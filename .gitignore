@@ -1,0 +1,39 @@
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+.eggs/
+
+# ── PyInstaller build artefacts ───────────────────────────────────────────────
+dist/
+build/
+*.spec
+
+# ── Virtual environments ──────────────────────────────────────────────────────
+venv/
+.venv/
+env/
+.env/
+
+# ── User config (may contain passwords / personal paths) ─────────────────────
+oblivion_config.json
+
+# ── IDE / OS ──────────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.suo
+*.user
+.DS_Store
+Thumbs.db
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+*.log
+
+# ── Claude Code session data ──────────────────────────────────────────────────
+.claude/
+
+# ── Nested clone (not a submodule) ────────────────────────────────────────────
+OblivionServerTool/

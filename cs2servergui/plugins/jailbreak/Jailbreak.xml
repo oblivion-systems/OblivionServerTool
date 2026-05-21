@@ -1,0 +1,42 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>Jailbreak</name>
+    </assembly>
+    <members>
+        <member name="T:Jailbreak.Jailbreak">
+            <summary>
+              The classic Jail gamemode, ported to Counter-Strike 2.
+            </summary>
+        </member>
+        <member name="M:Jailbreak.Jailbreak.#ctor(System.IServiceProvider)">
+            <summary>
+              The Jailbreak plugin.
+            </summary>
+            <param name="provider"></param>
+        </member>
+        <member name="P:Jailbreak.Jailbreak.ModuleName">
+            <inheritdoc />
+        </member>
+        <member name="P:Jailbreak.Jailbreak.ModuleVersion">
+            <inheritdoc />
+        </member>
+        <member name="P:Jailbreak.Jailbreak.ModuleAuthor">
+            <inheritdoc />
+        </member>
+        <member name="M:Jailbreak.Jailbreak.Load(System.Boolean)">
+            <inheritdoc />
+        </member>
+        <member name="M:Jailbreak.Jailbreak.Unload(System.Boolean)">
+            <inheritdoc />
+        </member>
+        <member name="T:Jailbreak.JailbreakServiceCollection">
+            <summary>
+              Class that auto-registers all jailbreak services and classes.
+            </summary>
+        </member>
+        <member name="M:Jailbreak.JailbreakServiceCollection.ConfigureServices(Microsoft.Extensions.DependencyInjection.IServiceCollection)">
+            <inheritdoc />
+        </member>
+    </members>
+</doc>

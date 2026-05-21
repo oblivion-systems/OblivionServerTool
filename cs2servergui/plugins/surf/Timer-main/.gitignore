@@ -1,0 +1,10 @@
+*.vs
+*.vscode/*
+!.vscode/tasks.json
+*.idea
+src/bin/Debug/*
+src/bin/Release/*
+src/obj/*
+src/SurfTimer.csproj
+*.puml
+out/uml/include/full.png
