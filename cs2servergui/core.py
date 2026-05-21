@@ -327,6 +327,7 @@ class AppCore:
 
     def check_update(self) -> None:
         def _do() -> None:
+            from .config import APP_VERSION
             build = self._installed_build()
             if not build:
                 self.log("Update check: appmanifest not found — is the server installed?")
@@ -335,25 +336,27 @@ class AppCore:
                 return
             self.log(f"Update check: installed build = {build}")
             try:
-                # Pass version=0 so the API always returns required_version
-                # (the current live build).  Asking "is MY build current?" is
-                # unreliable — the endpoint sometimes returns up_to_date=true
-                # for builds that steamcmd would still update.
-                url = (
-                    "https://api.steampowered.com/ISteamApps/UpToDateCheck/v0001/"
-                    f"?appid={CS2_APP_ID}&version=0&format=json"
+                # api.steamcmd.net mirrors steamcmd's own app-info cache and
+                # returns the public-branch buildid in the same units as the
+                # appmanifest.  The ISteamApps/UpToDateCheck endpoint returns
+                # the *network protocol version* (e.g. 14163), which is a
+                # completely different number and cannot be compared to buildids.
+                req = urllib.request.Request(
+                    "https://api.steamcmd.net/v1/info/730",
+                    headers={"User-Agent": f"OblivionServerTool/{APP_VERSION}"},
                 )
-                with urllib.request.urlopen(url, timeout=10) as resp:
+                with urllib.request.urlopen(req, timeout=15) as resp:
                     data = json.loads(resp.read())
-                r = data.get("response", {})
-                if not r.get("success"):
-                    self.log("Update check: Steam API returned success=false")
-                    if self.on_update_checked:
-                        self.on_update_checked(False, build, "unknown")
-                    return
-                latest = str(r.get("required_version", "")).strip()
+                latest = str(
+                    data.get("data", {})
+                        .get("730", {})
+                        .get("depots", {})
+                        .get("branches", {})
+                        .get("public", {})
+                        .get("buildid", "")
+                ).strip()
                 if not latest:
-                    self.log("Update check: API gave no required_version — skipping")
+                    self.log("Update check: buildid not found in API response")
                     if self.on_update_checked:
                         self.on_update_checked(False, build, "unknown")
                     return
