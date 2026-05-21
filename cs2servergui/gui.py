@@ -54,6 +54,7 @@ class CS2GUI:
         self._pulse_step:          int                = 0
         self._manual_update_check: bool               = False
         self._ff_btn:              ctk.CTkButton | None = None
+        self._app_upd_url:         str                = ""
 
         self.root = ctk.CTk()
         self.root.title("Oblivion Server Tool")
@@ -113,7 +114,6 @@ class CS2GUI:
         self._dot.pack(side="right", padx=20)
 
         # App self-update notification — hidden until a newer release is found
-        self._app_upd_url: str = ""
         self._app_upd_lbl = ctk.CTkLabel(
             hdr, text="",
             font=ctk.CTkFont(size=12, weight="bold"),

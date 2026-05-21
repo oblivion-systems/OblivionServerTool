@@ -14,19 +14,24 @@ import queue
 import re
 import socket
 import subprocess
+import sys
 import threading
 import time
 import urllib.request
+import zipfile
 from collections.abc import Callable
 
 from . import config as _config
 from .config import (
-    CS2_PATH, CS2_SERVER_DIR, CS2_APP_ID, CS2_ADDONS_DIR,
-    STEAMCMD_PATH, WORKSHOP_DIR,
-    DEPOTDL_PATH, DEPOTDL_RELEASE_URL,
+    # Non-path constants — safe to bind by name (never change at runtime)
+    CS2_APP_ID,
+    DEPOTDL_RELEASE_URL,
     RCON_HOST, RCON_PORT, RCON_PASSWORD,
     MODE_SETTINGS, _DEFAULT_MODE,
     _CONFIG_FILE,
+    # Path constants (CS2_SERVER_DIR, CS2_PATH, STEAMCMD_PATH, WORKSHOP_DIR,
+    # DEPOTDL_PATH, CS2_ADDONS_DIR) are accessed via _config.* so that
+    # update_paths() changes are always picked up at call time.
 )
 from .rcon import RCONClient
 
@@ -79,8 +84,6 @@ class AppCore:
         # fired (no args) when steam_session_active changes
         self.on_steam_session_change: Callable[[], None] | None = None
 
-        # fired with (prompt_type, submit_callback) when steamcmd asks for Guard
-        self.on_steam_guard: Callable[[str, Callable[[str], None]], None] | None = None
         self._load_config()
 
         # GUI / web callbacks — registered after construction
@@ -184,7 +187,7 @@ class AppCore:
         s    = MODE_SETTINGS.get(mode, _DEFAULT_MODE)
         maxp = self.max_players_override.strip() or s["maxplayers"]
         cmd  = [
-            CS2_PATH, "-dedicated",
+            _config.CS2_PATH, "-dedicated",
             "-port",          str(RCON_PORT),
             "+sv_lan",        "0",
             "+game_type",     s["game_type"],
@@ -202,7 +205,7 @@ class AppCore:
         try:
             self.proc = subprocess.Popen(cmd)
         except FileNotFoundError:
-            self.log(f"CS2 executable not found: {CS2_PATH}")
+            self.log(f"CS2 executable not found: {_config.CS2_PATH}")
             return
         self.running      = True
         self.boot_state   = "booting"
@@ -304,7 +307,7 @@ class AppCore:
 
     def _installed_build(self) -> str | None:
         manifest = os.path.join(
-            CS2_SERVER_DIR, "steamapps", f"appmanifest_{CS2_APP_ID}.acf"
+            _config.CS2_SERVER_DIR, "steamapps", f"appmanifest_{CS2_APP_ID}.acf"
         )
         try:
             with open(manifest, encoding="utf-8") as f:
@@ -316,10 +319,9 @@ class AppCore:
         return None
 
     def check_update(self) -> None:
-        import json as _json
         def _do() -> None:
             manifest = os.path.join(
-                CS2_SERVER_DIR, "steamapps", f"appmanifest_{CS2_APP_ID}.acf"
+                _config.CS2_SERVER_DIR, "steamapps", f"appmanifest_{CS2_APP_ID}.acf"
             )
             self.log(f"Update check: reading {manifest}")
             build = self._installed_build()
@@ -335,7 +337,7 @@ class AppCore:
                     f"?appid={CS2_APP_ID}&version={build}&format=json"
                 )
                 with urllib.request.urlopen(url, timeout=10) as resp:
-                    data = _json.loads(resp.read())
+                    data = json.loads(resp.read())
                 r = data.get("response", {})
                 self.log(f"Update check: API → {r}")
                 if not r.get("success"):
@@ -374,7 +376,6 @@ class AppCore:
         Fails silently — the app repo may be private or the machine may be offline.
         """
         from .config import APP_VERSION, APP_API_URL, APP_RELEASES_URL
-        import json as _json
 
         def _ver(v: str) -> tuple[int, ...]:
             """Parse semver into a comparable tuple.
@@ -400,7 +401,7 @@ class AppCore:
                     headers={"User-Agent": f"OblivionServerTool/{APP_VERSION}"},
                 )
                 with urllib.request.urlopen(req, timeout=10) as resp:
-                    data = _json.loads(resp.read())
+                    data = json.loads(resp.read())
                 tag = data.get("tag_name", "").strip().lstrip("v")
                 url = data.get("html_url", APP_RELEASES_URL)
                 if not tag:
@@ -424,8 +425,6 @@ class AppCore:
 
         Safe to call on an existing install — steamcmd will just verify/update.
         """
-        import zipfile
-
         def _do() -> None:
             self.log("═" * 48)
             self.log("  CS2 SERVER INSTALL")
@@ -470,8 +469,8 @@ class AppCore:
         def _do() -> None:
             self.log("─" * 48)
             self.log("  CS2 SERVER UPDATE")
-            self.log(f"  steamcmd    → {STEAMCMD_PATH}")
-            self.log(f"  install dir → {CS2_SERVER_DIR}")
+            self.log(f"  steamcmd    → {_config.STEAMCMD_PATH}")
+            self.log(f"  install dir → {_config.CS2_SERVER_DIR}")
             self.log("─" * 48)
             self.log("Launching steamcmd…")
             self.log("  Phase 1 — steamcmd initialises itself  (10–30 s, no output)")
@@ -479,8 +478,8 @@ class AppCore:
             self.log("  Phase 3 — download changed files  (progress below)")
             try:
                 proc = subprocess.Popen(
-                    [STEAMCMD_PATH, "+login", "anonymous",
-                     "+force_install_dir", CS2_SERVER_DIR,
+                    [_config.STEAMCMD_PATH, "+login", "anonymous",
+                     "+force_install_dir", _config.CS2_SERVER_DIR,
                      "+app_update", CS2_APP_ID, "+quit"],
                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 )
@@ -536,7 +535,7 @@ class AppCore:
                     self.log(f"  steamcmd exited with code {proc.returncode}")
                 self.log("─" * 48)
             except FileNotFoundError:
-                self.log(f"steamcmd not found: {STEAMCMD_PATH}")
+                self.log(f"steamcmd not found: {_config.STEAMCMD_PATH}")
             except Exception as exc:
                 self.log(f"Update error: {exc}")
             finally:
@@ -548,13 +547,13 @@ class AppCore:
     # ── workshop update check ─────────────────────────────────────────────────
 
     def check_workshop_updates(self) -> None:
-        import json as _json
         def _do() -> None:
-            if not os.path.exists(WORKSHOP_DIR):
+            wdir = _config.WORKSHOP_DIR
+            if not os.path.exists(wdir):
                 self.log("Workshop update check: directory not found")
                 return
-            ids = [f for f in os.listdir(WORKSHOP_DIR)
-                   if os.path.isdir(os.path.join(WORKSHOP_DIR, f)) and f.isdigit()]
+            ids = [f for f in os.listdir(wdir)
+                   if os.path.isdir(os.path.join(wdir, f)) and f.isdigit()]
             if not ids:
                 self.log("Workshop update check: no maps downloaded")
                 return
@@ -571,7 +570,7 @@ class AppCore:
                     method="POST",
                 )
                 with urllib.request.urlopen(req, timeout=15) as resp:
-                    data = _json.loads(resp.read())
+                    data = json.loads(resp.read())
                 items    = data.get("response", {}).get("publishedfiledetails", [])
                 outdated = []
                 up_to_date = 0
@@ -579,8 +578,8 @@ class AppCore:
                     wid      = item.get("publishedfileid", "")
                     title    = item.get("title") or wid
                     steam_ts = item.get("time_updated", 0)
-                    local_ts = (int(os.path.getmtime(os.path.join(WORKSHOP_DIR, wid)))
-                                if os.path.exists(os.path.join(WORKSHOP_DIR, wid)) else 0)
+                    local_ts = (int(os.path.getmtime(os.path.join(wdir, wid)))
+                                if os.path.exists(os.path.join(wdir, wid)) else 0)
                     if steam_ts > local_ts:
                         outdated.append((wid, title))
                     else:
@@ -600,10 +599,11 @@ class AppCore:
     # ── plugin checker ────────────────────────────────────────────────────────
 
     def check_plugins(self) -> None:
-        import json as _json
+        from .config import APP_VERSION
         def _do() -> None:
+            addons = _config.CS2_ADDONS_DIR
             self.log("Plugin check: scanning addons directory…")
-            css_dir = os.path.join(CS2_ADDONS_DIR, "counterstrikesharp")
+            css_dir = os.path.join(addons, "counterstrikesharp")
             if os.path.exists(css_dir):
                 self.log("CounterStrikeSharp: ✓ installed")
                 plugins_dir = os.path.join(css_dir, "plugins")
@@ -618,10 +618,10 @@ class AppCore:
                     req = urllib.request.Request(
                         "https://api.github.com/repos/"
                         "roflmuffin/CounterStrikeSharp/releases/latest",
-                        headers={"User-Agent": "OblivionServerTool/1.0"},
+                        headers={"User-Agent": f"OblivionServerTool/{APP_VERSION}"},
                     )
                     with urllib.request.urlopen(req, timeout=10) as resp:
-                        rel = _json.loads(resp.read())
+                        rel = json.loads(resp.read())
                     tag  = rel.get("tag_name", "?")
                     date = rel.get("published_at", "")[:10]
                     self.log(f"  Latest release: {tag}  ({date})")
@@ -629,10 +629,10 @@ class AppCore:
                     self.log(f"  GitHub check failed: {exc}")
             else:
                 self.log("CounterStrikeSharp: not found in addons/")
-            mm_dir = os.path.join(CS2_ADDONS_DIR, "metamod")
+            mm_dir = os.path.join(addons, "metamod")
             self.log("Metamod:Source: " + ("✓ installed" if os.path.exists(mm_dir)
                                             else "not found in addons/"))
-            self.log(f"Plugin check complete  (addons: {CS2_ADDONS_DIR})")
+            self.log(f"Plugin check complete  (addons: {addons})")
         threading.Thread(target=_do, daemon=True).start()
 
     # ── workshop download ─────────────────────────────────────────────────────
@@ -695,11 +695,10 @@ class AppCore:
         self.log("  Steam button turns green automatically on success.")
         self.log("─" * 48)
         try:
-            import sys as _sys
-            args = [STEAMCMD_PATH,
+            args = [_config.STEAMCMD_PATH,
                     "+login", self.steam_username, self.steam_password,
                     "+quit"]
-            if _sys.platform == "win32":
+            if sys.platform == "win32":
                 proc = subprocess.Popen(args,
                                         creationflags=subprocess.CREATE_NEW_CONSOLE)
             else:
@@ -725,20 +724,19 @@ class AppCore:
 
     def _ensure_depotdownloader(self) -> bool:
         """Download DepotDownloader if not already present. Returns True on success."""
-        import json as _json
-        import zipfile
-        if os.path.isfile(DEPOTDL_PATH):
+        from .config import APP_VERSION
+        if os.path.isfile(_config.DEPOTDL_PATH):
             return True
         self.log("DepotDownloader not found — downloading from GitHub…")
         try:
-            dest_dir = os.path.dirname(DEPOTDL_PATH)
+            dest_dir = os.path.dirname(_config.DEPOTDL_PATH)
             os.makedirs(dest_dir, exist_ok=True)
             req = urllib.request.Request(
                 DEPOTDL_RELEASE_URL,
-                headers={"User-Agent": "OblivionServerTool/1.0"},
+                headers={"User-Agent": f"OblivionServerTool/{APP_VERSION}"},
             )
             with urllib.request.urlopen(req, timeout=15) as r:
-                release = _json.loads(r.read())
+                release = json.loads(r.read())
             # Find the Windows x64 zip asset specifically
             assets = release.get("assets", [])
             asset_url = next(
@@ -764,10 +762,10 @@ class AppCore:
             with zipfile.ZipFile(zip_path, "r") as zf:
                 zf.extractall(dest_dir)
             os.remove(zip_path)
-            if os.path.isfile(DEPOTDL_PATH):
+            if os.path.isfile(_config.DEPOTDL_PATH):
                 self.log("  DepotDownloader installed ✓")
                 return True
-            self.log(f"  ✗ Extracted but {DEPOTDL_PATH} not found.")
+            self.log(f"  ✗ Extracted but {_config.DEPOTDL_PATH} not found.")
             return False
         except Exception as exc:
             self.log(f"  DepotDownloader install failed: {exc}")
@@ -795,7 +793,7 @@ class AppCore:
                     on_done(False)
                 return
 
-            dest = os.path.join(WORKSHOP_DIR, workshop_id)
+            dest = os.path.join(_config.WORKSHOP_DIR, workshop_id)
             os.makedirs(dest, exist_ok=True)
 
             session_ok = self.steam_session_active and bool(self.steam_username)
@@ -814,7 +812,7 @@ class AppCore:
                 self.log("  Logging in and saving session token for future downloads.")
 
             cmd = [
-                DEPOTDL_PATH,
+                _config.DEPOTDL_PATH,
                 "-app",     CS2_APP_ID,
                 "-pubfile", workshop_id,
                 "-dir",     dest,
@@ -822,8 +820,7 @@ class AppCore:
             self.log("  Launching DepotDownloader — "
                      "enter 2FA/Guard code in the console if prompted (first time only).")
             try:
-                import sys as _sys
-                if _sys.platform == "win32":
+                if sys.platform == "win32":
                     proc = subprocess.Popen(
                         cmd, creationflags=subprocess.CREATE_NEW_CONSOLE)
                 else:
@@ -868,7 +865,7 @@ class AppCore:
                     self.log(f"  No files found at: {dest}")
                 self.log("─" * 48)
             except FileNotFoundError:
-                self.log(f"  DepotDownloader not found: {DEPOTDL_PATH}")
+                self.log(f"  DepotDownloader not found: {_config.DEPOTDL_PATH}")
             except Exception as exc:
                 self.log(f"  DepotDownloader error: {exc}")
             finally:
@@ -883,12 +880,11 @@ class AppCore:
     # ── public IP ─────────────────────────────────────────────────────────────
 
     def check_public_ip(self) -> None:
-        import json as _json
         def _do() -> None:
             try:
                 with urllib.request.urlopen(
                         "https://api.ipify.org?format=json", timeout=8) as r:
-                    ip = _json.loads(r.read()).get("ip", "")
+                    ip = json.loads(r.read()).get("ip", "")
                 if ip:
                     self.public_ip = ip
                     if self.on_public_ip:
@@ -1064,7 +1060,6 @@ class AppCore:
 
     def fetch_workshop_names(self, ids: list[str],
                               on_done: Callable | None = None) -> None:
-        import json as _json
         if not ids:
             if on_done:
                 on_done()
@@ -1083,7 +1078,7 @@ class AppCore:
                     method="POST",
                 )
                 with urllib.request.urlopen(req, timeout=15) as resp:
-                    data = _json.loads(resp.read())
+                    data = json.loads(resp.read())
                 for item in data.get("response", {}).get("publishedfiledetails", []):
                     wid   = item.get("publishedfileid", "")
                     title = item.get("title", "").strip()
