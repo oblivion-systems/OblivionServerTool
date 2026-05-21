@@ -215,20 +215,29 @@ class CS2GUI:
 
         self._sec(parent, "MAPS & MODE")
 
-        self._lbl(parent, "Official Map")
+        # Which map source is currently active: "official" or "workshop"
+        self._map_source: str = "official"
+
+        self._off_lbl_w = ctk.CTkLabel(parent, text="Official Map",
+                                        font=ctk.CTkFont(size=13),
+                                        text_color=self.TEXT, anchor="w")
+        self._off_lbl_w.pack(fill="x", padx=14, pady=(8, 2))
         self._off_var = ctk.StringVar(value=OFFICIAL_MAPS[0])
         self._off_cb = ctk.CTkComboBox(
             parent, values=OFFICIAL_MAPS, variable=self._off_var,
-            command=lambda _: self._wk_var.set(""), **_cb)
+            command=self._on_official_select, **_cb)
         self._off_cb.pack(fill="x", padx=14, pady=(0, 4))
 
-        self._lbl(parent, "Workshop Map")
+        self._wk_lbl_w = ctk.CTkLabel(parent, text="Workshop Map",
+                                       font=ctk.CTkFont(size=13),
+                                       text_color=self.SUB, anchor="w")
+        self._wk_lbl_w.pack(fill="x", padx=14, pady=(8, 2))
         wkrow = ctk.CTkFrame(parent, fg_color="transparent")
         wkrow.pack(fill="x", padx=14, pady=(0, 4))
         self._wk_var = ctk.StringVar(value="")
         self._wk_cb = ctk.CTkComboBox(
-            wkrow, values=[], variable=self._wk_var,
-            command=lambda _: self._off_var.set(""), **_cb)
+            wkrow, values=[""], variable=self._wk_var,
+            command=self._on_workshop_select, **_cb)
         self._wk_cb.pack(side="left", fill="x", expand=True)
         ctk.CTkButton(
             wkrow, text="↺", width=36, height=34,
@@ -236,6 +245,16 @@ class CS2GUI:
             text_color=self.TEXT, font=ctk.CTkFont(size=15),
             command=self._refresh_wk,
         ).pack(side="right", padx=(6, 0))
+
+        # Live launch-preview chip — shows exactly what START / CHANGE MAP will use
+        self._map_preview_lbl = ctk.CTkLabel(
+            parent, text=f"▶  {OFFICIAL_MAPS[0]}  ·  Official",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            fg_color=self.DEEP, corner_radius=6,
+            text_color=self.ACCENT, anchor="w",
+        )
+        self._map_preview_lbl.pack(fill="x", padx=14, pady=(0, 8))
+        self._update_map_selection_ui()   # set initial border / colour state
 
         self._lbl(parent, "Game Mode")
         self._mode_var = ctk.StringVar(value="Competitive")
@@ -811,9 +830,10 @@ class CS2GUI:
         maps = MODE_MAPS.get(mode, OFFICIAL_MAPS)
 
         if maps is None:
-            # Workshop map required — disable the official selector
+            # Workshop map required — disable the official selector and force source
             self._off_cb.configure(values=[""], state="disabled")
             self._off_var.set("")
+            self._map_source = "workshop"
             self._mode_hint_lbl.configure(
                 text=f"⚑  {mode} requires a workshop map — select or download one below",
                 text_color=self.ORANGE,
@@ -823,6 +843,9 @@ class CS2GUI:
             self._off_cb.configure(values=maps, state="normal")
             if self._off_var.get() not in maps:
                 self._off_var.set(maps[0])
+            # If no workshop map is selected, revert to official automatically
+            if not self._wk_var.get().strip():
+                self._map_source = "official"
             if maps == OFFICIAL_MAPS:
                 self._mode_hint_lbl.configure(text="")
             else:
@@ -831,10 +854,40 @@ class CS2GUI:
                     text_color=self.SUB,
                 )
 
-        # Update browse button to reflect the selected mode
+        # Update browse button and preview chip
         self._browse_btn.configure(
             text=f"🔍  Browse {mode} Maps on Workshop"
         )
+        self._update_map_selection_ui()
+
+    def _on_official_select(self, _value: str) -> None:
+        """User explicitly chose an official map — make it the active source."""
+        self._map_source = "official"
+        self._update_map_selection_ui()
+
+    def _on_workshop_select(self, _value: str) -> None:
+        """User explicitly chose a workshop map — make it the active source."""
+        self._map_source = "workshop"
+        self._update_map_selection_ui()
+
+    def _update_map_selection_ui(self) -> None:
+        """Sync border colours, label brightness, and the launch-preview chip."""
+        if self._map_source == "workshop":
+            wk = self._wk_var.get().strip()
+            preview = (f"▶  {wk}  ·  Workshop" if wk
+                       else "▶  (no workshop map selected)")
+            self._off_lbl_w.configure(text_color=self.SUB)
+            self._wk_lbl_w.configure(text_color=self.TEXT)
+            self._off_cb.configure(border_color=self.BORDER)
+            self._wk_cb.configure(border_color=self.ACCENT)
+        else:
+            off = self._off_var.get().strip() or "—"
+            preview = f"▶  {off}  ·  Official"
+            self._off_lbl_w.configure(text_color=self.TEXT)
+            self._wk_lbl_w.configure(text_color=self.SUB)
+            self._off_cb.configure(border_color=self.ACCENT)
+            self._wk_cb.configure(border_color=self.BORDER)
+        self._map_preview_lbl.configure(text=preview)
 
     def _refresh_wk(self) -> None:
         ids = load_workshop()
@@ -855,23 +908,23 @@ class CS2GUI:
 
             def _apply() -> None:
                 self._wk_cb.configure(values=labels or [""])
-                # Also update the currently displayed text if it's a bare ID
+                # If the displayed value is still a bare ID, upgrade it to the
+                # "Name  [id]" format now that names have loaded.
                 current = self._wk_var.get().strip()
                 for i, wid in enumerate(ids):
                     if current == wid:
                         self._wk_var.set(labels[i])
                         break
-                # If nothing is selected yet, default to first entry
-                if not self._wk_var.get() and labels:
-                    self._wk_var.set(labels[0])
+                # No auto-select: user must explicitly choose a workshop map.
+                self._update_map_selection_ui()
 
             self.root.after(0, _apply)
 
         self.core.fetch_workshop_names(ids, on_done=_on_names_done)
 
     def _selected_map(self) -> tuple[str, bool]:
-        wk = self._wk_var.get().strip()
-        if wk:
+        if self._map_source == "workshop":
+            wk = self._wk_var.get().strip()
             # Extract bare numeric ID from "Map Name  [123456]" format
             m = re.search(r'\[(\d+)\]', wk)
             raw_id = m.group(1) if m else wk
