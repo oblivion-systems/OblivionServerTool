@@ -69,6 +69,7 @@ class CS2GUI:
     RED      = "#ef4444"
     TEXT     = "#e8e8f4"
     SUB      = "#9090aa"
+    DIM      = "#606078"
 
     def __init__(self, core: AppCore) -> None:
         self.core = core
