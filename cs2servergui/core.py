@@ -327,41 +327,42 @@ class AppCore:
 
     def check_update(self) -> None:
         def _do() -> None:
-            manifest = os.path.join(
-                _config.CS2_SERVER_DIR, "steamapps", f"appmanifest_{CS2_APP_ID}.acf"
-            )
-            self.log(f"Update check: reading {manifest}")
             build = self._installed_build()
             if not build:
-                self.log("Update check: appmanifest not found")
+                self.log("Update check: appmanifest not found — is the server installed?")
                 if self.on_update_checked:
                     self.on_update_checked(False, "unknown", "unknown")
                 return
             self.log(f"Update check: installed build = {build}")
             try:
+                # Pass version=0 so the API always returns required_version
+                # (the current live build).  Asking "is MY build current?" is
+                # unreliable — the endpoint sometimes returns up_to_date=true
+                # for builds that steamcmd would still update.
                 url = (
                     "https://api.steampowered.com/ISteamApps/UpToDateCheck/v0001/"
-                    f"?appid={CS2_APP_ID}&version={build}&format=json"
+                    f"?appid={CS2_APP_ID}&version=0&format=json"
                 )
                 with urllib.request.urlopen(url, timeout=10) as resp:
                     data = json.loads(resp.read())
                 r = data.get("response", {})
-                self.log(f"Update check: API → {r}")
                 if not r.get("success"):
                     self.log("Update check: Steam API returned success=false")
                     if self.on_update_checked:
                         self.on_update_checked(False, build, "unknown")
                     return
-                listed = r.get("version_is_listable", False)
-                if not listed:
-                    self.log(f"Update check: build {build} not in Steam version list")
-                up_to_date = r.get("up_to_date", True)
-                latest     = str(r.get("required_version") or build)
-                if up_to_date:
-                    self.log(f"Update check: up to date (build {build})")
+                latest = str(r.get("required_version", "")).strip()
+                if not latest:
+                    self.log("Update check: API gave no required_version — skipping")
+                    if self.on_update_checked:
+                        self.on_update_checked(False, build, "unknown")
+                    return
+                self.log(f"Update check: installed={build}  latest={latest}")
+                if build == latest:
+                    self.log("Update check: server is up to date")
                     self.update_available = False
                     if self.on_update_checked:
-                        self.on_update_checked(False, build, build)
+                        self.on_update_checked(False, build, latest)
                 else:
                     self.log("Update check: UPDATE AVAILABLE")
                     self.log(f"  Installed : {build}")
@@ -487,7 +488,7 @@ class AppCore:
                 proc = subprocess.Popen(
                     [_config.STEAMCMD_PATH, "+login", "anonymous",
                      "+force_install_dir", _config.CS2_SERVER_DIR,
-                     "+app_update", CS2_APP_ID, "+quit"],
+                     "+app_update", CS2_APP_ID, "validate", "+quit"],
                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 )
                 out_q: queue.Queue = queue.Queue()
