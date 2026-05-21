@@ -189,7 +189,7 @@ class AppCore:
             "+sv_lan",        "0",
             "+game_type",     s["game_type"],
             "+game_mode",     s["game_mode"],
-            "+maxplayers",    maxp,
+            "-maxplayers",    maxp,
             "+rcon_password", RCON_PASSWORD,
             "+hostname",      self.hostname or "CS2 Dedicated Server",
         ]
@@ -286,7 +286,6 @@ class AppCore:
                 self.log(f"[{caller}] Sending map change → {map_name} ({mode})…")
                 self.rcon.execute_retry(f"game_type {s['game_type']}")
                 self.rcon.execute_retry(f"game_mode {s['game_mode']}")
-                self.rcon.execute_retry(f"maxplayers {s['maxplayers']}")
                 rcon_cmd = (f"host_workshop_map {map_name}"
                             if is_workshop else f"changelevel {map_name}")
                 resp = self.rcon.execute_retry(rcon_cmd)
