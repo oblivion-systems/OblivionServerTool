@@ -12,6 +12,7 @@ pyinstaller ^
   --name "OblivionServerTool" ^
   --collect-all customtkinter ^
   --collect-all flask ^
+  --collect-all PIL ^
   --collect-all jinja2 ^
   --hidden-import werkzeug ^
   --hidden-import werkzeug.serving ^

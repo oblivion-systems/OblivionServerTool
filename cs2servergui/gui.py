@@ -8,16 +8,20 @@ no module-level state.
 from __future__ import annotations
 
 import functools
+import os
 import re
 import socket
+import tempfile
 import threading
 import time
 import tkinter.filedialog
 import urllib.parse
+import urllib.request
 import webbrowser
 from collections.abc import Callable
 
 import customtkinter as ctk
+from PIL import Image, ImageDraw
 
 from .config import (
     OFFICIAL_MAPS, GAME_MODES, MODE_MAPS, MODE_WORKSHOP_SEARCH,
@@ -28,6 +32,24 @@ from .core import AppCore
 # ── Global CTk theme (applied once at import time) ────────────────────────────
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("dark-blue")
+
+# ── Thumbnail cache directory ─────────────────────────────────────────────────
+_THUMB_DIR = os.path.join(tempfile.gettempdir(), "oblivion_thumbs")
+os.makedirs(_THUMB_DIR, exist_ok=True)
+
+# ── Colour seeds for placeholder map thumbnails ───────────────────────────────
+_MAP_COLORS: dict[str, tuple[int, int, int]] = {
+    "de_dust2":     (130,  95, 45),  "de_mirage":    (140, 100, 55),
+    "de_inferno":   (140,  60, 30),  "de_nuke":      ( 70, 110, 70),
+    "de_ancient":   (100,  85, 65),  "de_anubis":    (140, 115, 55),
+    "de_vertigo":   ( 50,  80,150),  "de_cache":     (110, 110, 60),
+    "de_overpass":  ( 55,  85,145),  "cs_office":    ( 70,  90, 70),
+    "cs_italy":     (140, 100, 50),  "ar_shoots":    (100,  60, 30),
+    "ar_baggage":   ( 80,  80, 80),  "ar_dizzy":     ( 90,  60, 40),
+    "de_lake":      ( 60, 120, 80),  "de_safehouse": ( 90,  70, 50),
+    "de_shortdust": (120,  90, 40),  "de_stmarc":    ( 80,  80,100),
+    "de_bank":      ( 70,  70, 80),  "de_sugarcane": ( 80, 110, 60),
+}
 
 
 class CS2GUI:
@@ -57,6 +79,7 @@ class CS2GUI:
         self._app_upd_url:         str                = ""
         self._wk_all_ids:          list[str]          = []
         self._wk_all_labels:       list[str]          = []
+        self._map_cards:           dict[str, ctk.CTkFrame] = {}  # map_id → card frame
 
         self.root = ctk.CTk()
         self.root.title("Oblivion Server Tool")
@@ -225,11 +248,17 @@ class CS2GUI:
                                         text_color=self.TEXT, anchor="w")
         self._off_lbl_w.pack(fill="x", padx=14, pady=(4, 2))
         self._off_var = ctk.StringVar(value=OFFICIAL_MAPS[0])
-        self._off_cb = ctk.CTkComboBox(
-            parent, values=OFFICIAL_MAPS, variable=self._off_var,
-            command=self._on_official_select, **_cb)
-        self._off_cb.pack(fill="x", padx=14, pady=(0, 3))
-        self._patch_dropdown_toggle(self._off_cb)
+        # ── official-map thumbnail grid (replaces dropdown) ──
+        self._off_scroll = ctk.CTkScrollableFrame(
+            parent, height=185,
+            fg_color=self.DEEP, corner_radius=8,
+            scrollbar_button_color=self.BORDER,
+            scrollbar_button_hover_color="#2a2a40",
+        )
+        self._off_scroll.pack(fill="x", padx=14, pady=(0, 3))
+        self._off_scroll.columnconfigure(0, weight=1, uniform="mc")
+        self._off_scroll.columnconfigure(1, weight=1, uniform="mc")
+        self._off_scroll.columnconfigure(2, weight=1, uniform="mc")
 
         self._wk_lbl_w = ctk.CTkLabel(parent, text="Workshop Map",
                                        font=ctk.CTkFont(size=13),
@@ -278,7 +307,8 @@ class CS2GUI:
             fg_color="transparent", text_color=self.ACCENT, anchor="w",
         )
         self._map_preview_lbl.pack(fill="x", padx=10, pady=5)
-        self._update_map_selection_ui()   # now _mode_var exists — full preview
+        self._rebuild_official_grid()         # populate cards now that _mode_var exists
+        self._update_map_selection_ui()       # now _mode_var exists — full preview
 
         # browse Steam Workshop — label updates with the selected mode
         self._browse_btn = ctk.CTkButton(
@@ -866,13 +896,116 @@ class CS2GUI:
 
     # ── map helpers ───────────────────────────────────────────────────────────
 
+    # ── thumbnail helpers ─────────────────────────────────────────────────────
+
+    def _make_placeholder_image(self, map_id: str) -> ctk.CTkImage:
+        """Generate a coloured gradient thumbnail for an official map."""
+        base = _MAP_COLORS.get(map_id, (55, 60, 80))
+        r, g, b = base
+        w, h = 162, 96
+        img = Image.new("RGB", (w, h))
+        draw = ImageDraw.Draw(img)
+        # Top-to-bottom gradient (slightly darker at the bottom)
+        for y in range(h):
+            f = 1.0 - 0.45 * (y / h)
+            draw.line([(0, y), (w, y)], fill=(int(r * f), int(g * f), int(b * f)))
+        # Subtle grid texture
+        gc = (min(r + 22, 255), min(g + 22, 255), min(b + 22, 255))
+        for x in range(0, w, 18):
+            draw.line([(x, 0), (x, h)], fill=gc)
+        for yy in range(0, h, 18):
+            draw.line([(0, yy), (w, yy)], fill=gc)
+        return ctk.CTkImage(img, size=(81, 48))
+
+    def _get_map_image(self, map_id: str) -> ctk.CTkImage:
+        """Return a cached thumbnail or generate a placeholder."""
+        cache = os.path.join(_THUMB_DIR, f"{map_id}.jpg")
+        if os.path.exists(cache):
+            try:
+                pil = Image.open(cache).resize((162, 96))
+                return ctk.CTkImage(pil, size=(81, 48))
+            except Exception:
+                pass
+        return self._make_placeholder_image(map_id)
+
+    def _make_map_card(self, parent: ctk.CTkFrame, map_id: str,
+                       row: int, col: int, selected: bool = False) -> ctk.CTkFrame:
+        """Build a compact clickable map thumbnail card."""
+        border_c = self.ACCENT if selected else self.BORDER
+        card = ctk.CTkFrame(
+            parent, corner_radius=8, border_width=2,
+            border_color=border_c, fg_color=self.DEEP, cursor="hand2",
+        )
+        card.grid(row=row, column=col, sticky="ew",
+                  padx=(0, 4) if col < 2 else (0, 0), pady=(0, 4))
+        img = self._get_map_image(map_id)
+        img_lbl = ctk.CTkLabel(card, text="", image=img, fg_color="transparent")
+        img_lbl.pack(padx=3, pady=(3, 0))
+        # Short human-readable name (strips prefix and underscores)
+        parts = map_id.split("_", 1)
+        short = parts[1].replace("_", " ").title() if len(parts) > 1 else map_id
+        ctk.CTkLabel(
+            card, text=short,
+            font=ctk.CTkFont(size=9),
+            text_color=self.TEXT, fg_color="transparent",
+            anchor="center",
+        ).pack(fill="x", padx=2, pady=(1, 3))
+        click = lambda _e, m=map_id: self._select_official_card(m)
+        card.bind("<Button-1>", click)
+        img_lbl.bind("<Button-1>", click)
+        return card
+
+    def _rebuild_official_grid(self) -> None:
+        """Repopulate the official-map card grid for the current mode."""
+        for w in list(self._off_scroll.winfo_children()):
+            w.destroy()
+        self._map_cards.clear()
+        mode = self._mode_var.get() if hasattr(self, "_mode_var") else "Competitive"
+        maps = MODE_MAPS.get(mode, OFFICIAL_MAPS)
+        if not maps:
+            # Mode needs a workshop map only — show informational label
+            ctk.CTkLabel(
+                self._off_scroll,
+                text=f"Workshop map required for {mode}",
+                text_color=self.SUB, font=ctk.CTkFont(size=11),
+            ).grid(row=0, column=0, columnspan=3, padx=6, pady=18)
+            self._off_var.set("")
+            return
+        current = self._off_var.get()
+        if current not in maps:
+            current = maps[0]
+            self._off_var.set(current)
+        for i, m in enumerate(maps):
+            row, col = divmod(i, 3)
+            card = self._make_map_card(self._off_scroll, m, row, col, selected=(m == current))
+            self._map_cards[m] = card
+
+    def _select_official_card(self, map_id: str) -> None:
+        """Select an official-map card, deselecting the previous one."""
+        old = self._off_var.get()
+        if old in self._map_cards:
+            self._map_cards[old].configure(border_color=self.BORDER)
+        self._off_var.set(map_id)
+        if map_id in self._map_cards:
+            self._map_cards[map_id].configure(border_color=self.ACCENT)
+        self._on_official_select(map_id)
+
+    def _set_official_active_style(self, active: bool) -> None:
+        """Highlight or dim the selected official-map card border."""
+        sel = self._off_var.get()
+        if sel and sel in self._map_cards:
+            self._map_cards[sel].configure(
+                border_color=self.ACCENT if active else self.BORDER
+            )
+
+    # ── mode / workshop ───────────────────────────────────────────────────────
+
     def _on_mode_change(self, mode: str) -> None:
         """Update Official Map picker whenever the game mode changes."""
         maps = MODE_MAPS.get(mode, OFFICIAL_MAPS)
 
         if maps is None:
-            # Workshop map required — disable the official selector and force source
-            self._off_cb.configure(values=[""], state="disabled")
+            # Workshop map required — clear official selection and force source
             self._off_var.set("")
             self._map_source = "workshop"
             self._mode_hint_lbl.configure(
@@ -880,8 +1013,6 @@ class CS2GUI:
                 text_color=self.ORANGE,
             )
         else:
-            # Enable picker; restrict to mode-compatible maps
-            self._off_cb.configure(values=maps, state="normal")
             if self._off_var.get() not in maps:
                 self._off_var.set(maps[0])
             # If no workshop map is selected, revert to official automatically
@@ -895,7 +1026,8 @@ class CS2GUI:
                     text_color=self.SUB,
                 )
 
-        # Update browse button, then re-filter workshop picker for new mode
+        # Rebuild the map card grid for the new mode, then update browse button
+        self._rebuild_official_grid()
         self._browse_btn.configure(
             text=f"🔍  Browse {mode} Maps on Workshop"
         )
@@ -980,14 +1112,14 @@ class CS2GUI:
                 preview = "▶  (no workshop map selected)"
             self._off_lbl_w.configure(text_color=self.SUB)
             self._wk_lbl_w.configure(text_color=self.TEXT)
-            self._off_cb.configure(border_color=self.BORDER)
+            self._set_official_active_style(False)
             self._wk_cb.configure(border_color=self.ACCENT)
         else:
             off     = self._off_var.get().strip() or "—"
             preview = f"▶  {off}  ·  {mode}" if mode else f"▶  {off}"
             self._off_lbl_w.configure(text_color=self.TEXT)
             self._wk_lbl_w.configure(text_color=self.SUB)
-            self._off_cb.configure(border_color=self.ACCENT)
+            self._set_official_active_style(True)
             self._wk_cb.configure(border_color=self.BORDER)
 
         # Guard: preview label doesn't exist on the first call during construction

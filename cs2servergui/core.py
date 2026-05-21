@@ -79,6 +79,7 @@ class AppCore:
         self.public_ip:           str                      = ""
         self._map_name_cache:     dict[str, str]           = {}
         self._map_tag_cache:      dict[str, list[str]]    = {}  # wid → lowercase tags
+        self._preview_url_cache:  dict[str, str]          = {}  # wid → Steam preview URL
         self._ff_enabled:         bool                     = False
         self._active_dl_proc:     subprocess.Popen | None  = None
         self.steam_session_active: bool                    = False
@@ -1096,11 +1097,14 @@ class AppCore:
                     title = item.get("title", "").strip()
                     tags  = [t.get("tag", "").lower()
                              for t in item.get("tags", []) if t.get("tag")]
+                    preview = item.get("preview_url", "")
                     if wid:
                         if title:
                             self._map_name_cache[wid] = title
                         if tags:
                             self._map_tag_cache[wid] = tags
+                        if preview:
+                            self._preview_url_cache[wid] = preview
                         tag_str = f"  [{', '.join(tags[:4])}]" if tags else ""
                         self.log(f"  Workshop: {wid} → {title or '(no title)'}{tag_str}")
             except Exception as exc:
