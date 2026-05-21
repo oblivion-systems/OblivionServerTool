@@ -78,6 +78,7 @@ class AppCore:
         # Runtime state
         self.public_ip:           str                      = ""
         self._map_name_cache:     dict[str, str]           = {}
+        self._map_tag_cache:      dict[str, list[str]]    = {}  # wid → lowercase tags
         self._ff_enabled:         bool                     = False
         self._active_dl_proc:     subprocess.Popen | None  = None
         self.steam_session_active: bool                    = False
@@ -1093,11 +1094,15 @@ class AppCore:
                 for item in data.get("response", {}).get("publishedfiledetails", []):
                     wid   = item.get("publishedfileid", "")
                     title = item.get("title", "").strip()
-                    if wid and title:
-                        self._map_name_cache[wid] = title
-                        self.log(f"  Workshop name: {wid} → {title}")
-                    elif wid:
-                        self.log(f"  Workshop name: {wid} → (no title returned)")
+                    tags  = [t.get("tag", "").lower()
+                             for t in item.get("tags", []) if t.get("tag")]
+                    if wid:
+                        if title:
+                            self._map_name_cache[wid] = title
+                        if tags:
+                            self._map_tag_cache[wid] = tags
+                        tag_str = f"  [{', '.join(tags[:4])}]" if tags else ""
+                        self.log(f"  Workshop: {wid} → {title or '(no title)'}{tag_str}")
             except Exception as exc:
                 self.log(f"Workshop name fetch failed: {exc}")
             finally:

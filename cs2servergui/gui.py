@@ -55,6 +55,8 @@ class CS2GUI:
         self._manual_update_check: bool               = False
         self._ff_btn:              ctk.CTkButton | None = None
         self._app_upd_url:         str                = ""
+        self._wk_all_ids:          list[str]          = []
+        self._wk_all_labels:       list[str]          = []
 
         self.root = ctk.CTk()
         self.root.title("Oblivion Server Tool")
@@ -854,11 +856,11 @@ class CS2GUI:
                     text_color=self.SUB,
                 )
 
-        # Update browse button and preview chip
+        # Update browse button, then re-filter workshop picker for new mode
         self._browse_btn.configure(
             text=f"🔍  Browse {mode} Maps on Workshop"
         )
-        self._update_map_selection_ui()
+        self._apply_wk_filter(mode)
 
     def _on_official_select(self, _value: str) -> None:
         """User explicitly chose an official map — make it the active source."""
@@ -894,35 +896,75 @@ class CS2GUI:
         self.core.log(f"Workshop scan: {_cfg.WORKSHOP_DIR}")
         ids = load_workshop()
         self.core.log(f"Workshop scan: {len(ids)} map(s) found")
-        # Show plain IDs immediately while names load
+        self._wk_all_ids = ids
+        # Show plain IDs immediately while names load in background
         self._wk_cb.configure(values=ids or [""])
 
         def _on_names_done() -> None:
-            # Build "Map Name  [id]" labels, falling back to bare ID if API missed it
             labels = []
             for wid in ids:
                 name = self.core._map_name_cache.get(wid, "")
-                if name:
-                    labels.append(f"{name}  [{wid}]")
-                else:
-                    self.core.log(f"  Workshop name not found for {wid}")
-                    labels.append(wid)
+                labels.append(f"{name}  [{wid}]" if name else wid)
 
             def _apply() -> None:
-                self._wk_cb.configure(values=labels or [""])
-                # If the displayed value is still a bare ID, upgrade it to the
-                # "Name  [id]" format now that names have loaded.
+                self._wk_all_labels = labels
+                # Upgrade any bare-ID display to "Name  [id]" now that names loaded
                 current = self._wk_var.get().strip()
                 for i, wid in enumerate(ids):
                     if current == wid:
                         self._wk_var.set(labels[i])
                         break
-                # No auto-select: user must explicitly choose a workshop map.
-                self._update_map_selection_ui()
+                self._apply_wk_filter(self._mode_var.get())
 
             self.root.after(0, _apply)
 
         self.core.fetch_workshop_names(ids, on_done=_on_names_done)
+
+    def _apply_wk_filter(self, mode: str) -> None:
+        """Show only workshop maps whose tags match the current game mode.
+
+        Maps with no tags are always included — we can't exclude what isn't
+        labelled.  If zero maps match the filter, fall back to showing all of
+        them so the user isn't left with an empty picker.
+        """
+        from .config import MODE_WORKSHOP_TAGS
+        ids    = self._wk_all_ids
+        labels = self._wk_all_labels
+        if not ids:
+            return
+
+        mode_tags = MODE_WORKSHOP_TAGS.get(mode, [])
+
+        if not mode_tags:
+            # No tag definition for this mode → show everything
+            filtered_labels = labels
+        else:
+            matched = [
+                label for wid, label in zip(ids, labels)
+                if not self.core._map_tag_cache.get(wid)          # untagged → always show
+                or any(mt in self.core._map_tag_cache[wid]        # any tag matches
+                       for mt in mode_tags)
+            ]
+            if matched:
+                filtered_labels = matched
+                self.core.log(
+                    f"Workshop filter ({mode}): {len(matched)} of {len(ids)} map(s)"
+                )
+            else:
+                # No matches at all — show everything with a note
+                filtered_labels = labels
+                self.core.log(
+                    f"Workshop filter ({mode}): no tag matches — showing all {len(ids)}"
+                )
+
+        self._wk_cb.configure(values=filtered_labels or [""])
+        # If the currently selected map was filtered out, deselect it
+        current = self._wk_var.get().strip()
+        if current and current not in filtered_labels:
+            self._wk_var.set("")
+            if self._map_source == "workshop":
+                self._map_source = "official"
+        self._update_map_selection_ui()
 
     def _selected_map(self) -> tuple[str, bool]:
         if self._map_source == "workshop":

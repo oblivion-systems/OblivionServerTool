@@ -173,6 +173,26 @@ MODE_WORKSHOP_SEARCH: dict[str, str] = {
 }
 _WS_BROWSE = "https://steamcommunity.com/workshop/browse/?appid=730&browsesort=trend"
 
+# Steam Workshop tags used to filter downloaded maps per mode.
+# Matching is case-insensitive against the tags returned by GetPublishedFileDetails.
+# Maps with no tags are always included (can't exclude what isn't labelled).
+# If none of the downloaded maps match the mode's tags, all maps are shown.
+MODE_WORKSHOP_TAGS: dict[str, list[str]] = {
+    "Competitive": ["bomb defusal", "hostage rescue"],
+    "Casual":      ["bomb defusal", "hostage rescue"],
+    "Wingman":     ["wingman", "bomb defusal"],
+    "3v3":         ["bomb defusal"],
+    "4v4":         ["bomb defusal"],
+    "1v1":         ["1v1", "aim"],
+    "Arms Race":   ["arms race"],
+    "Demolition":  ["demolition"],
+    "Deathmatch":  ["deathmatch"],
+    "Zombies":     ["zombie escape", "zombie"],
+    "Surf":        ["surf"],
+    "KZ / Climb":  ["climb", "kz"],
+    "Retakes":     ["retake", "bomb defusal"],
+}
+
 
 # ── Workshop map scanner ───────────────────────────────────────────────────────
 
