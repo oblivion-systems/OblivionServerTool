@@ -178,19 +178,24 @@ _WS_BROWSE = "https://steamcommunity.com/workshop/browse/?appid=730&browsesort=t
 # Maps with no tags are always included (can't exclude what isn't labelled).
 # If none of the downloaded maps match the mode's tags, all maps are shown.
 MODE_WORKSHOP_TAGS: dict[str, list[str]] = {
-    "Competitive": ["bomb defusal", "hostage rescue"],
-    "Casual":      ["bomb defusal", "hostage rescue"],
-    "Wingman":     ["wingman", "bomb defusal"],
-    "3v3":         ["bomb defusal"],
-    "4v4":         ["bomb defusal"],
-    "1v1":         ["1v1", "aim"],
-    "Arms Race":   ["arms race"],
+    # Tags are matched against the raw tag strings returned by the Steam Workshop
+    # GetPublishedFileDetails API (lowercased).  Common CS2 workshop tags:
+    #   "classic" — standard bomb/hostage maps
+    #   "competitive", "casual", "deathmatch", "wingman", "surf", "kz",
+    #   "aim", "zombie", "retake", "demolition", "armsrace"
+    "Competitive": ["classic", "competitive"],
+    "Casual":      ["classic", "competitive", "casual"],
+    "Wingman":     ["wingman"],
+    "3v3":         ["classic", "competitive"],
+    "4v4":         ["classic", "competitive"],
+    "1v1":         ["aim", "1v1"],
+    "Arms Race":   ["armsrace", "arms race"],
     "Demolition":  ["demolition"],
     "Deathmatch":  ["deathmatch"],
-    "Zombies":     ["zombie escape", "zombie"],
+    "Zombies":     ["zombie"],
     "Surf":        ["surf"],
-    "KZ / Climb":  ["climb", "kz"],
-    "Retakes":     ["retake", "bomb defusal"],
+    "KZ / Climb":  ["kz", "climb"],
+    "Retakes":     ["retake", "classic", "competitive"],
 }
 
 

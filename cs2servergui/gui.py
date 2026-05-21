@@ -290,19 +290,15 @@ class CS2GUI:
         )
         self._browse_btn.pack(fill="x", padx=14, pady=(0, 8))
 
-        # divider
+        # ── Workshop download (compact, no section header) ──
         ctk.CTkFrame(parent, fg_color=self.BORDER, height=1,
-                     corner_radius=0).pack(fill="x", padx=14, pady=(0, 6))
-
-        # local workshop download
-        self._sec_sub(parent, "DOWNLOAD WORKSHOP MAP")
-        self._lbl(parent, "Steam Workshop ID")
+                     corner_radius=0).pack(fill="x", padx=14, pady=(4, 6))
         ws_row = ctk.CTkFrame(parent, fg_color="transparent")
         ws_row.pack(fill="x", padx=14, pady=(0, 3))
         self._wsid_var = ctk.StringVar()
         ctk.CTkEntry(
             ws_row, textvariable=self._wsid_var,
-            placeholder_text="e.g. 3070720081",
+            placeholder_text="Workshop ID to download…",
             fg_color=self.DEEP, border_color=self.BORDER,
             text_color=self.TEXT, placeholder_text_color=self.SUB,
             font=ctk.CTkFont(size=13),
@@ -365,31 +361,39 @@ class CS2GUI:
     # ── TAB: Controls ─────────────────────────────────────────────────────────
 
     def _build_tab_controls(self, parent: ctk.CTkFrame) -> None:
-        _bf = {"font": ctk.CTkFont(size=12, weight="bold"), "height": 36, "corner_radius": 8}
-
         # ── Primary server buttons ──
         self._start_btn = ctk.CTkButton(
-            parent, text="▶   START SERVER",
+            parent, text="▶  START SERVER",
+            height=44, corner_radius=10,
+            font=ctk.CTkFont(size=13, weight="bold"),
             fg_color=self.ACCENT, hover_color=self.ACCENT_H,
-            text_color="#0d0d14", command=self._start, **_bf)
+            text_color="#0d0d14", command=self._start)
         self._start_btn.pack(fill="x", padx=12, pady=(10, 4))
 
+        # Stop + Change Map side-by-side
+        _pm = ctk.CTkFrame(parent, fg_color="transparent")
+        _pm.pack(fill="x", padx=12, pady=(0, 4))
+        _pm.columnconfigure(0, weight=1)
+        _pm.columnconfigure(1, weight=1)
         self._stop_btn = ctk.CTkButton(
-            parent, text="■   STOP SERVER",
+            _pm, text="■  STOP",
+            height=38, corner_radius=10,
+            font=ctk.CTkFont(size=12, weight="bold"),
             fg_color=self.STOP, hover_color=self.STOP_H,
-            state="disabled", command=self._stop, **_bf)
-        self._stop_btn.pack(fill="x", padx=12, pady=(0, 4))
-
+            state="disabled", command=self._stop)
+        self._stop_btn.grid(row=0, column=0, sticky="ew", padx=(0, 3))
         self._chg_btn = ctk.CTkButton(
-            parent, text="⟳   CHANGE MAP / MODE",
+            _pm, text="⟳  CHANGE MAP",
+            height=38, corner_radius=10,
+            font=ctk.CTkFont(size=12, weight="bold"),
             fg_color=self.BLUE, hover_color=self.BLUE_H,
-            state="disabled", command=self._change, **_bf)
-        self._chg_btn.pack(fill="x", padx=12, pady=(0, 8))
+            state="disabled", command=self._change)
+        self._chg_btn.grid(row=0, column=1, sticky="ew", padx=(3, 0))
 
-        # ── Compact utility row ──
+        # ── Utility row ──
         util = ctk.CTkFrame(parent, fg_color="transparent")
         util.pack(fill="x", padx=12, pady=(0, 8))
-        _ub = {"height": 28, "corner_radius": 7,
+        _ub = {"height": 28, "corner_radius": 8,
                "font": ctk.CTkFont(size=11, weight="bold")}
         self._upd_btn = ctk.CTkButton(
             util, text="⟳  Update",
@@ -412,64 +416,85 @@ class CS2GUI:
             text_color=self.SUB, command=self._open_web_panel, **_ub,
         ).pack(side="left", fill="x", expand=True)
 
-        # ── Divider ──
+        # ── Divider + section label ──
         ctk.CTkFrame(parent, fg_color=self.BORDER, height=1,
-                     corner_radius=0).pack(fill="x", padx=12, pady=(0, 8))
-
+                     corner_radius=0).pack(fill="x", padx=12, pady=(0, 6))
         ctk.CTkLabel(parent, text="QUICK ACTIONS",
-                     font=ctk.CTkFont(size=11, weight="bold"),
-                     text_color=self.SUB).pack(anchor="w", padx=12, pady=(0, 6))
+                     font=ctk.CTkFont(size=10, weight="bold"),
+                     text_color=self.SUB).pack(anchor="w", padx=12, pady=(0, 4))
 
-        # ── Broadcast message — first and largest quick action ──
+        # ── Broadcast: entry + send icon button on one row ──
         self._chat_var = ctk.StringVar()
+        _chat_row = ctk.CTkFrame(parent, fg_color="transparent")
+        _chat_row.pack(fill="x", padx=12, pady=(0, 8))
         chat_ent = ctk.CTkEntry(
-            parent, textvariable=self._chat_var,
+            _chat_row, textvariable=self._chat_var,
             placeholder_text="Broadcast to all players…",
             fg_color=self.DEEP, border_color=self.BORDER,
             text_color=self.TEXT, placeholder_text_color=self.SUB,
-            font=ctk.CTkFont(size=13), height=38,
+            font=ctk.CTkFont(size=13), height=36,
         )
-        chat_ent.pack(fill="x", padx=12, pady=(0, 4))
+        chat_ent.pack(side="left", fill="x", expand=True, padx=(0, 6))
         chat_ent.bind("<Return>", lambda _e: self._send_chat())
         ctk.CTkButton(
-            parent, text="📢  SEND TO ALL PLAYERS",
-            height=34, corner_radius=8,
-            fg_color=self.BLUE, hover_color=self.BLUE_H,
-            text_color=self.TEXT, font=ctk.CTkFont(size=12, weight="bold"),
+            _chat_row, text="📢", width=42, height=36,
+            corner_radius=10, fg_color=self.BLUE, hover_color=self.BLUE_H,
+            text_color=self.TEXT, font=ctk.CTkFont(size=18),
             command=self._send_chat,
-        ).pack(fill="x", padx=12, pady=(0, 8))
+        ).pack(side="right")
 
-        # ── Friendly fire toggle ──
+        # ── Quick action tiles — 3-column grid, expands to fill remaining height ──
+        _qa = ctk.CTkFrame(parent, fg_color="transparent")
+        _qa.pack(fill="both", expand=True, padx=12, pady=(0, 10))
+        _qa.columnconfigure(0, weight=1, uniform="qc")
+        _qa.columnconfigure(1, weight=1, uniform="qc")
+        _qa.columnconfigure(2, weight=1, uniform="qc")
+        _qa.rowconfigure(0, weight=1, uniform="qr")
+        _qa.rowconfigure(1, weight=1, uniform="qr")
+
+        _tb = {
+            "corner_radius": 10, "border_width": 1,
+            "border_color": self.BORDER,
+            "fg_color": self.DEEP, "hover_color": "#15151f",
+            "font": ctk.CTkFont(size=12, weight="bold"),
+        }
+
+        # Row 0
         self._ff_btn = ctk.CTkButton(
-            parent, text="🔥  Friendly Fire: OFF",
-            height=34, corner_radius=8,
-            fg_color=self.BORDER, hover_color="#2a2a40",
-            text_color=self.SUB, font=ctk.CTkFont(size=12, weight="bold"),
-            command=self._toggle_ff,
-        )
-        self._ff_btn.pack(fill="x", padx=12, pady=(0, 8))
+            _qa, text="🔥  Friendly Fire\nOFF",
+            text_color=self.SUB, command=self._toggle_ff, **_tb)
+        self._ff_btn.grid(row=0, column=0, sticky="nsew", padx=(0, 4), pady=(0, 4))
 
-        # ── Round controls — bigger, labelled ──
-        _rb = {"height": 34, "corner_radius": 8,
-               "fg_color": self.BORDER, "hover_color": "#2a2a40",
-               "text_color": self.TEXT, "font": ctk.CTkFont(size=12, weight="bold")}
-        rc1 = ctk.CTkFrame(parent, fg_color="transparent")
-        rc1.pack(fill="x", padx=12, pady=(0, 4))
-        ctk.CTkButton(rc1, text="↺  Restart Round",
-                      command=lambda: self.core.restart_round(), **_rb,
-                      ).pack(side="left", fill="x", expand=True, padx=(0, 4))
-        ctk.CTkButton(rc1, text="⏩  End Warmup",
-                      command=lambda: self.core.end_warmup(), **_rb,
-                      ).pack(side="left", fill="x", expand=True)
+        ctk.CTkButton(
+            _qa, text="↺  Restart\nRound",
+            text_color=self.TEXT,
+            command=lambda: self.core.restart_round(), **_tb,
+        ).grid(row=0, column=1, sticky="nsew", padx=(0, 4), pady=(0, 4))
 
-        rc2 = ctk.CTkFrame(parent, fg_color="transparent")
-        rc2.pack(fill="x", padx=12, pady=(0, 4))
-        ctk.CTkButton(rc2, text="⏸  Pause Match",
-                      command=lambda: self.core.pause_match(), **_rb,
-                      ).pack(side="left", fill="x", expand=True, padx=(0, 4))
-        ctk.CTkButton(rc2, text="▶  Unpause Match",
-                      command=lambda: self.core.unpause_match(), **_rb,
-                      ).pack(side="left", fill="x", expand=True)
+        ctk.CTkButton(
+            _qa, text="⏩  End\nWarmup",
+            text_color=self.TEXT,
+            command=lambda: self.core.end_warmup(), **_tb,
+        ).grid(row=0, column=2, sticky="nsew", pady=(0, 4))
+
+        # Row 1
+        ctk.CTkButton(
+            _qa, text="⏸  Pause\nMatch",
+            text_color=self.TEXT,
+            command=lambda: self.core.pause_match(), **_tb,
+        ).grid(row=1, column=0, sticky="nsew", padx=(0, 4))
+
+        ctk.CTkButton(
+            _qa, text="▶  Unpause\nMatch",
+            text_color=self.TEXT,
+            command=lambda: self.core.unpause_match(), **_tb,
+        ).grid(row=1, column=1, sticky="nsew", padx=(0, 4))
+
+        # Placeholder tile (reserved for future action)
+        ctk.CTkFrame(
+            _qa, fg_color=self.DEEP, corner_radius=10,
+            border_width=1, border_color=self.BORDER,
+        ).grid(row=1, column=2, sticky="nsew")
 
     # ── TAB: Players ──────────────────────────────────────────────────────────
 
@@ -1822,14 +1847,14 @@ class CS2GUI:
         self.core.set_friendly_fire(new_state)
         if new_state:
             self._ff_btn.configure(
-                text="🔥  Friendly Fire: ON",
+                text="🔥  Friendly Fire\nON",
                 fg_color=self.ORANGE, hover_color="#d97706",
                 text_color="#0d0d14",
             )
         else:
             self._ff_btn.configure(
-                text="🔥  Friendly Fire: OFF",
-                fg_color=self.BORDER, hover_color="#2a2a40",
+                text="🔥  Friendly Fire\nOFF",
+                fg_color=self.DEEP, hover_color="#15151f",
                 text_color=self.SUB,
             )
 
