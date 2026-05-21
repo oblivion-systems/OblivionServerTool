@@ -191,7 +191,7 @@ class CS2GUI:
 
         # ── main two-column area ──
         content = ctk.CTkFrame(self.root, fg_color="transparent")
-        content.pack(fill="both", expand=True, padx=14, pady=10)
+        content.pack(fill="both", expand=True, padx=14, pady=6)
         content.columnconfigure(0, weight=2, minsize=300)
         content.columnconfigure(1, weight=3, minsize=420)
         content.rowconfigure(0, weight=1)
@@ -223,20 +223,20 @@ class CS2GUI:
         self._off_lbl_w = ctk.CTkLabel(parent, text="Official Map",
                                         font=ctk.CTkFont(size=13),
                                         text_color=self.TEXT, anchor="w")
-        self._off_lbl_w.pack(fill="x", padx=14, pady=(8, 2))
+        self._off_lbl_w.pack(fill="x", padx=14, pady=(4, 2))
         self._off_var = ctk.StringVar(value=OFFICIAL_MAPS[0])
         self._off_cb = ctk.CTkComboBox(
             parent, values=OFFICIAL_MAPS, variable=self._off_var,
             command=self._on_official_select, **_cb)
-        self._off_cb.pack(fill="x", padx=14, pady=(0, 4))
+        self._off_cb.pack(fill="x", padx=14, pady=(0, 3))
         self._patch_dropdown_toggle(self._off_cb)
 
         self._wk_lbl_w = ctk.CTkLabel(parent, text="Workshop Map",
                                        font=ctk.CTkFont(size=13),
                                        text_color=self.SUB, anchor="w")
-        self._wk_lbl_w.pack(fill="x", padx=14, pady=(8, 2))
+        self._wk_lbl_w.pack(fill="x", padx=14, pady=(4, 2))
         wkrow = ctk.CTkFrame(parent, fg_color="transparent")
-        wkrow.pack(fill="x", padx=14, pady=(0, 4))
+        wkrow.pack(fill="x", padx=14, pady=(0, 3))
         self._wk_var = ctk.StringVar(value="")
         self._wk_cb = ctk.CTkComboBox(
             wkrow, values=[""], variable=self._wk_var,
@@ -259,7 +259,7 @@ class CS2GUI:
             parent, values=GAME_MODES, variable=self._mode_var,
             command=self._on_mode_change, **_cb,
         )
-        self._mode_cb.pack(fill="x", padx=14, pady=(0, 4))
+        self._mode_cb.pack(fill="x", padx=14, pady=(0, 3))
 
         # hint: shown when mode has non-standard or no official maps
         self._mode_hint_lbl = ctk.CTkLabel(
@@ -269,37 +269,36 @@ class CS2GUI:
         self._mode_hint_lbl.pack(fill="x", padx=14, pady=(0, 2))
 
         # Launch-preview chip — always shows exactly what START / CHANGE MAP will use
-        # Placed here so it reflects both map AND mode together
         _prev_wrap = ctk.CTkFrame(parent, fg_color=self.DEEP, corner_radius=8,
                                    border_width=1, border_color=self.ACCENT)
-        _prev_wrap.pack(fill="x", padx=14, pady=(4, 10))
+        _prev_wrap.pack(fill="x", padx=14, pady=(2, 6))
         self._map_preview_lbl = ctk.CTkLabel(
             _prev_wrap, text="",
             font=ctk.CTkFont(size=12, weight="bold"),
             fg_color="transparent", text_color=self.ACCENT, anchor="w",
         )
-        self._map_preview_lbl.pack(fill="x", padx=12, pady=8)
+        self._map_preview_lbl.pack(fill="x", padx=10, pady=5)
         self._update_map_selection_ui()   # now _mode_var exists — full preview
 
         # browse Steam Workshop — label updates with the selected mode
         self._browse_btn = ctk.CTkButton(
             parent, text="🔍  Browse Workshop Maps",
-            height=30, corner_radius=6,
+            height=28, corner_radius=6,
             fg_color=self.BORDER, hover_color="#2a2a40",
             text_color=self.SUB, font=ctk.CTkFont(size=12),
             command=self._browse_workshop,
         )
-        self._browse_btn.pack(fill="x", padx=14, pady=(0, 12))
+        self._browse_btn.pack(fill="x", padx=14, pady=(0, 8))
 
         # divider
         ctk.CTkFrame(parent, fg_color=self.BORDER, height=1,
-                     corner_radius=0).pack(fill="x", padx=14, pady=(0, 10))
+                     corner_radius=0).pack(fill="x", padx=14, pady=(0, 6))
 
         # local workshop download
         self._sec_sub(parent, "DOWNLOAD WORKSHOP MAP")
         self._lbl(parent, "Steam Workshop ID")
         ws_row = ctk.CTkFrame(parent, fg_color="transparent")
-        ws_row.pack(fill="x", padx=14, pady=(0, 4))
+        ws_row.pack(fill="x", padx=14, pady=(0, 3))
         self._wsid_var = ctk.StringVar()
         ctk.CTkEntry(
             ws_row, textvariable=self._wsid_var,
@@ -328,15 +327,15 @@ class CS2GUI:
         self._wsid_lbl = ctk.CTkLabel(
             parent, text="", text_color=self.SUB,
             font=ctk.CTkFont(size=12))
-        self._wsid_lbl.pack(anchor="w", padx=14, pady=(0, 6))
+        self._wsid_lbl.pack(anchor="w", padx=14, pady=(0, 4))
 
         ctk.CTkButton(
             parent, text="↻  Check Map Updates",
-            height=30, corner_radius=6,
+            height=28, corner_radius=6,
             fg_color=self.BORDER, hover_color="#2a2a40",
             text_color=self.SUB, font=ctk.CTkFont(size=12),
             command=self._check_map_updates,
-        ).pack(fill="x", padx=14, pady=(0, 12))
+        ).pack(fill="x", padx=14, pady=(0, 10))
 
     # ── right panel: tabbed controls ─────────────────────────────────────────
 
@@ -793,7 +792,7 @@ class CS2GUI:
 
     def _sec(self, parent: ctk.CTkFrame, title: str) -> None:
         row = ctk.CTkFrame(parent, fg_color="transparent")
-        row.pack(fill="x", padx=14, pady=(16, 6))
+        row.pack(fill="x", padx=14, pady=(8, 4))
         ctk.CTkFrame(row, fg_color=self.ACCENT, width=3,
                      corner_radius=2).pack(side="left", fill="y", padx=(0, 8))
         ctk.CTkLabel(row, text=title,
@@ -802,7 +801,7 @@ class CS2GUI:
 
     def _sec_sub(self, parent: ctk.CTkFrame, title: str) -> None:
         row = ctk.CTkFrame(parent, fg_color="transparent")
-        row.pack(fill="x", padx=14, pady=(4, 6))
+        row.pack(fill="x", padx=14, pady=(2, 4))
         ctk.CTkFrame(row, fg_color=self.ACCENT, width=3,
                      corner_radius=2).pack(side="left", fill="y", padx=(0, 8))
         ctk.CTkLabel(row, text=title,
@@ -812,7 +811,7 @@ class CS2GUI:
     def _lbl(self, parent: ctk.CTkFrame, text: str) -> None:
         ctk.CTkLabel(parent, text=text,
                      font=ctk.CTkFont(size=13),
-                     text_color=self.TEXT).pack(anchor="w", padx=14, pady=(8, 2))
+                     text_color=self.TEXT).pack(anchor="w", padx=14, pady=(4, 2))
 
     # ── log / RCON output ─────────────────────────────────────────────────────
 
