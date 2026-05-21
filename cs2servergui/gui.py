@@ -890,6 +890,8 @@ class CS2GUI:
         self._map_preview_lbl.configure(text=preview)
 
     def _refresh_wk(self) -> None:
+        from . import config as _cfg
+        self.core.log(f"Workshop scan: {_cfg.WORKSHOP_DIR}")
         ids = load_workshop()
         self.core.log(f"Workshop scan: {len(ids)} map(s) found")
         # Show plain IDs immediately while names load
