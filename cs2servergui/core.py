@@ -68,6 +68,7 @@ class AppCore:
         # Server config (persisted)
         self.hostname:             str  = "CS2 Dedicated Server"
         self.sv_password:          str  = ""
+        self.gslt_token:           str  = ""   # Steam Game Server Login Token
         self.tickrate_128:         bool = False
         self.auto_start:           bool = False
         self.bot_difficulty:       str  = "Normal"
@@ -149,6 +150,7 @@ class AppCore:
             self.steam_session_active  = bool(cfg.get("steam_session_active", False))
             self.hostname              = cfg.get("hostname", "CS2 Dedicated Server")
             self.sv_password           = cfg.get("sv_password", "")
+            self.gslt_token            = cfg.get("gslt_token", "")
             self.tickrate_128          = bool(cfg.get("tickrate_128", False))
             self.auto_start            = bool(cfg.get("auto_start", False))
             self.bot_difficulty        = cfg.get("bot_difficulty", "Normal")
@@ -168,6 +170,7 @@ class AppCore:
                 "steam_session_active": self.steam_session_active,
                 "hostname":             self.hostname,
                 "sv_password":          self.sv_password,
+                "gslt_token":           self.gslt_token,
                 "tickrate_128":         self.tickrate_128,
                 "auto_start":           self.auto_start,
                 "bot_difficulty":       self.bot_difficulty,
@@ -200,6 +203,8 @@ class AppCore:
             cmd += ["+sv_password", self.sv_password]
         if self.tickrate_128:
             cmd += ["-tickrate", "128"]
+        if self.gslt_token:
+            cmd += ["+sv_setsteamaccount", self.gslt_token]
         cmd += (["+host_workshop_map", map_name]
                 if is_workshop else ["+map", map_name])
         try:
@@ -216,6 +221,8 @@ class AppCore:
             self.log("  Tickrate 128 enabled")
         if self.sv_password:
             self.log("  Server password set")
+        if self.gslt_token:
+            self.log("  GSLT token set (+sv_setsteamaccount)")
         self.log(f"Polling RCON at {RCON_HOST}:{RCON_PORT} — waiting for server…")
         if self.on_state_change:
             self.on_state_change()

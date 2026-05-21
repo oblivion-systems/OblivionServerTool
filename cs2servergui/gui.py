@@ -583,6 +583,17 @@ class CS2GUI:
             command=self._set_sv_password_live,
         ).pack(side="right", padx=(5, 0))
 
+        ctk.CTkLabel(p, text="Game Server Login Token  (GSLT — required for workshop maps)",
+                     font=ctk.CTkFont(size=12), text_color=self.TEXT,
+                     anchor="w").pack(fill="x", padx=12)
+        self._gslt_var = ctk.StringVar(value=self.core.gslt_token)
+        ctk.CTkEntry(p, textvariable=self._gslt_var, show="●",
+                     placeholder_text="Get one at steamcommunity.com/dev/managegameservers",
+                     fg_color=self.DEEP, border_color=self.BORDER,
+                     text_color=self.TEXT, placeholder_text_color=self.SUB,
+                     font=ctk.CTkFont(size=12),
+                     ).pack(fill="x", padx=12, pady=(2, 6))
+
         ctk.CTkLabel(p, text="Max Players Override  (blank = mode default)",
                      font=ctk.CTkFont(size=12), text_color=self.TEXT,
                      anchor="w").pack(fill="x", padx=12)
@@ -1795,6 +1806,7 @@ class CS2GUI:
             self._refresh_wk()   # rescan workshop maps in the new location
         self.core.hostname             = self._hostname_var.get().strip()
         self.core.sv_password          = self._svpw_var.get()
+        self.core.gslt_token           = self._gslt_var.get().strip()
         self.core.tickrate_128         = self._tick128_var.get()
         self.core.auto_start           = self._autostart_var.get()
         self.core.max_players_override = self._maxp_var.get().strip()
