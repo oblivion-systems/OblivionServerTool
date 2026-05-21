@@ -229,6 +229,7 @@ class CS2GUI:
             parent, values=OFFICIAL_MAPS, variable=self._off_var,
             command=self._on_official_select, **_cb)
         self._off_cb.pack(fill="x", padx=14, pady=(0, 4))
+        self._patch_dropdown_toggle(self._off_cb)
 
         self._wk_lbl_w = ctk.CTkLabel(parent, text="Workshop Map",
                                        font=ctk.CTkFont(size=13),
@@ -241,6 +242,7 @@ class CS2GUI:
             wkrow, values=[""], variable=self._wk_var,
             command=self._on_workshop_select, **_cb)
         self._wk_cb.pack(side="left", fill="x", expand=True)
+        self._patch_dropdown_toggle(self._wk_cb)
         ctk.CTkButton(
             wkrow, text="↺", width=36, height=34,
             fg_color=self.BORDER, hover_color="#2a2a40",
@@ -248,15 +250,8 @@ class CS2GUI:
             command=self._refresh_wk,
         ).pack(side="right", padx=(6, 0))
 
-        # Live launch-preview chip — shows exactly what START / CHANGE MAP will use
-        self._map_preview_lbl = ctk.CTkLabel(
-            parent, text=f"▶  {OFFICIAL_MAPS[0]}  ·  Official",
-            font=ctk.CTkFont(size=12, weight="bold"),
-            fg_color=self.DEEP, corner_radius=6,
-            text_color=self.ACCENT, anchor="w",
-        )
-        self._map_preview_lbl.pack(fill="x", padx=14, pady=(0, 8))
-        self._update_map_selection_ui()   # set initial border / colour state
+        # Border colours only — preview label doesn't exist yet
+        self._update_map_selection_ui()
 
         self._lbl(parent, "Game Mode")
         self._mode_var = ctk.StringVar(value="Competitive")
@@ -271,7 +266,20 @@ class CS2GUI:
             parent, text="", text_color=self.SUB,
             font=ctk.CTkFont(size=12), anchor="w",
         )
-        self._mode_hint_lbl.pack(fill="x", padx=14, pady=(0, 4))
+        self._mode_hint_lbl.pack(fill="x", padx=14, pady=(0, 2))
+
+        # Launch-preview chip — always shows exactly what START / CHANGE MAP will use
+        # Placed here so it reflects both map AND mode together
+        _prev_wrap = ctk.CTkFrame(parent, fg_color=self.DEEP, corner_radius=8,
+                                   border_width=1, border_color=self.ACCENT)
+        _prev_wrap.pack(fill="x", padx=14, pady=(4, 10))
+        self._map_preview_lbl = ctk.CTkLabel(
+            _prev_wrap, text="",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            fg_color="transparent", text_color=self.ACCENT, anchor="w",
+        )
+        self._map_preview_lbl.pack(fill="x", padx=12, pady=8)
+        self._update_map_selection_ui()   # now _mode_var exists — full preview
 
         # browse Steam Workshop — label updates with the selected mode
         self._browse_btn = ctk.CTkButton(
@@ -784,15 +792,22 @@ class CS2GUI:
     # ── widget helpers ────────────────────────────────────────────────────────
 
     def _sec(self, parent: ctk.CTkFrame, title: str) -> None:
-        ctk.CTkLabel(parent, text=title,
+        row = ctk.CTkFrame(parent, fg_color="transparent")
+        row.pack(fill="x", padx=14, pady=(16, 6))
+        ctk.CTkFrame(row, fg_color=self.ACCENT, width=3,
+                     corner_radius=2).pack(side="left", fill="y", padx=(0, 8))
+        ctk.CTkLabel(row, text=title,
                      font=ctk.CTkFont(size=11, weight="bold"),
-                     text_color=self.SUB).pack(anchor="w", padx=14, pady=(14, 4))
+                     text_color=self.SUB).pack(side="left")
 
     def _sec_sub(self, parent: ctk.CTkFrame, title: str) -> None:
-        """Section header with no top padding — used for second section in same card."""
-        ctk.CTkLabel(parent, text=title,
+        row = ctk.CTkFrame(parent, fg_color="transparent")
+        row.pack(fill="x", padx=14, pady=(4, 6))
+        ctk.CTkFrame(row, fg_color=self.ACCENT, width=3,
+                     corner_radius=2).pack(side="left", fill="y", padx=(0, 8))
+        ctk.CTkLabel(row, text=title,
                      font=ctk.CTkFont(size=11, weight="bold"),
-                     text_color=self.SUB).pack(anchor="w", padx=14, pady=(0, 4))
+                     text_color=self.SUB).pack(side="left")
 
     def _lbl(self, parent: ctk.CTkFrame, text: str) -> None:
         ctk.CTkLabel(parent, text=text,
@@ -862,6 +877,45 @@ class CS2GUI:
         )
         self._apply_wk_filter(mode)
 
+    def _patch_dropdown_toggle(self, cb: ctk.CTkComboBox) -> None:
+        """Make clicking the dropdown arrow close it when it's already open.
+
+        CustomTkinter's default: click → open; click again → FocusOut closes
+        it, then the command fires and immediately reopens it.  We track when
+        the popup is destroyed and suppress the reopen if it just happened.
+        """
+        _closed_at = [0.0]
+
+        orig_open = cb._open_dropdown_menu
+
+        def _patched_open() -> None:
+            orig_open()
+            # 15 ms after open the popup widget exists — attach a Destroy hook
+            self.root.after(15, _attach_tracker)
+
+        def _attach_tracker() -> None:
+            try:
+                dm = cb._dropdown_menu
+                if dm and dm.winfo_exists():
+                    dm.bind("<Destroy>",
+                            lambda _e: _closed_at.__setitem__(0, time.time()),
+                            add=True)
+            except Exception:
+                pass
+
+        cb._open_dropdown_menu = _patched_open
+
+        orig_clicked = cb._clicked
+
+        def _guarded_click() -> None:
+            # If the popup was destroyed less than 250 ms ago it was closed by
+            # this very click — don't reopen it.
+            if time.time() - _closed_at[0] < 0.25:
+                return
+            orig_clicked()
+
+        cb._button.configure(command=_guarded_click)
+
     def _on_official_select(self, _value: str) -> None:
         """User explicitly chose an official map — make it the active source."""
         self._map_source = "official"
@@ -874,22 +928,32 @@ class CS2GUI:
 
     def _update_map_selection_ui(self) -> None:
         """Sync border colours, label brightness, and the launch-preview chip."""
+        mode_var = getattr(self, "_mode_var", None)
+        mode     = mode_var.get() if mode_var else ""
+
         if self._map_source == "workshop":
             wk = self._wk_var.get().strip()
-            preview = (f"▶  {wk}  ·  Workshop" if wk
-                       else "▶  (no workshop map selected)")
+            # Strip "  [id]" suffix — map name alone is enough for the chip
+            wk_name = re.sub(r"\s*\[\d+\]$", "", wk) if wk else ""
+            if wk_name:
+                preview = f"▶  {wk_name}  ·  {mode}" if mode else f"▶  {wk_name}"
+            else:
+                preview = "▶  (no workshop map selected)"
             self._off_lbl_w.configure(text_color=self.SUB)
             self._wk_lbl_w.configure(text_color=self.TEXT)
             self._off_cb.configure(border_color=self.BORDER)
             self._wk_cb.configure(border_color=self.ACCENT)
         else:
-            off = self._off_var.get().strip() or "—"
-            preview = f"▶  {off}  ·  Official"
+            off     = self._off_var.get().strip() or "—"
+            preview = f"▶  {off}  ·  {mode}" if mode else f"▶  {off}"
             self._off_lbl_w.configure(text_color=self.TEXT)
             self._wk_lbl_w.configure(text_color=self.SUB)
             self._off_cb.configure(border_color=self.ACCENT)
             self._wk_cb.configure(border_color=self.BORDER)
-        self._map_preview_lbl.configure(text=preview)
+
+        # Guard: preview label doesn't exist on the first call during construction
+        if hasattr(self, "_map_preview_lbl"):
+            self._map_preview_lbl.configure(text=preview)
 
     def _refresh_wk(self) -> None:
         from . import config as _cfg
