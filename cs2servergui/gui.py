@@ -880,41 +880,56 @@ class CS2GUI:
     def _patch_dropdown_toggle(self, cb: ctk.CTkComboBox) -> None:
         """Make clicking the dropdown arrow close it when it's already open.
 
-        CustomTkinter's default: click → open; click again → FocusOut closes
-        it, then the command fires and immediately reopens it.  We track when
-        the popup is destroyed and suppress the reopen if it just happened.
+        CTk default: click → open; click again → FocusOut hides/destroys the
+        popup, then the button command fires and immediately reopens it.
+        We record when the popup disappears and suppress the reopen within
+        250 ms.  Handles both old CTk (_button/_clicked) and new CTk
+        (_dropdown_button/_dropdown_callback / place_forget vs destroy).
         """
-        _closed_at = [0.0]
+        # Resolve version-specific button attribute
+        btn = (getattr(cb, "_dropdown_button", None) or
+               getattr(cb, "_button", None))
+        orig_open = getattr(cb, "_open_dropdown_menu", None)
+        if btn is None or orig_open is None:
+            return   # Unknown CTk internals — skip silently
 
-        orig_open = cb._open_dropdown_menu
+        _closed_at = [0.0]
 
         def _patched_open() -> None:
             orig_open()
-            # 15 ms after open the popup widget exists — attach a Destroy hook
             self.root.after(15, _attach_tracker)
 
         def _attach_tracker() -> None:
             try:
-                dm = cb._dropdown_menu
-                if dm and dm.winfo_exists():
-                    dm.bind("<Destroy>",
-                            lambda _e: _closed_at.__setitem__(0, time.time()),
-                            add=True)
+                dm = getattr(cb, "_dropdown_menu", None)
+                if not dm:
+                    return
+                stamp = lambda _e: _closed_at.__setitem__(0, time.time())
+                # <Destroy> fires when the widget is destroyed (older CTk)
+                # <Unmap>   fires when place_forget() hides it (newer CTk)
+                for ev in ("<Destroy>", "<Unmap>"):
+                    try:
+                        dm.bind(ev, stamp, add=True)
+                    except Exception:
+                        pass
             except Exception:
                 pass
 
         cb._open_dropdown_menu = _patched_open
 
-        orig_clicked = cb._clicked
-
         def _guarded_click() -> None:
-            # If the popup was destroyed less than 250 ms ago it was closed by
-            # this very click — don't reopen it.
             if time.time() - _closed_at[0] < 0.25:
                 return
-            orig_clicked()
+            # Call whichever click handler this CTk version exposes
+            clicked = (getattr(cb, "_dropdown_callback", None) or
+                       getattr(cb, "_clicked", None))
+            if clicked:
+                clicked()
 
-        cb._button.configure(command=_guarded_click)
+        try:
+            btn.configure(command=_guarded_click)
+        except Exception:
+            pass
 
     def _on_official_select(self, _value: str) -> None:
         """User explicitly chose an official map — make it the active source."""
