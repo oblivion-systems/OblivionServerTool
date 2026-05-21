@@ -212,7 +212,7 @@ class CS2GUI:
                 parent, text=label, anchor="w", height=36,
                 corner_radius=8, border_width=1,
                 fg_color="transparent", hover_color=self.BORDER,
-                border_color="transparent",
+                border_color=self.CARD,
                 text_color=self.SUB, font=ctk.CTkFont(size=12),
                 command=lambda p=pid: self._show_page(p),
             )
@@ -252,7 +252,7 @@ class CS2GUI:
                                text_color=self.ACCENT)
             else:
                 btn.configure(fg_color="transparent",
-                               border_color="transparent",
+                               border_color=self.CARD,
                                text_color=self.SUB)
 
     # ── status page ───────────────────────────────────────────────────────────
