@@ -284,17 +284,18 @@ class CS2GUI:
         return page
 
     def _build_ops_col(self, parent: ctk.CTkFrame) -> None:
-        """Left ops column: status card + control buttons + quick actions."""
-        # ── Status card ──
+        """Left ops column: unified Server card + Quick Actions card."""
+
+        # ── Unified Server card (status + control buttons in one card) ──
         sc = ctk.CTkFrame(parent, fg_color=self.CARD, corner_radius=12)
-        sc.pack(fill="x", pady=(0, 8))
+        sc.pack(fill="x", pady=(0, 10))
 
         sc_hdr = ctk.CTkFrame(sc, fg_color="transparent")
-        sc_hdr.pack(fill="x", padx=14, pady=(12, 6))
-        ctk.CTkLabel(sc_hdr, text="Server Status",
-                     font=ctk.CTkFont(size=12, weight="bold"),
-                     text_color=self.SUB).pack(side="left")
-        # Status indicator (same format as before — no logic changes needed)
+        sc_hdr.pack(fill="x", padx=16, pady=(14, 8))
+        ctk.CTkLabel(sc_hdr, text="Server",
+                     font=ctk.CTkFont(size=14, weight="bold"),
+                     text_color=self.TEXT).pack(side="left")
+        # Status indicator (unchanged format — _set_state writes to ._dot)
         self._dot = ctk.CTkLabel(sc_hdr,
                                   text="⬤  OFFLINE",
                                   font=ctk.CTkFont(size=11, weight="bold"),
@@ -303,10 +304,10 @@ class CS2GUI:
 
         def _stat_row(lbl_text: str) -> ctk.CTkLabel:
             row = ctk.CTkFrame(sc, fg_color="transparent")
-            row.pack(fill="x", padx=14, pady=2)
+            row.pack(fill="x", padx=16, pady=1)
             ctk.CTkLabel(row, text=lbl_text, text_color=self.DIM,
-                         font=ctk.CTkFont(size=12), anchor="w",
-                         width=52).pack(side="left")
+                         font=ctk.CTkFont(size=11), anchor="w",
+                         width=48).pack(side="left")
             val = ctk.CTkLabel(row, text="—", text_color=self.TEXT,
                                 font=ctk.CTkFont(size=12, weight="bold"),
                                 anchor="w")
@@ -315,37 +316,32 @@ class CS2GUI:
 
         self._sb_map  = _stat_row("Map")
         self._sb_mode = _stat_row("Mode")
-        ctk.CTkFrame(sc, fg_color="transparent", height=8).pack()
 
-        # ── Control card ──
-        cc = ctk.CTkFrame(parent, fg_color=self.CARD, corner_radius=12)
-        cc.pack(fill="x", pady=(0, 8))
+        # Subtle inner divider
+        ctk.CTkFrame(sc, fg_color=self.BORDER, height=1,
+                     corner_radius=0).pack(fill="x", padx=16, pady=(10, 0))
 
-        ctk.CTkLabel(cc, text="Server Control",
-                     font=ctk.CTkFont(size=12, weight="bold"),
-                     text_color=self.SUB).pack(anchor="w", padx=14, pady=(12, 8))
-
-        btn_grid = ctk.CTkFrame(cc, fg_color="transparent")
-        btn_grid.pack(fill="x", padx=12, pady=(0, 12))
+        # Control buttons live inside the same card (no second card → less fragmentation)
+        btn_grid = ctk.CTkFrame(sc, fg_color="transparent")
+        btn_grid.pack(fill="x", padx=12, pady=(10, 14))
         btn_grid.columnconfigure(0, weight=1, uniform="cb")
         btn_grid.columnconfigure(1, weight=1, uniform="cb")
         btn_grid.columnconfigure(2, weight=1, uniform="cb")
 
-        _bs = dict(height=72, corner_radius=12, border_width=1,
-                   border_color=self.BORDER,
+        _bs = dict(height=78, corner_radius=12, border_width=0,
                    font=ctk.CTkFont(size=11, weight="bold"))
         self._start_btn = ctk.CTkButton(
             btn_grid, text="▶\nSTART",
             fg_color=self.ACCENT, hover_color=self.ACCENT_H,
             text_color="#0d0d14", command=self._start, **_bs)
-        self._start_btn.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
+        self._start_btn.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
 
         self._stop_btn = ctk.CTkButton(
             btn_grid, text="■\nSTOP",
             fg_color=self.STOP, hover_color=self.STOP_H,
             text_color=self.TEXT, state="disabled",
             command=self._stop, **_bs)
-        self._stop_btn.grid(row=0, column=1, sticky="nsew", padx=(0, 4))
+        self._stop_btn.grid(row=0, column=1, sticky="nsew", padx=(0, 5))
 
         self._chg_btn = ctk.CTkButton(
             btn_grid, text="⟳\nCHANGE",
@@ -354,60 +350,71 @@ class CS2GUI:
             command=self._change, **_bs)
         self._chg_btn.grid(row=0, column=2, sticky="nsew")
 
-        # ── Quick Actions card ──
+        # ── Quick Actions card (more visible, colour-coded tiles) ──
         qa = ctk.CTkFrame(parent, fg_color=self.CARD, corner_radius=12)
-        qa.pack(fill="x", pady=(0, 8))
+        qa.pack(fill="x", pady=(0, 0))
 
-        ctk.CTkLabel(qa, text="Quick Actions",
-                     font=ctk.CTkFont(size=12, weight="bold"),
-                     text_color=self.SUB).pack(anchor="w", padx=14, pady=(12, 6))
+        qa_hdr = ctk.CTkFrame(qa, fg_color="transparent")
+        qa_hdr.pack(fill="x", padx=16, pady=(14, 8))
+        ctk.CTkLabel(qa_hdr, text="Quick Actions",
+                     font=ctk.CTkFont(size=14, weight="bold"),
+                     text_color=self.TEXT).pack(side="left")
+        ctk.CTkLabel(qa_hdr, text="LIVE",
+                     font=ctk.CTkFont(size=9, weight="bold"),
+                     fg_color=self.ACCENT, text_color="#0d0d14",
+                     corner_radius=4, padx=6, pady=1).pack(side="right")
 
-        # Broadcast row
+        # Broadcast row (taller + more prominent send button)
         self._chat_var = ctk.StringVar()
         br_row = ctk.CTkFrame(qa, fg_color="transparent")
-        br_row.pack(fill="x", padx=12, pady=(0, 8))
+        br_row.pack(fill="x", padx=12, pady=(0, 10))
         chat_ent = ctk.CTkEntry(
             br_row, textvariable=self._chat_var,
-            placeholder_text="Broadcast to players…",
+            placeholder_text="📣  Broadcast to players…",
             fg_color=self.DEEP, border_color=self.BORDER,
             text_color=self.TEXT, placeholder_text_color=self.SUB,
-            font=ctk.CTkFont(size=12), height=32)
-        chat_ent.pack(side="left", fill="x", expand=True, padx=(0, 4))
+            font=ctk.CTkFont(size=12), height=38)
+        chat_ent.pack(side="left", fill="x", expand=True, padx=(0, 6))
         chat_ent.bind("<Return>", lambda _e: self._send_chat())
-        ctk.CTkButton(br_row, text="📢", width=36, height=32,
-                      corner_radius=8, fg_color=self.BLUE, hover_color=self.BLUE_H,
-                      font=ctk.CTkFont(size=16), command=self._send_chat,
+        ctk.CTkButton(br_row, text="SEND", width=66, height=38,
+                      corner_radius=8, fg_color=self.BLUE,
+                      hover_color=self.BLUE_H, text_color=self.TEXT,
+                      font=ctk.CTkFont(size=11, weight="bold"),
+                      command=self._send_chat,
                       ).pack(side="right")
 
-        # Action tile grid (2 rows × 3 cols)
+        # Action tile grid — taller, bolder, colour-accent borders per action
         tg = ctk.CTkFrame(qa, fg_color="transparent")
-        tg.pack(fill="x", padx=12, pady=(0, 12))
+        tg.pack(fill="x", padx=12, pady=(0, 14))
         tg.columnconfigure(0, weight=1, uniform="qc")
         tg.columnconfigure(1, weight=1, uniform="qc")
         tg.columnconfigure(2, weight=1, uniform="qc")
 
-        _tb = dict(corner_radius=8, border_width=1, border_color=self.BORDER,
-                   fg_color=self.DEEP, hover_color="#15151f",
-                   font=ctk.CTkFont(size=10, weight="bold"), height=50)
-        self._ff_btn = ctk.CTkButton(
-            tg, text="🔥\nFF OFF", text_color=self.SUB,
-            command=self._toggle_ff, **_tb)
-        self._ff_btn.grid(row=0, column=0, sticky="nsew", padx=(0, 4), pady=(0, 4))
-        ctk.CTkButton(tg, text="↺\nRestart", text_color=self.TEXT,
-                      command=self.core.restart_round, **_tb,
-                      ).grid(row=0, column=1, sticky="nsew", padx=(0, 4), pady=(0, 4))
-        ctk.CTkButton(tg, text="⏩\nWarmup", text_color=self.TEXT,
-                      command=self.core.end_warmup, **_tb,
-                      ).grid(row=0, column=2, sticky="nsew", pady=(0, 4))
-        ctk.CTkButton(tg, text="⏸\nPause", text_color=self.TEXT,
-                      command=self.core.pause_match, **_tb,
-                      ).grid(row=1, column=0, sticky="nsew", padx=(0, 4))
-        ctk.CTkButton(tg, text="▶\nUnpause", text_color=self.TEXT,
-                      command=self.core.unpause_match, **_tb,
-                      ).grid(row=1, column=1, sticky="nsew", padx=(0, 4))
-        ctk.CTkFrame(tg, fg_color=self.DEEP, corner_radius=8,
-                     border_width=1, border_color=self.BORDER,
-                     ).grid(row=1, column=2, sticky="nsew")
+        # Common tile defaults; each tile then overrides its accent border colour
+        _tb_base = dict(corner_radius=10, border_width=2,
+                        fg_color=self.DEEP, hover_color="#15151f",
+                        font=ctk.CTkFont(size=11, weight="bold"), height=72)
+
+        def _tile(row: int, col: int, text: str, accent: str,
+                  cmd, text_color: str | None = None) -> ctk.CTkButton:
+            padx = (0, 5) if col < 2 else (0, 0)
+            pady = (0, 5) if row == 0 else (0, 0)
+            btn = ctk.CTkButton(
+                tg, text=text,
+                text_color=text_color or self.TEXT,
+                border_color=accent,
+                command=cmd, **_tb_base,
+            )
+            btn.grid(row=row, column=col, sticky="nsew", padx=padx, pady=pady)
+            return btn
+
+        self._ff_btn = _tile(0, 0, "🔥\nFF OFF", self.ORANGE,
+                              self._toggle_ff, text_color=self.SUB)
+        _tile(0, 1, "↺\nRestart", self.BLUE,  self.core.restart_round)
+        _tile(0, 2, "⏩\nWarmup",  self.GREEN, self.core.end_warmup)
+        _tile(1, 0, "⏸\nPause",   "#facc15",  self.core.pause_match)
+        _tile(1, 1, "▶\nUnpause", self.ACCENT, self.core.unpause_match)
+        _tile(1, 2, "🤖\nKick Bots", self.STOP, self.core.kick_bots)
 
     def _build_maps_col(self, parent: ctk.CTkFrame) -> None:
         """Centre column: mode picker + official map card grid + workshop picker."""
@@ -455,13 +462,13 @@ class CS2GUI:
         self._off_var = ctk.StringVar(value=OFFICIAL_MAPS[0])
         self._map_cards: dict[str, ctk.CTkFrame] = {}
 
-        # Official map scrollable card grid
+        # Official map scrollable card grid (taller — accommodates bigger thumbnails)
         self._off_scroll = ctk.CTkScrollableFrame(
-            p, height=190, fg_color=self.DEEP, corner_radius=8,
+            p, height=320, fg_color=self.DEEP, corner_radius=10,
             scrollbar_button_color=self.BORDER,
             scrollbar_button_hover_color="#2a2a40",
         )
-        self._off_scroll.pack(fill="x", padx=4, pady=(0, 8))
+        self._off_scroll.pack(fill="x", padx=4, pady=(0, 10))
         self._off_scroll.columnconfigure(0, weight=1, uniform="mc")
         self._off_scroll.columnconfigure(1, weight=1, uniform="mc")
         self._off_scroll.columnconfigure(2, weight=1, uniform="mc")
@@ -1653,57 +1660,105 @@ class CS2GUI:
     # ── thumbnail helpers ─────────────────────────────────────────────────────
 
     def _make_placeholder_image(self, map_id: str) -> ctk.CTkImage:
-        """Generate a coloured gradient thumbnail for an official map."""
-        base = _MAP_COLORS.get(map_id, (55, 60, 80))
+        """Generate a richer placeholder thumbnail with sky/ground + skyline."""
+        base = _MAP_COLORS.get(map_id, (60, 65, 90))
         r, g, b = base
-        w, h = 162, 96
+        w, h = 240, 144
         img = Image.new("RGB", (w, h))
         draw = ImageDraw.Draw(img)
-        # Top-to-bottom gradient (slightly darker at the bottom)
-        for y in range(h):
-            f = 1.0 - 0.45 * (y / h)
-            draw.line([(0, y), (w, y)], fill=(int(r * f), int(g * f), int(b * f)))
-        # Subtle grid texture
-        gc = (min(r + 22, 255), min(g + 22, 255), min(b + 22, 255))
-        for x in range(0, w, 18):
-            draw.line([(x, 0), (x, h)], fill=gc)
-        for yy in range(0, h, 18):
-            draw.line([(0, yy), (w, yy)], fill=gc)
-        return ctk.CTkImage(img, size=(81, 48))
+
+        # ── Sky gradient (top 45 %) ──
+        sky_h = int(h * 0.45)
+        sky_top  = (max(int(r * 0.45) + 12, 0),
+                    max(int(g * 0.55) + 22, 0),
+                    max(int(b * 0.75) + 30, 0))
+        sky_bot  = (int(r * 0.80), int(g * 0.85), int(b * 0.90))
+        for y in range(sky_h):
+            f  = y / max(sky_h - 1, 1)
+            cr = int(sky_top[0] * (1 - f) + sky_bot[0] * f)
+            cg = int(sky_top[1] * (1 - f) + sky_bot[1] * f)
+            cb = int(sky_top[2] * (1 - f) + sky_bot[2] * f)
+            draw.line([(0, y), (w, y)], fill=(cr, cg, cb))
+
+        # ── Ground gradient (bottom 55 %) ──
+        for y in range(sky_h, h):
+            f  = (y - sky_h) / max(h - sky_h - 1, 1)
+            gr = int(r * (1 - 0.35 * f))
+            gg = int(g * (1 - 0.35 * f))
+            gb = int(b * (1 - 0.35 * f))
+            draw.line([(0, y), (w, y)], fill=(gr, gg, gb))
+
+        # ── Skyline silhouettes straddling the horizon ──
+        seed = (sum(map(ord, map_id)) if map_id else 0)
+        rng  = [(seed + i * 7) % 100 / 100.0 for i in range(10)]
+        x = 0
+        idx = 0
+        horizon = sky_h
+        while x < w:
+            bw = 18 + int(rng[idx % len(rng)] * 28)
+            bh = 14 + int(rng[(idx + 3) % len(rng)] * 32)
+            factor = 0.45 + rng[(idx + 5) % len(rng)] * 0.20
+            br = int(r * factor)
+            bg = int(g * factor)
+            bb = int(b * factor)
+            draw.rectangle([(x, horizon - bh), (x + bw, horizon + 4)],
+                           fill=(br, bg, bb))
+            # Tiny "windows" on bigger buildings
+            if bw > 22 and bh > 18:
+                wr = min(br + 60, 255)
+                wg = min(bg + 50, 255)
+                wb = min(bb + 30, 180)
+                for wy in range(horizon - bh + 5, horizon - 3, 6):
+                    for wx in range(x + 3, x + bw - 3, 5):
+                        draw.point((wx, wy), fill=(wr, wg, wb))
+            x += bw + 2 + int(rng[(idx + 1) % len(rng)] * 4)
+            idx += 1
+
+        # ── Subtle scan-line grid for game-screenshot feel ──
+        gc = (min(r + 18, 255), min(g + 18, 255), min(b + 18, 255))
+        for gy in range(0, h, 24):
+            draw.line([(0, gy), (w, gy)], fill=gc)
+
+        # ── Soft inner border (accent on bottom edge) ──
+        accent = (min(r + 45, 255), min(g + 45, 255), min(b + 65, 255))
+        draw.rectangle([(0, 0), (w - 1, h - 1)], outline=accent, width=1)
+        draw.line([(0, h - 1), (w - 1, h - 1)], fill=accent, width=2)
+
+        return ctk.CTkImage(img, size=(118, 70))
 
     def _get_map_image(self, map_id: str) -> ctk.CTkImage:
         """Return a cached thumbnail or generate a placeholder."""
         cache = os.path.join(_THUMB_DIR, f"{map_id}.jpg")
         if os.path.exists(cache):
             try:
-                pil = Image.open(cache).resize((162, 96))
-                return ctk.CTkImage(pil, size=(81, 48))
+                pil = Image.open(cache).resize((240, 144))
+                return ctk.CTkImage(pil, size=(118, 70))
             except Exception:
                 pass
         return self._make_placeholder_image(map_id)
 
     def _make_map_card(self, parent: ctk.CTkFrame, map_id: str,
                        row: int, col: int, selected: bool = False) -> ctk.CTkFrame:
-        """Build a compact clickable map thumbnail card."""
+        """Build a clickable map thumbnail card with screenshot-style image."""
         border_c = self.ACCENT if selected else self.BORDER
         card = ctk.CTkFrame(
-            parent, corner_radius=8, border_width=2,
+            parent, corner_radius=10, border_width=2,
             border_color=border_c, fg_color=self.DEEP, cursor="hand2",
         )
         card.grid(row=row, column=col, sticky="ew",
-                  padx=(0, 4) if col < 2 else (0, 0), pady=(0, 4))
+                  padx=(0, 6) if col < 2 else (0, 0), pady=(0, 6))
         img = self._get_map_image(map_id)
         img_lbl = ctk.CTkLabel(card, text="", image=img, fg_color="transparent")
-        img_lbl.pack(padx=3, pady=(3, 0))
+        img_lbl.pack(padx=4, pady=(4, 0))
         # Short human-readable name (strips prefix and underscores)
         parts = map_id.split("_", 1)
         short = parts[1].replace("_", " ").title() if len(parts) > 1 else map_id
         ctk.CTkLabel(
             card, text=short,
-            font=ctk.CTkFont(size=9),
-            text_color=self.TEXT, fg_color="transparent",
-            anchor="center",
-        ).pack(fill="x", padx=2, pady=(1, 3))
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color=self.TEXT if selected else self.SUB,
+            fg_color="transparent", anchor="center",
+        ).pack(fill="x", padx=2, pady=(3, 6))
         click = lambda _e, m=map_id: self._select_official_card(m)
         card.bind("<Button-1>", click)
         img_lbl.bind("<Button-1>", click)
