@@ -981,20 +981,34 @@ class AppCore:
 
     @staticmethod
     def _parse_players(status_output: str) -> list[dict]:
+        """Parse 'status' RCON output into a list of player dicts.
+
+        CS2 status lines look like:
+          #  <userid>  "<name>"  <steamid>  <connected>  <ping>  <loss>  <state>  <rate>
+
+        The steamid field has changed across CS2 builds and can appear as:
+          STEAM_X:X:XXXXXXXX  — legacy Steam2 format
+          [U:1:XXXXXXXX]      — Steam3 format
+          76561XXXXXXXXXXXX   — Steam64 17-digit format
+          BOT                 — bot placeholder (kept in list)
+        """
         players: list[dict] = []
         pattern = re.compile(
-            r"^#\s+(\d+)\s+"
-            r'"([^"]*)"'
-            r"\s+(STEAM_\S+|\[U:\S+)"
-            r"\s+(\S+)"
-            r"\s+(\d+)",
+            r"^#\s+(\d+)\s+"    # #  <userid>
+            r'"([^"]*)"'         # "<name>"
+            r"\s+(\S+)"          # <steamid — any token>
+            r"\s+(\S+)"          # <connected time>
+            r"\s+(\d+)",         # <ping>
             re.MULTILINE,
         )
         for m in pattern.finditer(status_output):
+            steamid = m.group(3)
+            if steamid == "uniqueid":   # header row — skip
+                continue
             players.append({
                 "userid":  m.group(1),
                 "name":    m.group(2),
-                "steamid": m.group(3),
+                "steamid": steamid,
                 "time":    m.group(4),
                 "ping":    m.group(5),
             })
@@ -1003,8 +1017,14 @@ class AppCore:
     def get_players(self, callback: Callable[[list[dict]], None]) -> None:
         def _do() -> None:
             try:
-                out = self.rcon.execute("status")
-                callback(self._parse_players(out))
+                out     = self.rcon.execute("status")
+                players = self._parse_players(out)
+                # Diagnostic: if the server returned output but we parsed nothing,
+                # log the raw text so a format change can be spotted quickly.
+                if out.strip() and not players:
+                    self.log("[players] status returned output but no players "
+                             f"could be parsed — raw:\n{out[:600]}")
+                callback(players)
             except Exception as exc:
                 self.log(f"get_players error: {exc}")
                 callback([])
