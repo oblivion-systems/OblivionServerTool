@@ -51,6 +51,25 @@ _MAP_COLORS: dict[str, tuple[int, int, int]] = {
     "de_bank":      ( 70,  70, 80),  "de_sugarcane": ( 80, 110, 60),
 }
 
+# ── Public URLs for official CS2 map thumbnails ──────────────────────────────
+# Source: Counter-Strike Wiki on Fandom (counterstrike.fandom.com) — these are
+# the actual CDN URLs returned by the MediaWiki pageimages API for each map.
+# They sit on Wikia's static CDN (static.wikia.nocookie.net) which is stable
+# for years.  If any URL ever returns 404, the placeholder thumbnail remains.
+_OFFICIAL_MAP_URLS: dict[str, list[str]] = {
+    "de_dust2":   ["https://static.wikia.nocookie.net/cswikia/images/1/16/Cs2_dust2.png/revision/latest"],
+    "de_mirage":  ["https://static.wikia.nocookie.net/cswikia/images/f/f5/De_mirage_cs2.png/revision/latest"],
+    "de_inferno": ["https://static.wikia.nocookie.net/cswikia/images/1/17/Cs2_inferno_remake.png/revision/latest"],
+    "de_nuke":    ["https://static.wikia.nocookie.net/cswikia/images/d/d6/De_nuke_cs2.png/revision/latest"],
+    "de_anubis":  ["https://static.wikia.nocookie.net/cswikia/images/a/a0/CS2_Anubis_B_site.png/revision/latest"],
+    "de_ancient": ["https://static.wikia.nocookie.net/cswikia/images/5/5c/De_ancient_cs2.png/revision/latest"],
+    "de_vertigo": ["https://static.wikia.nocookie.net/cswikia/images/8/88/De_vertigo_cs2.jpg/revision/latest"],
+    "de_overpass":["https://static.wikia.nocookie.net/cswikia/images/5/55/Overpass_loading_screen.png/revision/latest"],
+    "de_cache":   ["https://static.wikia.nocookie.net/cswikia/images/5/5b/De_cache_cs2.png/revision/latest"],
+    "cs_office":  ["https://static.wikia.nocookie.net/cswikia/images/f/f0/Cs2_office.png/revision/latest"],
+    "cs_italy":   ["https://static.wikia.nocookie.net/cswikia/images/a/aa/Cs2_italy.png/revision/latest"],
+}
+
 
 class CS2GUI:
     # ── Colour palette ────────────────────────────────────────────────────────
@@ -457,7 +476,7 @@ class CS2GUI:
 
         # ── Standard Maps subsection ──
         std_hdr = ctk.CTkFrame(p, fg_color="transparent")
-        std_hdr.pack(fill="x", padx=4, pady=(0, 6))
+        std_hdr.pack(fill="x", padx=4, pady=(0, 4))
         ctk.CTkFrame(std_hdr, fg_color=self.ACCENT, width=3,
                      corner_radius=2).pack(side="left", fill="y", padx=(0, 8))
         self._off_lbl_w = ctk.CTkLabel(std_hdr, text="Standard Maps",
@@ -472,18 +491,18 @@ class CS2GUI:
 
         # Official map scrollable card grid (taller — accommodates bigger thumbnails)
         self._off_scroll = ctk.CTkScrollableFrame(
-            p, height=320, fg_color=self.DEEP, corner_radius=10,
+            p, height=300, fg_color=self.DEEP, corner_radius=10,
             scrollbar_button_color=self.BORDER,
             scrollbar_button_hover_color="#2a2a40",
         )
-        self._off_scroll.pack(fill="x", padx=4, pady=(0, 10))
+        self._off_scroll.pack(fill="x", padx=4, pady=(0, 4))
         self._off_scroll.columnconfigure(0, weight=1, uniform="mc")
         self._off_scroll.columnconfigure(1, weight=1, uniform="mc")
         self._off_scroll.columnconfigure(2, weight=1, uniform="mc")
 
         # ── Workshop Maps subsection ──
         wk_hdr = ctk.CTkFrame(p, fg_color="transparent")
-        wk_hdr.pack(fill="x", padx=4, pady=(0, 6))
+        wk_hdr.pack(fill="x", padx=4, pady=(2, 4))
         ctk.CTkFrame(wk_hdr, fg_color=self.ACCENT, width=3,
                      corner_radius=2).pack(side="left", fill="y", padx=(0, 8))
         self._wk_lbl_w = ctk.CTkLabel(wk_hdr, text="Workshop Maps",
@@ -1830,7 +1849,56 @@ class CS2GUI:
         click = lambda _e, m=map_id: self._select_official_card(m)
         card.bind("<Button-1>", click)
         img_lbl.bind("<Button-1>", click)
+        # Kick off async fetch of the real official screenshot if not cached
+        if not os.path.exists(os.path.join(_THUMB_DIR, f"{map_id}.jpg")):
+            self._fetch_official_thumb(map_id)
         return card
+
+    def _fetch_official_thumb(self, map_id: str) -> None:
+        """Background-download a real screenshot for an official map.
+
+        Tries each candidate URL in _OFFICIAL_MAP_URLS in order; first one
+        that returns >2 KB of data wins.  Saves to oblivion_thumbs/<map_id>.jpg
+        and triggers a card refresh on the main thread.
+        """
+        urls = _OFFICIAL_MAP_URLS.get(map_id, [])
+        if not urls:
+            return
+        cache = os.path.join(_THUMB_DIR, f"{map_id}.jpg")
+
+        def _do() -> None:
+            for url in urls:
+                try:
+                    req = urllib.request.Request(
+                        url, headers={"User-Agent": "Mozilla/5.0 OblivionServerTool"})
+                    with urllib.request.urlopen(req, timeout=8) as resp:
+                        data = resp.read()
+                    if len(data) > 2048:   # sanity: skip error pages / placeholders
+                        # Re-encode to JPEG via PIL so any source format works
+                        from io import BytesIO
+                        pil = Image.open(BytesIO(data)).convert("RGB")
+                        pil.save(cache, "JPEG", quality=82)
+                        self.root.after(0, self._refresh_official_card_image, map_id)
+                        return
+                except Exception:
+                    continue
+
+        threading.Thread(target=_do, daemon=True).start()
+
+    def _refresh_official_card_image(self, map_id: str) -> None:
+        """Swap the placeholder image inside an official-map card for the real one."""
+        card = self._map_cards.get(map_id)
+        if not card:
+            return
+        try:
+            img = self._get_map_image(map_id)
+            for child in card.winfo_children():
+                if (isinstance(child, ctk.CTkLabel)
+                        and getattr(child, "_image", None) is not None):
+                    child.configure(image=img)
+                    break
+        except Exception:
+            pass
 
     def _rebuild_official_grid(self) -> None:
         """Repopulate the official-map card grid for the current mode."""
