@@ -54,17 +54,21 @@ _MAP_COLORS: dict[str, tuple[int, int, int]] = {
 
 class CS2GUI:
     # ── Colour palette ────────────────────────────────────────────────────────
-    BG       = "#09090e"
-    CARD     = "#0f0f16"
-    DEEP     = "#060609"
-    BORDER   = "#1c1c28"
-    ACCENT   = "#a78bfa"
-    ACCENT_H = "#8b5cf6"
+    BG       = "#121214"   # window background (deep charcoal)
+    CARD     = "#1a1a1e"   # card / panel surface (one step lighter than BG)
+    SIDE     = "#16161a"   # sidebar (between BG and CARD)
+    DEEP     = "#0e0e10"   # inset surface — log box, dropdown bg
+    BORDER   = "#26262e"   # frame borders + inactive accents
+    ACCENT   = "#8a2be2"   # electric violet
+    ACCENT_H = "#7b2cbf"   # accent (hover / pressed — slightly muted)
     BLUE     = "#4e9aff"
     BLUE_H   = "#3b82f6"
-    STOP     = "#e05c6b"
+    STOP     = "#e05c6b"   # destructive red (kick / unban / ban / delete)
     STOP_H   = "#be2a3e"
+    NEUTRAL  = "#52525b"   # muted grey — used by the server STOP control button
+    NEUTRAL_H = "#3f3f46"
     GREEN    = "#22c55e"
+    GREEN_H  = "#16a34a"
     ORANGE   = "#f59e0b"
     RED      = "#ef4444"
     TEXT     = "#e8e8f4"
@@ -133,7 +137,7 @@ class CS2GUI:
         main.columnconfigure(1, weight=1)
         main.rowconfigure(0, weight=1)
 
-        side = ctk.CTkFrame(main, fg_color=self.CARD, corner_radius=0, width=175)
+        side = ctk.CTkFrame(main, fg_color=self.SIDE, corner_radius=0, width=185)
         side.grid(row=0, column=0, sticky="nsew")
         side.pack_propagate(False)
         self._build_sidebar(side)
@@ -212,7 +216,7 @@ class CS2GUI:
                 parent, text=label, anchor="w", height=36,
                 corner_radius=8, border_width=1,
                 fg_color="transparent", hover_color=self.BORDER,
-                border_color=self.CARD,
+                border_color=self.SIDE,
                 text_color=self.SUB, font=ctk.CTkFont(size=12),
                 command=lambda p=pid: self._show_page(p),
             )
@@ -252,7 +256,7 @@ class CS2GUI:
                                text_color=self.ACCENT)
             else:
                 btn.configure(fg_color="transparent",
-                               border_color=self.CARD,
+                               border_color=self.SIDE,
                                text_color=self.SUB)
 
     # ── status page ───────────────────────────────────────────────────────────
@@ -292,15 +296,19 @@ class CS2GUI:
 
         sc_hdr = ctk.CTkFrame(sc, fg_color="transparent")
         sc_hdr.pack(fill="x", padx=16, pady=(14, 8))
-        ctk.CTkLabel(sc_hdr, text="Server",
+        ctk.CTkLabel(sc_hdr, text="Server Status:",
                      font=ctk.CTkFont(size=14, weight="bold"),
                      text_color=self.TEXT).pack(side="left")
-        # Status indicator (unchanged format — _set_state writes to ._dot)
-        self._dot = ctk.CTkLabel(sc_hdr,
-                                  text="⬤  OFFLINE",
-                                  font=ctk.CTkFont(size=11, weight="bold"),
-                                  text_color=self.RED)
-        self._dot.pack(side="right")
+
+        # Status pill badge — green/orange/red background, white bold text
+        self._sc_badge_wrap = ctk.CTkFrame(
+            sc_hdr, fg_color=self.RED, corner_radius=10)
+        self._sc_badge_wrap.pack(side="right")
+        self._dot = ctk.CTkLabel(
+            self._sc_badge_wrap, text="OFFLINE",
+            font=ctk.CTkFont(size=10, weight="bold"),
+            text_color="#ffffff", fg_color="transparent")
+        self._dot.pack(padx=10, pady=2)
 
         def _stat_row(lbl_text: str) -> ctk.CTkLabel:
             row = ctk.CTkFrame(sc, fg_color="transparent")
@@ -338,7 +346,7 @@ class CS2GUI:
 
         self._stop_btn = ctk.CTkButton(
             btn_grid, text="■\nSTOP",
-            fg_color=self.STOP, hover_color=self.STOP_H,
+            fg_color=self.NEUTRAL, hover_color=self.NEUTRAL_H,
             text_color=self.TEXT, state="disabled",
             command=self._stop, **_bs)
         self._stop_btn.grid(row=0, column=1, sticky="nsew", padx=(0, 5))
@@ -482,21 +490,41 @@ class CS2GUI:
                                        font=ctk.CTkFont(size=11, weight="bold"),
                                        text_color=self.SUB)
         self._wk_lbl_w.pack(side="left")
-
-        wkrow = ctk.CTkFrame(p, fg_color="transparent")
-        wkrow.pack(fill="x", padx=4, pady=(0, 4))
-        self._wk_var = ctk.StringVar(value="")
-        self._wk_cb = ctk.CTkComboBox(
-            wkrow, values=[""], variable=self._wk_var,
-            command=self._on_workshop_select, **_cb_kw)
-        self._wk_cb.pack(side="left", fill="x", expand=True)
-        self._patch_dropdown_toggle(self._wk_cb)
         ctk.CTkButton(
-            wkrow, text="↺", width=36, height=34,
+            wk_hdr, text="↺  Refresh", width=78, height=24,
+            corner_radius=6,
             fg_color=self.BORDER, hover_color="#2a2a40",
-            text_color=self.TEXT, font=ctk.CTkFont(size=15),
+            text_color=self.SUB, font=ctk.CTkFont(size=11),
             command=self._refresh_wk,
-        ).pack(side="right", padx=(6, 0))
+        ).pack(side="right")
+
+        # Workshop selection state (kept for backward-compat with helpers)
+        self._wk_var = ctk.StringVar(value="")
+        self._wk_cards: dict[str, ctk.CTkFrame] = {}
+        # _wk_cb retained as a hidden placeholder so legacy code paths don't crash
+        # if they reference .configure(values=...) — re-targeted to a stub frame.
+        self._wk_cb = ctk.CTkComboBox(
+            wk_hdr, values=[""], variable=self._wk_var, **_cb_kw)
+        # Not packed → invisible. Keeps `_apply_wk_filter`'s `.configure(values=…)`
+        # calls safe to invoke without raising.
+
+        # Workshop card grid (scrollable, taller than official maps grid)
+        self._wk_scroll = ctk.CTkScrollableFrame(
+            p, height=260, fg_color=self.DEEP, corner_radius=10,
+            scrollbar_button_color=self.BORDER,
+            scrollbar_button_hover_color="#2a2a40",
+        )
+        self._wk_scroll.pack(fill="x", padx=4, pady=(0, 8))
+        self._wk_scroll.columnconfigure(0, weight=1, uniform="wc")
+        self._wk_scroll.columnconfigure(1, weight=1, uniform="wc")
+        self._wk_scroll.columnconfigure(2, weight=1, uniform="wc")
+
+        # Placeholder while the workshop list is empty
+        self._wk_empty_lbl = ctk.CTkLabel(
+            self._wk_scroll,
+            text="No workshop maps downloaded yet.\nUse the Workshop tab to grab some.",
+            text_color=self.SUB, font=ctk.CTkFont(size=11))
+        self._wk_empty_lbl.grid(row=0, column=0, columnspan=3, padx=10, pady=24)
 
         # Mode hint
         self._mode_hint_lbl = ctk.CTkLabel(
@@ -601,36 +629,76 @@ class CS2GUI:
         qc.grid(row=1, column=0, sticky="ew")
 
         ctk.CTkLabel(qc, text="Quick Config",
-                     font=ctk.CTkFont(size=12, weight="bold"),
-                     text_color=self.SUB).pack(anchor="w", padx=14, pady=(12, 6))
+                     font=ctk.CTkFont(size=13, weight="bold"),
+                     text_color=self.TEXT).pack(anchor="w", padx=14, pady=(14, 10))
 
-        ctk.CTkLabel(qc, text="Mode", font=ctk.CTkFont(size=11),
-                     text_color=self.DIM, anchor="w").pack(fill="x", padx=14)
-        # Shares _mode_var with maps col — synced automatically
-        ctk.CTkComboBox(qc, values=GAME_MODES, variable=self._mode_var,
-                        command=self._on_mode_change, **_cb_kw,
-                        ).pack(fill="x", padx=14, pady=(2, 6))
+        # OptionMenu style — feels cleaner than ComboBox (no free-text typing)
+        _om_kw = dict(
+            fg_color=self.DEEP, button_color=self.ACCENT,
+            button_hover_color=self.ACCENT_H,
+            dropdown_fg_color=self.CARD,
+            dropdown_hover_color=self.BORDER,
+            text_color=self.TEXT,
+            dropdown_text_color=self.TEXT,
+            font=ctk.CTkFont(size=12),
+            corner_radius=8, height=32,
+        )
 
-        ctk.CTkLabel(qc, text="Map", font=ctk.CTkFont(size=11),
-                     text_color=self.DIM, anchor="w").pack(fill="x", padx=14)
+        def _form_row(label: str, widget_factory) -> None:
+            row = ctk.CTkFrame(qc, fg_color="transparent")
+            row.pack(fill="x", padx=14, pady=(0, 8))
+            ctk.CTkLabel(row, text=label,
+                         font=ctk.CTkFont(size=11),
+                         text_color=self.DIM, anchor="w",
+                         width=78).pack(side="left")
+            w = widget_factory(row)
+            w.pack(side="right", fill="x", expand=True)
+
+        # Map dropdown — shares _off_var with the map-card grid
         _mode_maps = MODE_MAPS.get(self._mode_var.get(), OFFICIAL_MAPS) or OFFICIAL_MAPS
-        self._qc_map_cb = ctk.CTkComboBox(
+        self._qc_map_cb = ctk.CTkOptionMenu(
             qc, values=_mode_maps, variable=self._off_var,
-            command=self._on_official_select, **_cb_kw)
-        self._qc_map_cb.pack(fill="x", padx=14, pady=(2, 6))
+            command=self._on_official_select, **_om_kw)
+        _form_row("Map:",         lambda _: self._qc_map_cb)
 
-        # Clickable LAN connect string
-        conn_lbl = ctk.CTkLabel(
-            qc, text=f"⎘  connect {RCON_HOST}:{RCON_PORT}",
-            font=ctk.CTkFont(size=11), text_color=self.DIM, cursor="hand2")
-        conn_lbl.pack(anchor="w", padx=14, pady=(0, 2))
-        conn_lbl.bind("<Button-1>", lambda _e: self._copy_connect_string())
+        _form_row("Mode:",
+            lambda r: ctk.CTkOptionMenu(
+                r, values=GAME_MODES, variable=self._mode_var,
+                command=self._on_mode_change, **_om_kw))
 
-        # External IP (fetched async)
+        # Max Players — pulls/sets from core.max_players_override
+        if not hasattr(self, "_maxp_var"):
+            self._maxp_var = ctk.StringVar(value=self.core.max_players_override or "16")
+        _maxp_choices = ["2", "4", "6", "8", "10", "12", "16", "20", "24", "32"]
+        _form_row("Max Players:",
+            lambda r: ctk.CTkOptionMenu(
+                r, values=_maxp_choices, variable=self._maxp_var,
+                command=self._on_max_players_quickset, **_om_kw))
+
+        # Read-only Server IP entry (highlight-to-copy)
+        ip_row = ctk.CTkFrame(qc, fg_color="transparent")
+        ip_row.pack(fill="x", padx=14, pady=(0, 14))
+        ctk.CTkLabel(ip_row, text="server IP:",
+                     font=ctk.CTkFont(size=11),
+                     text_color=self.DIM, anchor="w",
+                     width=78).pack(side="left")
+        ip_value = f"{RCON_HOST}:{RCON_PORT}"
+        self._ip_entry = ctk.CTkEntry(
+            ip_row, fg_color=self.DEEP, border_color=self.BORDER,
+            text_color=self.TEXT, font=ctk.CTkFont(size=12),
+            height=32, corner_radius=8)
+        self._ip_entry.insert(0, ip_value)
+        self._ip_entry.configure(state="readonly")
+        self._ip_entry.pack(side="right", fill="x", expand=True)
+        # Click-to-copy on the readonly entry
+        self._ip_entry.bind("<Button-1>", lambda _e: self._copy_connect_string())
+
+        # External IP — small inline label below
         self._pub_ip_lbl = ctk.CTkLabel(
             qc, text="ext: fetching…",
-            font=ctk.CTkFont(size=11), text_color=self.DIM, cursor="hand2")
-        self._pub_ip_lbl.pack(anchor="w", padx=14, pady=(0, 12))
+            font=ctk.CTkFont(size=10), text_color=self.DIM, cursor="hand2",
+            anchor="w")
+        self._pub_ip_lbl.pack(fill="x", padx=14, pady=(0, 12))
         self._pub_ip_lbl.bind("<Button-1>", lambda _e: self._copy_public_ip())
 
     # ── players page ──────────────────────────────────────────────────────────
@@ -1807,6 +1875,135 @@ class CS2GUI:
                 border_color=self.ACCENT if active else self.BORDER
             )
 
+    # ── workshop card helpers ────────────────────────────────────────────────
+
+    def _get_workshop_image(self, wid: str) -> ctk.CTkImage:
+        """Return a cached Steam preview image or a workshop-styled placeholder."""
+        cache = os.path.join(_THUMB_DIR, f"ws_{wid}.jpg")
+        if os.path.exists(cache):
+            try:
+                pil = Image.open(cache).resize((240, 144))
+                return ctk.CTkImage(pil, size=(118, 70))
+            except Exception:
+                pass
+        return self._make_placeholder_image(f"ws_{wid}")
+
+    def _make_workshop_card(self, parent: ctk.CTkFrame, wid: str, label: str,
+                            row: int, col: int,
+                            selected: bool = False) -> ctk.CTkFrame:
+        """Build a clickable workshop-map card with thumbnail + Subscribed tag."""
+        border_c = self.ACCENT if selected else self.BORDER
+        card = ctk.CTkFrame(
+            parent, corner_radius=10, border_width=2,
+            border_color=border_c, fg_color=self.DEEP, cursor="hand2",
+        )
+        card.grid(row=row, column=col, sticky="ew",
+                  padx=(0, 6) if col < 2 else (0, 0), pady=(0, 6))
+
+        img = self._get_workshop_image(wid)
+        img_lbl = ctk.CTkLabel(card, text="", image=img, fg_color="transparent")
+        img_lbl.pack(padx=4, pady=(4, 0))
+
+        # Extract the human-readable name from "Name  [id]"; fall back to ID
+        name = re.sub(r"\s*\[\d+\]$", "", label).strip() or wid
+        display = name if len(name) <= 18 else name[:17] + "…"
+        ctk.CTkLabel(
+            card, text=display,
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color=self.TEXT if selected else self.SUB,
+            fg_color="transparent", anchor="center",
+        ).pack(fill="x", padx=2, pady=(3, 0))
+
+        # "Subscribed" tag — these are maps already downloaded
+        ctk.CTkLabel(
+            card, text="Subscribed",
+            font=ctk.CTkFont(size=8, weight="bold"),
+            text_color=self.ACCENT, fg_color="transparent",
+            anchor="center",
+        ).pack(fill="x", padx=2, pady=(0, 5))
+
+        click = lambda _e, lbl=label: self._select_workshop_card(lbl)
+        card.bind("<Button-1>", click)
+        img_lbl.bind("<Button-1>", click)
+        return card
+
+    def _rebuild_wk_grid(self, ids: list[str], labels: list[str]) -> None:
+        """Repopulate the workshop card grid from the current ID/label lists."""
+        for w in list(self._wk_scroll.winfo_children()):
+            w.destroy()
+        self._wk_cards.clear()
+
+        if not ids:
+            ctk.CTkLabel(
+                self._wk_scroll,
+                text="No workshop maps downloaded yet.\nUse the Workshop tab to grab some.",
+                text_color=self.SUB, font=ctk.CTkFont(size=11)
+            ).grid(row=0, column=0, columnspan=3, padx=10, pady=24)
+            return
+
+        current = self._wk_var.get().strip()
+        for i, (wid, lbl) in enumerate(zip(ids, labels)):
+            row, col = divmod(i, 3)
+            selected = (lbl == current)
+            card = self._make_workshop_card(
+                self._wk_scroll, wid, lbl, row, col, selected=selected)
+            self._wk_cards[lbl] = card
+            # Background-fetch the Steam preview image if not already cached
+            url = self.core._preview_url_cache.get(wid, "")
+            cache = os.path.join(_THUMB_DIR, f"ws_{wid}.jpg")
+            if url and not os.path.exists(cache):
+                self._fetch_workshop_thumb(wid, url, lbl)
+
+    def _select_workshop_card(self, label: str) -> None:
+        """Select a workshop card; deselect the previously selected one."""
+        old = self._wk_var.get()
+        if old in self._wk_cards:
+            self._wk_cards[old].configure(border_color=self.BORDER)
+        self._wk_var.set(label)
+        if label in self._wk_cards:
+            self._wk_cards[label].configure(border_color=self.ACCENT)
+        self._on_workshop_select(label)
+
+    def _set_workshop_active_style(self, active: bool) -> None:
+        """Highlight/dim the selected workshop card border."""
+        sel = self._wk_var.get()
+        if sel and sel in self._wk_cards:
+            self._wk_cards[sel].configure(
+                border_color=self.ACCENT if active else self.BORDER
+            )
+
+    def _fetch_workshop_thumb(self, wid: str, url: str, label: str) -> None:
+        """Background-download a Steam preview thumbnail and refresh the card."""
+        cache = os.path.join(_THUMB_DIR, f"ws_{wid}.jpg")
+
+        def _do() -> None:
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(req, timeout=8) as resp:
+                    data = resp.read()
+                with open(cache, "wb") as f:
+                    f.write(data)
+                self.root.after(0, self._refresh_workshop_card_image, wid, label)
+            except Exception:
+                pass  # Silently fall back to the placeholder
+
+        threading.Thread(target=_do, daemon=True).start()
+
+    def _refresh_workshop_card_image(self, wid: str, label: str) -> None:
+        """Replace the placeholder image inside a workshop card with the real one."""
+        card = self._wk_cards.get(label)
+        if not card:
+            return
+        try:
+            img = self._get_workshop_image(wid)
+            # The first packed child of a workshop card is the image label
+            for child in card.winfo_children():
+                if isinstance(child, ctk.CTkLabel) and getattr(child, "_image", None) is not None:
+                    child.configure(image=img)
+                    break
+        except Exception:
+            pass
+
     # ── mode / workshop ───────────────────────────────────────────────────────
 
     def _on_mode_change(self, mode: str) -> None:
@@ -1903,7 +2100,16 @@ class CS2GUI:
     def _on_official_select(self, _value: str) -> None:
         """User explicitly chose an official map — make it the active source."""
         self._map_source = "official"
+        # Keep card grid in sync when the user picked via the Quick Config dropdown
+        if hasattr(self, "_map_cards"):
+            for mid, card in self._map_cards.items():
+                card.configure(border_color=self.ACCENT if mid == _value else self.BORDER)
         self._update_map_selection_ui()
+
+    def _on_max_players_quickset(self, value: str) -> None:
+        """Quick Config max-players dropdown changed — push to core + log."""
+        self.core.max_players_override = value.strip()
+        self.core.log(f"Max players override set to {value}")
 
     def _on_workshop_select(self, _value: str) -> None:
         """User explicitly chose a workshop map — make it the active source."""
@@ -1926,14 +2132,14 @@ class CS2GUI:
             self._off_lbl_w.configure(text_color=self.SUB)
             self._wk_lbl_w.configure(text_color=self.TEXT)
             self._set_official_active_style(False)
-            self._wk_cb.configure(border_color=self.ACCENT)
+            self._set_workshop_active_style(True)
         else:
             off     = self._off_var.get().strip() or "—"
             preview = f"▶  {off}  ·  {mode}" if mode else f"▶  {off}"
             self._off_lbl_w.configure(text_color=self.TEXT)
             self._wk_lbl_w.configure(text_color=self.SUB)
             self._set_official_active_style(True)
-            self._wk_cb.configure(border_color=self.BORDER)
+            self._set_workshop_active_style(False)
 
         # Guard: preview label doesn't exist on the first call during construction
         if hasattr(self, "_map_preview_lbl"):
@@ -1944,9 +2150,10 @@ class CS2GUI:
         self.core.log(f"Workshop scan: {_cfg.WORKSHOP_DIR}")
         ids = load_workshop()
         self.core.log(f"Workshop scan: {len(ids)} map(s) found")
-        self._wk_all_ids = ids
-        # Show plain IDs immediately while names load in background
-        self._wk_cb.configure(values=ids or [""])
+        self._wk_all_ids    = ids
+        self._wk_all_labels = list(ids)  # bare-ID labels while names load
+        # Build the grid immediately so the UI doesn't sit empty during the lookup
+        self._rebuild_wk_grid(ids, self._wk_all_labels)
 
         def _on_names_done() -> None:
             labels = []
@@ -1956,7 +2163,7 @@ class CS2GUI:
 
             def _apply() -> None:
                 self._wk_all_labels = labels
-                # Upgrade any bare-ID display to "Name  [id]" now that names loaded
+                # Upgrade any bare-ID selection to "Name  [id]" now that names loaded
                 current = self._wk_var.get().strip()
                 for i, wid in enumerate(ids):
                     if current == wid:
@@ -2005,13 +2212,18 @@ class CS2GUI:
                     f"Workshop filter ({mode}): no tag matches — showing all {len(ids)}"
                 )
 
-        self._wk_cb.configure(values=filtered_labels or [""])
         # If the currently selected map was filtered out, deselect it
         current = self._wk_var.get().strip()
         if current and current not in filtered_labels:
             self._wk_var.set("")
             if self._map_source == "workshop":
                 self._map_source = "official"
+
+        # Rebuild the card grid with the filtered set (matching IDs)
+        filtered_ids = [
+            wid for wid, lbl in zip(ids, labels) if lbl in filtered_labels
+        ]
+        self._rebuild_wk_grid(filtered_ids, filtered_labels)
         self._update_map_selection_ui()
 
     def _selected_map(self) -> tuple[str, bool]:
@@ -2028,6 +2240,12 @@ class CS2GUI:
         self._sb_map.configure( text=self.core.current_map  if self.core.running else "—")
         self._sb_mode.configure(text=self.core.current_mode if self.core.running else "—")
 
+    def _set_status_badge(self, text: str, color: str) -> None:
+        """Update the pill-shaped status badge in the Server card header."""
+        self._dot.configure(text=text)
+        if hasattr(self, "_sc_badge_wrap") and self._sc_badge_wrap is not None:
+            self._sc_badge_wrap.configure(fg_color=color)
+
     def _on_core_state_change(self) -> None:
         """Called on the main thread whenever AppCore.boot_state changes."""
         self._set_state(self.core.boot_state)
@@ -2036,9 +2254,8 @@ class CS2GUI:
         """Animate the header dot while the server is booting."""
         if self.core.boot_state != "booting":
             return
-        frames = ["⬤  BOOTING ·  ", "⬤  BOOTING ·· ", "⬤  BOOTING ···"]
-        self._dot.configure(text=frames[self._pulse_step % 3],
-                            text_color=self.ORANGE)
+        frames = ["BOOTING ·  ", "BOOTING ·· ", "BOOTING ···"]
+        self._set_status_badge(frames[self._pulse_step % 3], self.ORANGE)
         self._pulse_step += 1
         self.root.after(500, self._boot_pulse)
 
@@ -2534,15 +2751,15 @@ class CS2GUI:
         self._stop_btn.configure( state="normal"   if running     else "disabled")
         self._chg_btn.configure(  state="normal"   if state == "ready" else "disabled")
         if state == "offline":
-            self._dot.configure(text="⬤  OFFLINE",  text_color=self.RED)
+            self._set_status_badge("OFFLINE", self.RED)
             if self._ff_btn:
                 self._ff_btn.configure(state="disabled")
         elif state == "booting":
-            self._dot.configure(text="⬤  BOOTING…", text_color=self.ORANGE)
+            self._set_status_badge("BOOTING", self.ORANGE)
             if self._ff_btn:
                 self._ff_btn.configure(state="disabled")
         else:
-            self._dot.configure(text="⬤  ONLINE",   text_color=self.GREEN)
+            self._set_status_badge("ONLINE", self.GREEN)
             if self._ff_btn:
                 self._ff_btn.configure(state="normal")
         self._sync_status_bar()
