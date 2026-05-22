@@ -179,6 +179,9 @@ class CS2GUI:
         for p in self._pages.values():
             p.place(relx=0, rely=0, relwidth=1, relheight=1)
 
+        # Default landing page — Server Status dashboard
+        self._show_page("status")
+
         # ── slim status bar (bottom) ──
         sb = ctk.CTkFrame(self.root, fg_color=self.DEEP, corner_radius=0, height=26)
         sb.pack(side="bottom", fill="x")
