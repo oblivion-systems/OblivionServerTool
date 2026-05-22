@@ -462,8 +462,9 @@ class CS2GUI:
         p = scroll   # alias
 
         # ── Header row: "Map Selection" + mode dropdown inline ──
-        hdr_row = ctk.CTkFrame(p, fg_color="transparent")
-        hdr_row.pack(fill="x", padx=4, pady=(8, 8))
+        hdr_row = ctk.CTkFrame(p, fg_color="transparent", height=34)
+        hdr_row.pack(fill="x", padx=4, pady=(2, 4))
+        hdr_row.pack_propagate(False)
         ctk.CTkLabel(hdr_row, text="Map Selection",
                      font=ctk.CTkFont(size=14, weight="bold"),
                      text_color=self.TEXT).pack(side="left")
@@ -475,10 +476,12 @@ class CS2GUI:
         self._patch_dropdown_toggle(self._mode_cb)
 
         # ── Standard Maps subsection ──
-        std_hdr = ctk.CTkFrame(p, fg_color="transparent")
-        std_hdr.pack(fill="x", padx=4, pady=(0, 4))
-        ctk.CTkFrame(std_hdr, fg_color=self.ACCENT, width=3,
-                     corner_radius=2).pack(side="left", fill="y", padx=(0, 8))
+        # Fixed-height header so the accent stripe can't stretch the row
+        std_hdr = ctk.CTkFrame(p, fg_color="transparent", height=20)
+        std_hdr.pack(fill="x", padx=4, pady=(0, 1))
+        std_hdr.pack_propagate(False)
+        ctk.CTkFrame(std_hdr, fg_color=self.ACCENT, width=3, height=14,
+                     corner_radius=2).pack(side="left", padx=(0, 8), pady=3)
         self._off_lbl_w = ctk.CTkLabel(std_hdr, text="Standard Maps",
                                         font=ctk.CTkFont(size=11, weight="bold"),
                                         text_color=self.TEXT)
@@ -495,16 +498,17 @@ class CS2GUI:
             scrollbar_button_color=self.BORDER,
             scrollbar_button_hover_color="#2a2a40",
         )
-        self._off_scroll.pack(fill="x", padx=4, pady=(0, 4))
+        self._off_scroll.pack(fill="x", padx=4, pady=(0, 2))
         self._off_scroll.columnconfigure(0, weight=1, uniform="mc")
         self._off_scroll.columnconfigure(1, weight=1, uniform="mc")
         self._off_scroll.columnconfigure(2, weight=1, uniform="mc")
 
         # ── Workshop Maps subsection ──
-        wk_hdr = ctk.CTkFrame(p, fg_color="transparent")
-        wk_hdr.pack(fill="x", padx=4, pady=(2, 4))
-        ctk.CTkFrame(wk_hdr, fg_color=self.ACCENT, width=3,
-                     corner_radius=2).pack(side="left", fill="y", padx=(0, 8))
+        wk_hdr = ctk.CTkFrame(p, fg_color="transparent", height=26)
+        wk_hdr.pack(fill="x", padx=4, pady=(2, 1))
+        wk_hdr.pack_propagate(False)
+        ctk.CTkFrame(wk_hdr, fg_color=self.ACCENT, width=3, height=14,
+                     corner_radius=2).pack(side="left", padx=(0, 8), pady=6)
         self._wk_lbl_w = ctk.CTkLabel(wk_hdr, text="Workshop Maps",
                                        font=ctk.CTkFont(size=11, weight="bold"),
                                        text_color=self.SUB)
@@ -533,7 +537,7 @@ class CS2GUI:
             scrollbar_button_color=self.BORDER,
             scrollbar_button_hover_color="#2a2a40",
         )
-        self._wk_scroll.pack(fill="x", padx=4, pady=(0, 8))
+        self._wk_scroll.pack(fill="x", padx=4, pady=(0, 4))
         self._wk_scroll.columnconfigure(0, weight=1, uniform="wc")
         self._wk_scroll.columnconfigure(1, weight=1, uniform="wc")
         self._wk_scroll.columnconfigure(2, weight=1, uniform="wc")
@@ -549,17 +553,17 @@ class CS2GUI:
         self._mode_hint_lbl = ctk.CTkLabel(
             p, text="", text_color=self.SUB,
             font=ctk.CTkFont(size=12), anchor="w")
-        self._mode_hint_lbl.pack(fill="x", padx=4, pady=(0, 2))
+        self._mode_hint_lbl.pack(fill="x", padx=4, pady=(0, 1))
 
         # Launch-preview chip
         _prev_wrap = ctk.CTkFrame(p, fg_color=self.DEEP, corner_radius=8,
                                    border_width=1, border_color=self.ACCENT)
-        _prev_wrap.pack(fill="x", padx=4, pady=(2, 6))
+        _prev_wrap.pack(fill="x", padx=4, pady=(1, 3))
         self._map_preview_lbl = ctk.CTkLabel(
             _prev_wrap, text="",
             font=ctk.CTkFont(size=12, weight="bold"),
             fg_color="transparent", text_color=self.ACCENT, anchor="w")
-        self._map_preview_lbl.pack(fill="x", padx=10, pady=5)
+        self._map_preview_lbl.pack(fill="x", padx=10, pady=4)
 
         # Browse Workshop button
         self._browse_btn = ctk.CTkButton(
@@ -569,7 +573,7 @@ class CS2GUI:
             text_color=self.SUB, font=ctk.CTkFont(size=12),
             command=self._browse_workshop,
         )
-        self._browse_btn.pack(fill="x", padx=4, pady=(0, 8))
+        self._browse_btn.pack(fill="x", padx=4, pady=(0, 4))
 
         # Populate card grid now that _mode_var exists
         self._rebuild_official_grid()
