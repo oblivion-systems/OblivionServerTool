@@ -541,15 +541,9 @@ class CS2GUI:
                      text_color=self.DIM, anchor="w",
                      ).pack(fill="x", padx=4, pady=(0, 2))
 
-        # Workshop selection state (kept for backward-compat with helpers)
+        # Workshop selection state
         self._wk_var = ctk.StringVar(value="")
         self._wk_cards: dict[str, ctk.CTkFrame] = {}
-        # _wk_cb retained as a hidden placeholder so legacy code paths don't crash
-        # if they reference .configure(values=...) — re-targeted to a stub frame.
-        self._wk_cb = ctk.CTkComboBox(
-            wk_hdr, values=[""], variable=self._wk_var, **_cb_kw)
-        # Not packed → invisible. Keeps `_apply_wk_filter`'s `.configure(values=…)`
-        # calls safe to invoke without raising.
 
         # Workshop card grid — same cap so the rest of the column stays visible
         self._wk_scroll = ctk.CTkScrollableFrame(
@@ -910,7 +904,11 @@ class CS2GUI:
         ctk.CTkLabel(p, text="Max Players Override  (blank = mode default)",
                      font=ctk.CTkFont(size=12), text_color=self.TEXT,
                      anchor="w").pack(fill="x", padx=12)
-        self._maxp_var = ctk.StringVar(value=self.core.max_players_override)
+        # _maxp_var may already exist (the right-col Quick Config creates it
+        # first).  Reuse it so the Configuration entry and the Quick Config
+        # dropdown stay in lock-step instead of holding orphaned StringVars.
+        if not hasattr(self, "_maxp_var"):
+            self._maxp_var = ctk.StringVar(value=self.core.max_players_override)
         ctk.CTkEntry(p, textvariable=self._maxp_var, placeholder_text="e.g. 16",
                      fg_color=self.DEEP, border_color=self.BORDER,
                      text_color=self.TEXT, placeholder_text_color=self.SUB,
@@ -1099,647 +1097,6 @@ class CS2GUI:
 
         return page
 
-    # ── old panel/tab builder stubs (kept for _build_config_panel) ────────────
-
-    def _build_config_panel(self, parent: ctk.CTkFrame) -> None:
-        _cb = dict(
-            fg_color=self.DEEP, button_color=self.BORDER,
-            border_color=self.BORDER, dropdown_fg_color=self.CARD,
-            dropdown_hover_color=self.BORDER, text_color=self.TEXT,
-            dropdown_text_color=self.TEXT, button_hover_color="#2a2a40",
-            font=ctk.CTkFont(size=13),
-        )
-
-        self._sec(parent, "MAPS & MODE")
-
-        # Which map source is currently active: "official" or "workshop"
-        self._map_source: str = "official"
-
-        self._off_lbl_w = ctk.CTkLabel(parent, text="Official Map",
-                                        font=ctk.CTkFont(size=13),
-                                        text_color=self.TEXT, anchor="w")
-        self._off_lbl_w.pack(fill="x", padx=14, pady=(4, 2))
-        self._off_var = ctk.StringVar(value=OFFICIAL_MAPS[0])
-        # ── official-map thumbnail grid (replaces dropdown) ──
-        self._off_scroll = ctk.CTkScrollableFrame(
-            parent, height=185,
-            fg_color=self.DEEP, corner_radius=8,
-            scrollbar_button_color=self.BORDER,
-            scrollbar_button_hover_color="#2a2a40",
-        )
-        self._off_scroll.pack(fill="x", padx=14, pady=(0, 3))
-        self._off_scroll.columnconfigure(0, weight=1, uniform="mc")
-        self._off_scroll.columnconfigure(1, weight=1, uniform="mc")
-        self._off_scroll.columnconfigure(2, weight=1, uniform="mc")
-
-        self._wk_lbl_w = ctk.CTkLabel(parent, text="Workshop Map",
-                                       font=ctk.CTkFont(size=13),
-                                       text_color=self.SUB, anchor="w")
-        self._wk_lbl_w.pack(fill="x", padx=14, pady=(4, 2))
-        wkrow = ctk.CTkFrame(parent, fg_color="transparent")
-        wkrow.pack(fill="x", padx=14, pady=(0, 3))
-        self._wk_var = ctk.StringVar(value="")
-        self._wk_cb = ctk.CTkComboBox(
-            wkrow, values=[""], variable=self._wk_var,
-            command=self._on_workshop_select, **_cb)
-        self._wk_cb.pack(side="left", fill="x", expand=True)
-        self._patch_dropdown_toggle(self._wk_cb)
-        ctk.CTkButton(
-            wkrow, text="↺", width=36, height=34,
-            fg_color=self.BORDER, hover_color="#2a2a40",
-            text_color=self.TEXT, font=ctk.CTkFont(size=15),
-            command=self._refresh_wk,
-        ).pack(side="right", padx=(6, 0))
-
-        # Border colours only — preview label doesn't exist yet
-        self._update_map_selection_ui()
-
-        self._lbl(parent, "Game Mode")
-        self._mode_var = ctk.StringVar(value="Competitive")
-        self._mode_cb = ctk.CTkComboBox(
-            parent, values=GAME_MODES, variable=self._mode_var,
-            command=self._on_mode_change, **_cb,
-        )
-        self._mode_cb.pack(fill="x", padx=14, pady=(0, 3))
-
-        # hint: shown when mode has non-standard or no official maps
-        self._mode_hint_lbl = ctk.CTkLabel(
-            parent, text="", text_color=self.SUB,
-            font=ctk.CTkFont(size=12), anchor="w",
-        )
-        self._mode_hint_lbl.pack(fill="x", padx=14, pady=(0, 2))
-
-        # Launch-preview chip — always shows exactly what START / CHANGE MAP will use
-        _prev_wrap = ctk.CTkFrame(parent, fg_color=self.DEEP, corner_radius=8,
-                                   border_width=1, border_color=self.ACCENT)
-        _prev_wrap.pack(fill="x", padx=14, pady=(2, 6))
-        self._map_preview_lbl = ctk.CTkLabel(
-            _prev_wrap, text="",
-            font=ctk.CTkFont(size=12, weight="bold"),
-            fg_color="transparent", text_color=self.ACCENT, anchor="w",
-        )
-        self._map_preview_lbl.pack(fill="x", padx=10, pady=5)
-        self._rebuild_official_grid()         # populate cards now that _mode_var exists
-        self._update_map_selection_ui()       # now _mode_var exists — full preview
-
-        # browse Steam Workshop — label updates with the selected mode
-        self._browse_btn = ctk.CTkButton(
-            parent, text="🔍  Browse Workshop Maps",
-            height=28, corner_radius=6,
-            fg_color=self.BORDER, hover_color="#2a2a40",
-            text_color=self.SUB, font=ctk.CTkFont(size=12),
-            command=self._browse_workshop,
-        )
-        self._browse_btn.pack(fill="x", padx=14, pady=(0, 8))
-
-        # ── Workshop download (compact, no section header) ──
-        ctk.CTkFrame(parent, fg_color=self.BORDER, height=1,
-                     corner_radius=0).pack(fill="x", padx=14, pady=(4, 6))
-        ws_row = ctk.CTkFrame(parent, fg_color="transparent")
-        ws_row.pack(fill="x", padx=14, pady=(0, 3))
-        self._wsid_var = ctk.StringVar()
-        ctk.CTkEntry(
-            ws_row, textvariable=self._wsid_var,
-            placeholder_text="Workshop ID to download…",
-            fg_color=self.DEEP, border_color=self.BORDER,
-            text_color=self.TEXT, placeholder_text_color=self.SUB,
-            font=ctk.CTkFont(size=13),
-        ).pack(side="left", fill="x", expand=True)
-        # Cancel button (invisible until a download is active)
-        self._cancel_dl_btn = ctk.CTkButton(
-            ws_row, text="✕", width=34, height=34,
-            fg_color=self.BORDER, hover_color=self.BORDER,
-            text_color=self.BORDER,          # invisible until active
-            font=ctk.CTkFont(size=14, weight="bold"),
-            state="disabled",
-            command=self.core.cancel_download,
-        )
-        self._cancel_dl_btn.pack(side="right", padx=(4, 0))
-        ctk.CTkButton(
-            ws_row, text="DL", width=52, height=34,
-            fg_color=self.ACCENT, hover_color=self.ACCENT_H,
-            text_color="#0d0d14",
-            font=ctk.CTkFont(size=12, weight="bold"),
-            command=self._local_dl,
-        ).pack(side="right", padx=(6, 0))
-        self._wsid_lbl = ctk.CTkLabel(
-            parent, text="", text_color=self.SUB,
-            font=ctk.CTkFont(size=12))
-        self._wsid_lbl.pack(anchor="w", padx=14, pady=(0, 4))
-
-        ctk.CTkButton(
-            parent, text="↻  Check Map Updates",
-            height=28, corner_radius=6,
-            fg_color=self.BORDER, hover_color="#2a2a40",
-            text_color=self.SUB, font=ctk.CTkFont(size=12),
-            command=self._check_map_updates,
-        ).pack(fill="x", padx=14, pady=(0, 10))
-
-    # ── right panel: tabbed controls ─────────────────────────────────────────
-
-    def _build_controls_panel(self, parent: ctk.CTkFrame) -> None:
-        tabs = ctk.CTkTabview(
-            parent,
-            fg_color=self.CARD,
-            segmented_button_fg_color=self.DEEP,
-            segmented_button_selected_color=self.ACCENT,
-            segmented_button_selected_hover_color=self.ACCENT_H,
-            segmented_button_unselected_color=self.DEEP,
-            segmented_button_unselected_hover_color=self.BORDER,
-            text_color=self.TEXT,
-            text_color_disabled=self.SUB,
-        )
-        tabs.pack(fill="both", expand=True, padx=0, pady=0)
-        tabs.add("Controls")
-        tabs.add("Players")
-        tabs.add("Config")
-        tabs.add("Console")
-
-        self._build_tab_controls(tabs.tab("Controls"))
-        self._build_tab_players(tabs.tab("Players"))
-        self._build_tab_config(tabs.tab("Config"))
-        self._build_tab_console(tabs.tab("Console"))
-
-    # ── TAB: Controls ─────────────────────────────────────────────────────────
-
-    def _build_tab_controls(self, parent: ctk.CTkFrame) -> None:
-        # ── Primary server buttons ──
-        self._start_btn = ctk.CTkButton(
-            parent, text="▶  START SERVER",
-            height=44, corner_radius=10,
-            font=ctk.CTkFont(size=13, weight="bold"),
-            fg_color=self.ACCENT, hover_color=self.ACCENT_H,
-            text_color="#0d0d14", command=self._start)
-        self._start_btn.pack(fill="x", padx=12, pady=(10, 4))
-
-        # Stop + Change Map side-by-side
-        _pm = ctk.CTkFrame(parent, fg_color="transparent")
-        _pm.pack(fill="x", padx=12, pady=(0, 4))
-        _pm.columnconfigure(0, weight=1)
-        _pm.columnconfigure(1, weight=1)
-        self._stop_btn = ctk.CTkButton(
-            _pm, text="■  STOP",
-            height=38, corner_radius=10,
-            font=ctk.CTkFont(size=12, weight="bold"),
-            fg_color=self.STOP, hover_color=self.STOP_H,
-            state="disabled", command=self._stop)
-        self._stop_btn.grid(row=0, column=0, sticky="ew", padx=(0, 3))
-        self._chg_btn = ctk.CTkButton(
-            _pm, text="⟳  CHANGE MAP",
-            height=38, corner_radius=10,
-            font=ctk.CTkFont(size=12, weight="bold"),
-            fg_color=self.BLUE, hover_color=self.BLUE_H,
-            state="disabled", command=self._change)
-        self._chg_btn.grid(row=0, column=1, sticky="ew", padx=(3, 0))
-
-        # ── Utility row ──
-        util = ctk.CTkFrame(parent, fg_color="transparent")
-        util.pack(fill="x", padx=12, pady=(0, 8))
-        _ub = {"height": 28, "corner_radius": 8,
-               "font": ctk.CTkFont(size=11, weight="bold")}
-        self._upd_btn = ctk.CTkButton(
-            util, text="⟳  Update",
-            fg_color=self.BORDER, hover_color="#2a2a40",
-            text_color=self.SUB, command=self._check_update_btn, **_ub)
-        self._upd_btn.pack(side="left", fill="x", expand=True, padx=(0, 4))
-        ctk.CTkButton(
-            util, text="⚙  Plugins",
-            fg_color=self.BORDER, hover_color="#2a2a40",
-            text_color=self.SUB, command=self._check_plugins, **_ub,
-        ).pack(side="left", fill="x", expand=True, padx=(0, 4))
-        self._steam_btn = ctk.CTkButton(
-            util, text="🔑  Steam",
-            fg_color=self.BORDER, hover_color="#2a2a40",
-            text_color=self.SUB, command=self._show_steam_account_dialog, **_ub)
-        self._steam_btn.pack(side="left", fill="x", expand=True, padx=(0, 4))
-        ctk.CTkButton(
-            util, text="🌐  Web Panel",
-            fg_color=self.BORDER, hover_color="#2a2a40",
-            text_color=self.SUB, command=self._open_web_panel, **_ub,
-        ).pack(side="left", fill="x", expand=True)
-
-        # ── Divider + section label ──
-        ctk.CTkFrame(parent, fg_color=self.BORDER, height=1,
-                     corner_radius=0).pack(fill="x", padx=12, pady=(0, 6))
-        ctk.CTkLabel(parent, text="QUICK ACTIONS",
-                     font=ctk.CTkFont(size=10, weight="bold"),
-                     text_color=self.SUB).pack(anchor="w", padx=12, pady=(0, 4))
-
-        # ── Broadcast: entry + send icon button on one row ──
-        self._chat_var = ctk.StringVar()
-        _chat_row = ctk.CTkFrame(parent, fg_color="transparent")
-        _chat_row.pack(fill="x", padx=12, pady=(0, 8))
-        chat_ent = ctk.CTkEntry(
-            _chat_row, textvariable=self._chat_var,
-            placeholder_text="Broadcast to all players…",
-            fg_color=self.DEEP, border_color=self.BORDER,
-            text_color=self.TEXT, placeholder_text_color=self.SUB,
-            font=ctk.CTkFont(size=13), height=36,
-        )
-        chat_ent.pack(side="left", fill="x", expand=True, padx=(0, 6))
-        chat_ent.bind("<Return>", lambda _e: self._send_chat())
-        ctk.CTkButton(
-            _chat_row, text="📢", width=42, height=36,
-            corner_radius=10, fg_color=self.BLUE, hover_color=self.BLUE_H,
-            text_color=self.TEXT, font=ctk.CTkFont(size=18),
-            command=self._send_chat,
-        ).pack(side="right")
-
-        # ── Quick action tiles — 3-column grid, expands to fill remaining height ──
-        _qa = ctk.CTkFrame(parent, fg_color="transparent")
-        _qa.pack(fill="both", expand=True, padx=12, pady=(0, 10))
-        _qa.columnconfigure(0, weight=1, uniform="qc")
-        _qa.columnconfigure(1, weight=1, uniform="qc")
-        _qa.columnconfigure(2, weight=1, uniform="qc")
-        _qa.rowconfigure(0, weight=1, uniform="qr")
-        _qa.rowconfigure(1, weight=1, uniform="qr")
-
-        _tb = {
-            "corner_radius": 10, "border_width": 1,
-            "border_color": self.BORDER,
-            "fg_color": self.DEEP, "hover_color": "#15151f",
-            "font": ctk.CTkFont(size=12, weight="bold"),
-        }
-
-        # Row 0
-        self._ff_btn = ctk.CTkButton(
-            _qa, text="🔥  Friendly Fire\nOFF",
-            text_color=self.SUB, command=self._toggle_ff, **_tb)
-        self._ff_btn.grid(row=0, column=0, sticky="nsew", padx=(0, 4), pady=(0, 4))
-
-        ctk.CTkButton(
-            _qa, text="↺  Restart\nRound",
-            text_color=self.TEXT,
-            command=lambda: self.core.restart_round(), **_tb,
-        ).grid(row=0, column=1, sticky="nsew", padx=(0, 4), pady=(0, 4))
-
-        ctk.CTkButton(
-            _qa, text="⏩  End\nWarmup",
-            text_color=self.TEXT,
-            command=lambda: self.core.end_warmup(), **_tb,
-        ).grid(row=0, column=2, sticky="nsew", pady=(0, 4))
-
-        # Row 1
-        ctk.CTkButton(
-            _qa, text="⏸  Pause\nMatch",
-            text_color=self.TEXT,
-            command=lambda: self.core.pause_match(), **_tb,
-        ).grid(row=1, column=0, sticky="nsew", padx=(0, 4))
-
-        ctk.CTkButton(
-            _qa, text="▶  Unpause\nMatch",
-            text_color=self.TEXT,
-            command=lambda: self.core.unpause_match(), **_tb,
-        ).grid(row=1, column=1, sticky="nsew", padx=(0, 4))
-
-        # Placeholder tile (reserved for future action)
-        ctk.CTkFrame(
-            _qa, fg_color=self.DEEP, corner_radius=10,
-            border_width=1, border_color=self.BORDER,
-        ).grid(row=1, column=2, sticky="nsew")
-
-    # ── TAB: Players ──────────────────────────────────────────────────────────
-
-    def _build_tab_players(self, parent: ctk.CTkFrame) -> None:
-        # Header row: refresh + auto-refresh
-        hdr = ctk.CTkFrame(parent, fg_color="transparent")
-        hdr.pack(fill="x", padx=12, pady=(10, 4))
-        ctk.CTkButton(
-            hdr, text="↺ Refresh", width=90, height=28,
-            fg_color=self.BORDER, hover_color="#2a2a40",
-            text_color=self.SUB, font=ctk.CTkFont(size=12),
-            corner_radius=6, command=self._refresh_players,
-        ).pack(side="left")
-        self._auto_refresh_var = ctk.BooleanVar(value=False)
-        ctk.CTkCheckBox(
-            hdr, text="Auto (10s)", variable=self._auto_refresh_var,
-            text_color=self.SUB, font=ctk.CTkFont(size=12),
-            fg_color=self.ACCENT, hover_color=self.ACCENT_H,
-            border_color=self.BORDER, checkmark_color="#0d0d14",
-            command=self._toggle_auto_refresh,
-        ).pack(side="left", padx=(10, 0))
-
-        self._player_status_lbl = ctk.CTkLabel(
-            parent, text="", text_color=self.SUB, font=ctk.CTkFont(size=12))
-        self._player_status_lbl.pack(anchor="w", padx=12, pady=(0, 4))
-
-        # Scrollable player list
-        self._player_scroll = ctk.CTkScrollableFrame(
-            parent, fg_color=self.DEEP, corner_radius=8, height=140)
-        self._player_scroll.pack(fill="x", padx=12, pady=(0, 8))
-        self._player_rows: list[ctk.CTkFrame] = []
-
-        ctk.CTkFrame(parent, fg_color=self.BORDER, height=1,
-                     corner_radius=0).pack(fill="x", padx=12, pady=(0, 8))
-
-        ctk.CTkLabel(parent, text="BAN MANAGEMENT",
-                     font=ctk.CTkFont(size=11, weight="bold"),
-                     text_color=self.SUB).pack(anchor="w", padx=12, pady=(0, 4))
-
-        # Manual ban row
-        ban_row = ctk.CTkFrame(parent, fg_color="transparent")
-        ban_row.pack(fill="x", padx=12, pady=(0, 4))
-        self._ban_id_var = ctk.StringVar()
-        ctk.CTkEntry(
-            ban_row, textvariable=self._ban_id_var,
-            placeholder_text="SteamID to ban…",
-            fg_color=self.DEEP, border_color=self.BORDER,
-            text_color=self.TEXT, placeholder_text_color=self.SUB,
-            font=ctk.CTkFont(size=12),
-        ).pack(side="left", fill="x", expand=True)
-        ctk.CTkButton(
-            ban_row, text="Ban", width=60, height=32,
-            fg_color=self.STOP, hover_color=self.STOP_H,
-            font=ctk.CTkFont(size=12, weight="bold"),
-            command=self._manual_ban,
-        ).pack(side="right", padx=(5, 0))
-
-        ctk.CTkButton(
-            parent, text="↺ Refresh Ban List", height=28,
-            fg_color=self.BORDER, hover_color="#2a2a40",
-            text_color=self.SUB, font=ctk.CTkFont(size=12),
-            corner_radius=6, command=self._refresh_ban_list,
-        ).pack(fill="x", padx=12, pady=(0, 4))
-
-        self._ban_scroll = ctk.CTkScrollableFrame(
-            parent, fg_color=self.DEEP, corner_radius=8, height=100)
-        self._ban_scroll.pack(fill="x", padx=12, pady=(0, 8))
-        self._ban_rows: list[ctk.CTkFrame] = []
-        self._auto_refresh_after: str | None = None
-
-    # ── TAB: Config ───────────────────────────────────────────────────────────
-
-    def _build_tab_config(self, parent: ctk.CTkFrame) -> None:
-        scroll = ctk.CTkScrollableFrame(parent, fg_color="transparent")
-        scroll.pack(fill="both", expand=True, padx=0, pady=0)
-        p = scroll   # alias
-
-        ctk.CTkLabel(p, text="INSTALL LOCATION",
-                     font=ctk.CTkFont(size=11, weight="bold"),
-                     text_color=self.SUB).pack(anchor="w", padx=12, pady=(10, 4))
-
-        ctk.CTkLabel(p, text="CS2 Server Directory  (folder containing steamcmd.exe)",
-                     font=ctk.CTkFont(size=12), text_color=self.TEXT,
-                     anchor="w").pack(fill="x", padx=12)
-        dir_row = ctk.CTkFrame(p, fg_color="transparent")
-        dir_row.pack(fill="x", padx=12, pady=(2, 6))
-        self._server_dir_var = ctk.StringVar(value=self.core.server_dir)
-        ctk.CTkEntry(dir_row, textvariable=self._server_dir_var,
-                     placeholder_text=r"e.g. C:\cs2server",
-                     fg_color=self.DEEP, border_color=self.BORDER,
-                     text_color=self.TEXT, placeholder_text_color=self.SUB,
-                     font=ctk.CTkFont(size=12),
-                     ).pack(side="left", fill="x", expand=True)
-        ctk.CTkButton(
-            dir_row, text="Browse", width=72, height=30,
-            fg_color=self.BORDER, hover_color="#2a2a40",
-            text_color=self.TEXT, font=ctk.CTkFont(size=11),
-            command=self._browse_server_dir,
-        ).pack(side="right", padx=(5, 0))
-
-        ctk.CTkButton(
-            p, text="⬇  Install / Reinstall CS2 Server",
-            height=30, corner_radius=6,
-            fg_color=self.BORDER, hover_color="#2a2a40",
-            text_color=self.SUB, font=ctk.CTkFont(size=12),
-            command=self._install_server,
-        ).pack(fill="x", padx=12, pady=(4, 8))
-
-        ctk.CTkFrame(p, fg_color=self.BORDER, height=1,
-                     corner_radius=0).pack(fill="x", padx=12, pady=(0, 8))
-
-        ctk.CTkLabel(p, text="SERVER SETTINGS",
-                     font=ctk.CTkFont(size=11, weight="bold"),
-                     text_color=self.SUB).pack(anchor="w", padx=12, pady=(0, 4))
-
-        ctk.CTkLabel(p, text="Server Hostname",
-                     font=ctk.CTkFont(size=12), text_color=self.TEXT,
-                     anchor="w").pack(fill="x", padx=12)
-        self._hostname_var = ctk.StringVar(value=self.core.hostname)
-        ctk.CTkEntry(p, textvariable=self._hostname_var,
-                     fg_color=self.DEEP, border_color=self.BORDER,
-                     text_color=self.TEXT, font=ctk.CTkFont(size=12),
-                     ).pack(fill="x", padx=12, pady=(2, 6))
-
-        ctk.CTkLabel(p, text="Server Password  (blank = public)",
-                     font=ctk.CTkFont(size=12), text_color=self.TEXT,
-                     anchor="w").pack(fill="x", padx=12)
-        pw_row = ctk.CTkFrame(p, fg_color="transparent")
-        pw_row.pack(fill="x", padx=12, pady=(2, 6))
-        self._svpw_var = ctk.StringVar(value=self.core.sv_password)
-        ctk.CTkEntry(pw_row, textvariable=self._svpw_var, show="●",
-                     fg_color=self.DEEP, border_color=self.BORDER,
-                     text_color=self.TEXT, font=ctk.CTkFont(size=12),
-                     ).pack(side="left", fill="x", expand=True)
-        ctk.CTkButton(
-            pw_row, text="Set Live", width=72, height=30,
-            fg_color=self.BLUE, hover_color=self.BLUE_H,
-            font=ctk.CTkFont(size=11, weight="bold"),
-            command=self._set_sv_password_live,
-        ).pack(side="right", padx=(5, 0))
-
-        ctk.CTkLabel(p, text="Game Server Login Token  (GSLT — required for workshop maps)",
-                     font=ctk.CTkFont(size=12), text_color=self.TEXT,
-                     anchor="w").pack(fill="x", padx=12)
-        self._gslt_var = ctk.StringVar(value=self.core.gslt_token)
-        ctk.CTkEntry(p, textvariable=self._gslt_var, show="●",
-                     placeholder_text="Get one at steamcommunity.com/dev/managegameservers",
-                     fg_color=self.DEEP, border_color=self.BORDER,
-                     text_color=self.TEXT, placeholder_text_color=self.SUB,
-                     font=ctk.CTkFont(size=12),
-                     ).pack(fill="x", padx=12, pady=(2, 6))
-
-        ctk.CTkLabel(p, text="Max Players Override  (blank = mode default)",
-                     font=ctk.CTkFont(size=12), text_color=self.TEXT,
-                     anchor="w").pack(fill="x", padx=12)
-        self._maxp_var = ctk.StringVar(value=self.core.max_players_override)
-        ctk.CTkEntry(p, textvariable=self._maxp_var,
-                     placeholder_text="e.g. 16",
-                     fg_color=self.DEEP, border_color=self.BORDER,
-                     text_color=self.TEXT, placeholder_text_color=self.SUB,
-                     font=ctk.CTkFont(size=12),
-                     ).pack(fill="x", padx=12, pady=(2, 6))
-
-        # Checkboxes row
-        chk_row = ctk.CTkFrame(p, fg_color="transparent")
-        chk_row.pack(fill="x", padx=12, pady=(0, 6))
-        self._tick128_var = ctk.BooleanVar(value=self.core.tickrate_128)
-        ctk.CTkCheckBox(
-            chk_row,
-            text="Tickrate 128  (legacy, subtick handles timing)",
-            variable=self._tick128_var,
-            text_color=self.TEXT, font=ctk.CTkFont(size=12),
-            fg_color=self.ACCENT, hover_color=self.ACCENT_H,
-            border_color=self.BORDER, checkmark_color="#0d0d14",
-        ).pack(side="left", padx=(0, 20))
-        self._autostart_var = ctk.BooleanVar(value=self.core.auto_start)
-        ctk.CTkCheckBox(
-            chk_row, text="Auto-start on launch", variable=self._autostart_var,
-            text_color=self.TEXT, font=ctk.CTkFont(size=12),
-            fg_color=self.ACCENT, hover_color=self.ACCENT_H,
-            border_color=self.BORDER, checkmark_color="#0d0d14",
-        ).pack(side="left")
-
-        ctk.CTkButton(
-            p, text="💾  Save Settings", height=34, corner_radius=8,
-            fg_color=self.ACCENT, hover_color=self.ACCENT_H,
-            text_color="#0d0d14", font=ctk.CTkFont(size=12, weight="bold"),
-            command=self._save_server_settings,
-        ).pack(fill="x", padx=12, pady=(0, 10))
-
-        ctk.CTkFrame(p, fg_color=self.BORDER, height=1,
-                     corner_radius=0).pack(fill="x", padx=12, pady=(0, 8))
-
-        ctk.CTkLabel(p, text="BOTS",
-                     font=ctk.CTkFont(size=11, weight="bold"),
-                     text_color=self.SUB).pack(anchor="w", padx=12, pady=(0, 4))
-
-        bot_row = ctk.CTkFrame(p, fg_color="transparent")
-        bot_row.pack(fill="x", padx=12, pady=(0, 4))
-        _bb = {"height": 30, "corner_radius": 6,
-               "fg_color": self.BORDER, "hover_color": "#2a2a40",
-               "text_color": self.TEXT, "font": ctk.CTkFont(size=12, weight="bold")}
-        ctk.CTkButton(bot_row, text="+1 Bot",
-                      command=lambda: self.core.add_bots(1), **_bb,
-                      ).pack(side="left", fill="x", expand=True, padx=(0, 4))
-        ctk.CTkButton(bot_row, text="+5 Bots",
-                      command=lambda: self.core.add_bots(5), **_bb,
-                      ).pack(side="left", fill="x", expand=True, padx=(0, 4))
-        ctk.CTkButton(bot_row, text="Kick All",
-                      fg_color=self.STOP, hover_color=self.STOP_H,
-                      text_color=self.TEXT, font=ctk.CTkFont(size=12, weight="bold"),
-                      height=30, corner_radius=6,
-                      command=self.core.kick_bots,
-                      ).pack(side="left", fill="x", expand=True)
-
-        ctk.CTkLabel(p, text="Bot Difficulty",
-                     font=ctk.CTkFont(size=12), text_color=self.TEXT,
-                     anchor="w").pack(fill="x", padx=12, pady=(4, 2))
-        self._bot_diff_var = ctk.StringVar(value=self.core.bot_difficulty)
-        ctk.CTkComboBox(
-            p, values=["Easy", "Normal", "Hard", "Expert"],
-            variable=self._bot_diff_var,
-            fg_color=self.DEEP, button_color=self.BORDER,
-            border_color=self.BORDER, dropdown_fg_color=self.CARD,
-            dropdown_hover_color=self.BORDER, text_color=self.TEXT,
-            dropdown_text_color=self.TEXT, button_hover_color="#2a2a40",
-            font=ctk.CTkFont(size=12),
-            command=lambda v: setattr(self.core, "bot_difficulty", v),
-        ).pack(fill="x", padx=12, pady=(0, 10))
-
-        ctk.CTkFrame(p, fg_color=self.BORDER, height=1,
-                     corner_radius=0).pack(fill="x", padx=12, pady=(0, 8))
-
-        ctk.CTkLabel(p, text="CONFIG PRESETS",
-                     font=ctk.CTkFont(size=11, weight="bold"),
-                     text_color=self.SUB).pack(anchor="w", padx=12, pady=(0, 4))
-
-        preset_save_row = ctk.CTkFrame(p, fg_color="transparent")
-        preset_save_row.pack(fill="x", padx=12, pady=(0, 4))
-        self._preset_name_var = ctk.StringVar()
-        ctk.CTkEntry(
-            preset_save_row, textvariable=self._preset_name_var,
-            placeholder_text="Preset name…",
-            fg_color=self.DEEP, border_color=self.BORDER,
-            text_color=self.TEXT, placeholder_text_color=self.SUB,
-            font=ctk.CTkFont(size=12),
-        ).pack(side="left", fill="x", expand=True)
-        ctk.CTkButton(
-            preset_save_row, text="Save", width=60, height=30,
-            fg_color=self.ACCENT, hover_color=self.ACCENT_H,
-            text_color="#0d0d14", font=ctk.CTkFont(size=12, weight="bold"),
-            command=self._save_preset,
-        ).pack(side="right", padx=(5, 0))
-
-        preset_load_row = ctk.CTkFrame(p, fg_color="transparent")
-        preset_load_row.pack(fill="x", padx=12, pady=(0, 6))
-        preset_names = list(self.core.presets.keys()) or [""]
-        self._preset_sel_var = ctk.StringVar(value=preset_names[0])
-        self._preset_cb = ctk.CTkComboBox(
-            preset_load_row, values=preset_names,
-            variable=self._preset_sel_var,
-            fg_color=self.DEEP, button_color=self.BORDER,
-            border_color=self.BORDER, dropdown_fg_color=self.CARD,
-            dropdown_hover_color=self.BORDER, text_color=self.TEXT,
-            dropdown_text_color=self.TEXT, button_hover_color="#2a2a40",
-            font=ctk.CTkFont(size=12),
-        )
-        self._preset_cb.pack(side="left", fill="x", expand=True)
-        ctk.CTkButton(
-            preset_load_row, text="Load", width=55, height=30,
-            fg_color=self.BLUE, hover_color=self.BLUE_H,
-            font=ctk.CTkFont(size=12, weight="bold"),
-            command=self._load_preset,
-        ).pack(side="right", padx=(5, 0))
-        ctk.CTkButton(
-            preset_load_row, text="Del", width=40, height=30,
-            fg_color=self.STOP, hover_color=self.STOP_H,
-            font=ctk.CTkFont(size=12, weight="bold"),
-            command=self._delete_preset,
-        ).pack(side="right", padx=(5, 0))
-
-    # ── TAB: Console ──────────────────────────────────────────────────────────
-
-    def _build_tab_console(self, parent: ctk.CTkFrame) -> None:
-        self._rcon_box = ctk.CTkTextbox(
-            parent, fg_color=self.DEEP, text_color="#a8c4bf",
-            font=ctk.CTkFont(family="Consolas", size=12),
-            state="disabled", wrap="word",
-        )
-        self._rcon_box.pack(fill="both", expand=True, padx=12, pady=(10, 6))
-
-        cmd_row = ctk.CTkFrame(parent, fg_color="transparent")
-        cmd_row.pack(fill="x", padx=12, pady=(0, 6))
-        self._rcon_var = ctk.StringVar()
-        rcon_ent = ctk.CTkEntry(
-            cmd_row, textvariable=self._rcon_var,
-            placeholder_text="Enter RCON command…",
-            fg_color=self.DEEP, border_color=self.BORDER,
-            text_color=self.TEXT, placeholder_text_color=self.SUB,
-            font=ctk.CTkFont(size=13),
-        )
-        rcon_ent.pack(side="left", fill="x", expand=True)
-        rcon_ent.bind("<Return>", lambda _e: self._send_rcon())
-        ctk.CTkButton(
-            cmd_row, text="SEND", width=72, height=34,
-            fg_color=self.BLUE, hover_color=self.BLUE_H,
-            font=ctk.CTkFont(size=12, weight="bold"),
-            command=self._send_rcon,
-        ).pack(side="right", padx=(6, 0))
-
-        ctk.CTkButton(
-            parent, text=f"⚑  TEST RCON  ({RCON_HOST}:{RCON_PORT})",
-            height=30, corner_radius=6,
-            fg_color=self.BORDER, hover_color="#2a2a40",
-            text_color=self.SUB, font=ctk.CTkFont(size=12),
-            command=self._test_rcon,
-        ).pack(fill="x", padx=12, pady=(0, 10))
-
-    # ── widget helpers ────────────────────────────────────────────────────────
-
-    def _sec(self, parent: ctk.CTkFrame, title: str) -> None:
-        row = ctk.CTkFrame(parent, fg_color="transparent")
-        row.pack(fill="x", padx=14, pady=(8, 4))
-        ctk.CTkFrame(row, fg_color=self.ACCENT, width=3,
-                     corner_radius=2).pack(side="left", fill="y", padx=(0, 8))
-        ctk.CTkLabel(row, text=title,
-                     font=ctk.CTkFont(size=11, weight="bold"),
-                     text_color=self.SUB).pack(side="left")
-
-    def _sec_sub(self, parent: ctk.CTkFrame, title: str) -> None:
-        row = ctk.CTkFrame(parent, fg_color="transparent")
-        row.pack(fill="x", padx=14, pady=(2, 4))
-        ctk.CTkFrame(row, fg_color=self.ACCENT, width=3,
-                     corner_radius=2).pack(side="left", fill="y", padx=(0, 8))
-        ctk.CTkLabel(row, text=title,
-                     font=ctk.CTkFont(size=11, weight="bold"),
-                     text_color=self.SUB).pack(side="left")
-
-    def _lbl(self, parent: ctk.CTkFrame, text: str) -> None:
-        ctk.CTkLabel(parent, text=text,
-                     font=ctk.CTkFont(size=13),
-                     text_color=self.TEXT).pack(anchor="w", padx=14, pady=(4, 2))
-
     # ── log / RCON output ─────────────────────────────────────────────────────
 
     def _append_log(self, entry: str) -> None:
@@ -1773,32 +1130,33 @@ class CS2GUI:
     def _make_top_glow_image(self, w: int, h: int) -> ctk.CTkImage:
         """Render a soft horizontal violet glow that fades into the background.
 
-        Centred on the screen — peak ACCENT alpha at the middle, fading to BG
-        at the left/right edges and vertically.  Gives the window an ambient
-        purple aura along the top instead of a hard accent line.
+        Cosine-bell horizontal falloff × linear vertical falloff, blended
+        from BG → ACCENT.  Pixels are written through a single bytearray
+        and handed to Image.frombytes — ~10× faster than per-pixel
+        draw.point() calls.
         """
-        # Parse hex colours into RGB tuples
         def _hex(c: str) -> tuple[int, int, int]:
             c = c.lstrip("#")
             return (int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16))
-        bg     = _hex(self.BG)
-        accent = _hex(self.ACCENT)
+        br, bgn, bb     = _hex(self.BG)
+        ar, ag, ab      = _hex(self.ACCENT)
+        cx              = w / 2.0
+        denom           = max(h - 1, 1)
 
-        img  = Image.new("RGB", (w, h))
-        draw = ImageDraw.Draw(img)
-        cx   = w / 2
-        for x in range(w):
-            # Horizontal cosine-bell falloff: 1.0 at centre, ~0 at edges
-            dx = abs(x - cx) / cx
-            hfall = max(0.0, 1.0 - dx * dx)
-            for y in range(h):
-                # Vertical falloff: brightest at top, fading to BG by row h
-                vfall = 1.0 - (y / max(h - 1, 1))
-                mix   = hfall * vfall * 0.55   # cap intensity so it stays subtle
-                r = int(bg[0] * (1 - mix) + accent[0] * mix)
-                g = int(bg[1] * (1 - mix) + accent[1] * mix)
-                b = int(bg[2] * (1 - mix) + accent[2] * mix)
-                draw.point((x, y), fill=(r, g, b))
+        # Pre-compute horizontal falloff once; per-row only multiplies by vfall.
+        hfall = [max(0.0, 1.0 - ((abs(x - cx) / cx) ** 2)) for x in range(w)]
+        buf   = bytearray(w * h * 3)
+        for y in range(h):
+            vfall = (1.0 - y / denom) * 0.55
+            row_off = y * w * 3
+            for x in range(w):
+                m = hfall[x] * vfall
+                inv = 1.0 - m
+                i = row_off + x * 3
+                buf[i]     = int(br  * inv + ar * m)
+                buf[i + 1] = int(bgn * inv + ag * m)
+                buf[i + 2] = int(bb  * inv + ab * m)
+        img = Image.frombytes("RGB", (w, h), bytes(buf))
         return ctk.CTkImage(img, size=(w, h))
 
     def _make_placeholder_image(self, map_id: str) -> ctk.CTkImage:
@@ -1892,6 +1250,9 @@ class CS2GUI:
         img = self._get_map_image(map_id)
         img_lbl = ctk.CTkLabel(card, text="", image=img, fg_color="transparent")
         img_lbl.pack(padx=5, pady=(5, 0))
+        # Stash image-label ref on the card so _refresh_official_card_image
+        # can swap the image in without poking CTk-internal attributes.
+        card._img_lbl = img_lbl  # type: ignore[attr-defined]
         # Display the raw map_id (de_dust2, de_inferno…) like the mockup
         ctk.CTkLabel(
             card, text=map_id,
@@ -1943,13 +1304,11 @@ class CS2GUI:
         card = self._map_cards.get(map_id)
         if not card:
             return
+        img_lbl = getattr(card, "_img_lbl", None)
+        if img_lbl is None:
+            return
         try:
-            img = self._get_map_image(map_id)
-            for child in card.winfo_children():
-                if (isinstance(child, ctk.CTkLabel)
-                        and getattr(child, "_image", None) is not None):
-                    child.configure(image=img)
-                    break
+            img_lbl.configure(image=self._get_map_image(map_id))
         except Exception:
             pass
 
@@ -2027,6 +1386,8 @@ class CS2GUI:
         img = self._get_workshop_image(wid)
         img_lbl = ctk.CTkLabel(img_wrap, text="", image=img, fg_color="transparent")
         img_lbl.pack()
+        # Stash for _refresh_workshop_card_image (avoids poking CTk internals)
+        card._img_lbl = img_lbl  # type: ignore[attr-defined]
         # Steam workshop icon: small circular badge with a wrench/gear glyph
         badge = ctk.CTkLabel(
             img_wrap, text="⚒",
@@ -2128,13 +1489,11 @@ class CS2GUI:
         card = self._wk_cards.get(label)
         if not card:
             return
+        img_lbl = getattr(card, "_img_lbl", None)
+        if img_lbl is None:
+            return
         try:
-            img = self._get_workshop_image(wid)
-            # The first packed child of a workshop card is the image label
-            for child in card.winfo_children():
-                if isinstance(child, ctk.CTkLabel) and getattr(child, "_image", None) is not None:
-                    child.configure(image=img)
-                    break
+            img_lbl.configure(image=self._get_workshop_image(wid))
         except Exception:
             pass
 

@@ -3,7 +3,7 @@
 A desktop GUI for managing a **Counter-Strike 2 dedicated server** on Windows.  
 Built with Python + CustomTkinter. No installer required — single `.exe` you drop on any machine.
 
-> **Status: v0.5.0 — work in progress.** Core features are working; expect rough edges.
+> **Status: v0.7.5 — work in progress.** Core features are working; expect rough edges.
 
 ---
 
