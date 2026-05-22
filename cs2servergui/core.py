@@ -327,6 +327,19 @@ class AppCore:
             pass
         return None
 
+    def _installed_beta_key(self) -> str:
+        """Return the BetaKey stored in appmanifest, or '' for public branch."""
+        manifest = os.path.join(
+            _config.CS2_SERVER_DIR, "steamapps", f"appmanifest_{CS2_APP_ID}.acf"
+        )
+        try:
+            with open(manifest, encoding="utf-8") as f:
+                content = f.read()
+            m = re.search(r'"BetaKey"\s+"([^"]*)"', content)
+            return m.group(1).strip() if m else ""
+        except Exception:
+            return ""
+
     def check_update(self) -> None:
         def _do() -> None:
             from .config import APP_VERSION
@@ -336,7 +349,15 @@ class AppCore:
                 if self.on_update_checked:
                     self.on_update_checked(False, "unknown", "unknown")
                 return
-            self.log(f"Update check: installed build = {build}")
+            beta_key = self._installed_beta_key()
+            branch_label = f"beta:{beta_key}" if beta_key else "public"
+            self.log(f"Update check: installed build = {build}  branch = {branch_label}")
+            if beta_key:
+                self.log(
+                    f"  ⚠  Server is on beta branch '{beta_key}' — "
+                    "this will cause 'client out of date' errors.  "
+                    "Run Update to switch to the public branch."
+                )
             try:
                 # api.steamcmd.net mirrors steamcmd's own app-info cache and
                 # returns the public-branch buildid in the same units as the
@@ -472,6 +493,48 @@ class AppCore:
 
         threading.Thread(target=_do, daemon=True).start()
 
+    # ── appmanifest branch helper ─────────────────────────────────────────────
+
+    def _fix_appmanifest_branch(self) -> str:
+        """Read appmanifest_<appid>.acf, report and clear any non-public BetaKey.
+
+        steamcmd respects the BetaKey stored in the appmanifest even when no
+        -beta flag is passed on the command line.  If the manifest was ever
+        written with a beta key (by a prior manual steamcmd session, a Valve
+        default, or any other tool), every subsequent update silently stays on
+        that beta branch.  Clearing it here before steamcmd runs guarantees we
+        get the public release.
+
+        Returns a human-readable status string for the log.
+        """
+        manifest = os.path.join(
+            _config.CS2_SERVER_DIR, "steamapps",
+            f"appmanifest_{CS2_APP_ID}.acf",
+        )
+        if not os.path.exists(manifest):
+            return "appmanifest not found — will be created on install"
+        try:
+            with open(manifest, encoding="utf-8") as f:
+                content = f.read()
+            m = re.search(r'"BetaKey"\s+"([^"]*)"', content)
+            beta_key = m.group(1).strip() if m else ""
+            if beta_key:
+                # Clear the value in-place so steamcmd sees an empty branch key
+                content = re.sub(
+                    r'("BetaKey"\s+")[^"]*(")',
+                    r"\1\2",
+                    content,
+                )
+                with open(manifest, "w", encoding="utf-8") as f:
+                    f.write(content)
+                return (
+                    f"⚠  BetaKey was '{beta_key}' — cleared. "
+                    "steamcmd will now pull the public branch."
+                )
+            return f"BetaKey is empty — already targeting public branch"
+        except Exception as exc:
+            return f"appmanifest read/write failed: {exc}"
+
     def run_update(self, on_done: Callable | None = None) -> None:
         if self.running:
             self.log("Stop the server before updating.")
@@ -485,6 +548,14 @@ class AppCore:
             self.log(f"  steamcmd    → {_config.STEAMCMD_PATH}")
             self.log(f"  install dir → {_config.CS2_SERVER_DIR}")
             self.log("─" * 48)
+
+            # ── Step 0: guarantee the public branch ──────────────────────────
+            # steamcmd honours the BetaKey inside appmanifest_730.acf even if
+            # no -beta flag is given on the command line.  Patch it first so
+            # the update always installs from the public (stable) channel.
+            branch_status = self._fix_appmanifest_branch()
+            self.log(f"  Branch check: {branch_status}")
+
             self.log("Launching steamcmd…")
             self.log("  Phase 1 — steamcmd initialises itself  (10–30 s, no output)")
             self.log("  Phase 2 — login anonymous")

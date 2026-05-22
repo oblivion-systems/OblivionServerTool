@@ -42,7 +42,7 @@ DEPOTDL_RELEASE_URL = (
 # ── App self-update ────────────────────────────────────────────────────────────
 # Bump APP_VERSION before each release tag, then push and create a GitHub
 # release tagged "v<APP_VERSION>" — all connected clients will see the update.
-APP_VERSION      = "0.7.5"
+APP_VERSION      = "0.8"
 APP_REPO         = "jacquesvniekerk-eng/OblivionServerTool"
 APP_RELEASES_URL = f"https://github.com/{APP_REPO}/releases/latest"
 APP_API_URL      = f"https://api.github.com/repos/{APP_REPO}/releases/latest"
@@ -108,6 +108,7 @@ _CONFIG_FILE = os.path.join(_APP_DIR, "oblivion_config.json")
 OFFICIAL_MAPS = [
     "de_dust2", "de_mirage", "de_inferno", "de_nuke",
     "de_ancient", "de_anubis", "de_vertigo", "de_cache",
+    "de_overpass", "de_train",
 ]
 
 GAME_MODES = [
