@@ -149,6 +149,10 @@ class CS2GUI:
         # Set initial button state from saved config
         self._update_steam_btn()
 
+        # Probe for an already-running server (GUI closed and reopened while
+        # cs2.exe was still up).  Delayed slightly so the first paint completes.
+        self.root.after(800, self.core.probe_existing_server)
+
         # First-run: prompt for server directory if not yet configured
         if not self.core.server_dir:
             self.root.after(200, self._show_setup_dialog)

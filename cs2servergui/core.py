@@ -239,11 +239,81 @@ class AppCore:
                 self.log("Server did not exit cleanly — killing process")
                 self.proc.kill()
             self.proc = None
+        elif self.running:
+            # Reattached session — no Popen handle.
+            # Ask the server to quit via RCON; fall back to taskkill if needed.
+            self.log("Stopping reattached server…")
+            try:
+                self.rcon.execute("quit")
+                time.sleep(1)
+            except Exception:
+                pass
+            # Confirm it's gone; if cs2.exe is still in the process list, force-kill.
+            try:
+                chk = subprocess.run(
+                    ["tasklist", "/FI", "IMAGENAME eq cs2.exe", "/NH", "/FO", "CSV"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                if "cs2.exe" in chk.stdout.lower():
+                    subprocess.run(
+                        ["taskkill", "/F", "/IM", "cs2.exe"],
+                        capture_output=True, timeout=5,
+                    )
+            except Exception:
+                pass
         self.running    = False
         self.boot_state = "offline"
         self.log("Server stopped")
         if self.on_state_change:
             self.on_state_change()
+
+    def probe_existing_server(self) -> None:
+        """Detect a CS2 server that was already running when the GUI launched.
+
+        Workflow:
+          1. tasklist — fast OS check; bail immediately if cs2.exe isn't there.
+          2. RCON status — confirm it's our server and pull the current map.
+          3. If both succeed → mark running/ready and fire on_state_change.
+
+        Runs on a daemon thread so it never blocks the UI.
+        """
+        def _do() -> None:
+            # ── 1. OS process check ───────────────────────────────────────────
+            try:
+                res = subprocess.run(
+                    ["tasklist", "/FI", "IMAGENAME eq cs2.exe",
+                     "/NH", "/FO", "CSV"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                if "cs2.exe" not in res.stdout.lower():
+                    return   # nothing running — normal cold start
+            except Exception:
+                return
+
+            # ── 2. RCON handshake ─────────────────────────────────────────────
+            self.log("Detected running CS2 process — attempting to reconnect…")
+            try:
+                out = self.rcon.execute("status")
+            except Exception as exc:
+                self.log(f"CS2 process found but RCON not reachable: {exc}")
+                return
+
+            # ── 3. Mark as running and parse current map ──────────────────────
+            self.running    = True
+            self.boot_state = "ready"
+
+            map_m = re.search(r"^map\s*:\s*(\S+)", out,
+                              re.MULTILINE | re.IGNORECASE)
+            if map_m:
+                self.current_map = map_m.group(1).split()[0]  # strip trailing junk
+
+            self.log(
+                f"Reconnected to existing server  |  map: {self.current_map}"
+            )
+            if self.on_state_change:
+                self.on_state_change()
+
+        threading.Thread(target=_do, daemon=True).start()
 
     def _poll_rcon_ready(self) -> None:
         """Probe RCON every 3 s; mark server ready when it responds."""
