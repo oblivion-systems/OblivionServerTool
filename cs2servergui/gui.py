@@ -208,19 +208,19 @@ class CS2GUI:
         brand.pack(fill="x", padx=14, pady=(20, 4))
         logo = ctk.CTkLabel(
             brand, text="CS",
-            width=34, height=34, corner_radius=10,
+            width=38, height=38, corner_radius=10,
             fg_color=self.ACCENT, text_color="#ffffff",
-            font=ctk.CTkFont(size=12, weight="bold"),
+            font=ctk.CTkFont(size=14, weight="bold"),
         )
         logo.pack(side="left", padx=(0, 10))
         title_col = ctk.CTkFrame(brand, fg_color="transparent")
         title_col.pack(side="left", fill="x", expand=True)
         ctk.CTkLabel(title_col, text="OBLIVION",
-                     font=ctk.CTkFont(size=14, weight="bold"),
+                     font=ctk.CTkFont(size=16, weight="bold"),
                      text_color=self.TEXT, anchor="w").pack(fill="x")
         ctk.CTkLabel(title_col, text="SERVER TOOL",
-                     font=ctk.CTkFont(size=9, weight="bold"),
-                     text_color=self.DIM, anchor="w").pack(fill="x")
+                     font=ctk.CTkFont(size=10, weight="bold"),
+                     text_color=self.SUB, anchor="w").pack(fill="x")
 
         # App update notification (hidden until found)
         self._app_upd_lbl = ctk.CTkLabel(
@@ -235,8 +235,8 @@ class CS2GUI:
                      corner_radius=0).pack(fill="x", padx=14, pady=(14, 6))
 
         ctk.CTkLabel(parent, text="NAVIGATION",
-                     font=ctk.CTkFont(size=9, weight="bold"),
-                     text_color=self.DIM, anchor="w").pack(fill="x", padx=16, pady=(0, 4))
+                     font=ctk.CTkFont(size=10, weight="bold"),
+                     text_color=self.SUB, anchor="w").pack(fill="x", padx=16, pady=(2, 6))
 
         # Navigation buttons
         self._nav_btns: dict[str, ctk.CTkButton] = {}
@@ -248,11 +248,11 @@ class CS2GUI:
         ]
         for pid, label in _nav:
             btn = ctk.CTkButton(
-                parent, text=label, anchor="w", height=40,
+                parent, text=label, anchor="w", height=42,
                 corner_radius=10, border_width=1,
                 fg_color="transparent", hover_color=self.BORDER,
                 border_color=self.SIDE,
-                text_color=self.SUB, font=ctk.CTkFont(size=13),
+                text_color=self.SUB, font=ctk.CTkFont(size=14, weight="bold"),
                 command=lambda p=pid: self._show_page(p),
             )
             btn.pack(fill="x", padx=10, pady=3)
@@ -451,13 +451,16 @@ class CS2GUI:
             btn.grid(row=row, column=col, sticky="nsew", padx=padx, pady=pady)
             return btn
 
-        self._ff_btn = _tile(0, 0, "🔥\nFF OFF", self.ORANGE,
-                              self._toggle_ff, text_color=self.SUB)
-        _tile(0, 1, "↺\nRestart", self.BLUE,  self.core.restart_round)
-        _tile(0, 2, "⏩\nWarmup",  self.GREEN, self.core.end_warmup)
-        _tile(1, 0, "⏸\nPause",   "#facc15",  self.core.pause_match)
-        _tile(1, 1, "▶\nUnpause", self.ACCENT, self.core.unpause_match)
-        _tile(1, 2, "🤖\nKick Bots", self.STOP, self.core.kick_bots)
+        # Symbol set is intentionally non-emoji so every tile shares the same
+        # text-font rendering (color-emoji glyphs make 🔥 / 🤖 look chunkier
+        # and misaligned next to the Unicode arrows).
+        self._ff_btn = _tile(0, 0, "⊘\nFF OFF",   self.ORANGE,
+                              self._toggle_ff)
+        _tile(0, 1, "↺\nRestart",  self.BLUE,   self.core.restart_round)
+        _tile(0, 2, "⏵\nWarmup",   self.GREEN,  self.core.end_warmup)
+        _tile(1, 0, "▮▮\nPause",   "#facc15",   self.core.pause_match)
+        _tile(1, 1, "▶\nUnpause",  self.ACCENT, self.core.unpause_match)
+        _tile(1, 2, "✕\nKick Bots", self.STOP,   self.core.kick_bots)
 
     def _build_maps_col(self, parent: ctk.CTkFrame) -> None:
         """Centre column: mode picker + official map card grid + workshop picker."""
@@ -505,9 +508,9 @@ class CS2GUI:
         self._off_var = ctk.StringVar(value=OFFICIAL_MAPS[0])
         self._map_cards: dict[str, ctk.CTkFrame] = {}
 
-        # Official map scrollable card grid (taller — accommodates bigger thumbnails)
+        # Official map scrollable card grid — capped so launch chip stays in view
         self._off_scroll = ctk.CTkScrollableFrame(
-            p, height=380, fg_color=self.DEEP, corner_radius=10,
+            p, height=250, fg_color=self.DEEP, corner_radius=10,
             scrollbar_button_color=self.BORDER,
             scrollbar_button_hover_color="#2a2a40",
         )
@@ -524,6 +527,7 @@ class CS2GUI:
                                        font=ctk.CTkFont(size=12, weight="bold"),
                                        text_color=self.TEXT, anchor="w")
         self._wk_lbl_w.pack(side="left")
+        # Default to bright — _update_map_selection_ui keeps both headers equal
         ctk.CTkButton(
             wk_hdr, text="↺  Refresh", width=78, height=24,
             corner_radius=6,
@@ -547,9 +551,9 @@ class CS2GUI:
         # Not packed → invisible. Keeps `_apply_wk_filter`'s `.configure(values=…)`
         # calls safe to invoke without raising.
 
-        # Workshop card grid (scrollable, taller than official maps grid)
+        # Workshop card grid — same cap so the rest of the column stays visible
         self._wk_scroll = ctk.CTkScrollableFrame(
-            p, height=320, fg_color=self.DEEP, corner_radius=10,
+            p, height=210, fg_color=self.DEEP, corner_radius=10,
             scrollbar_button_color=self.BORDER,
             scrollbar_button_hover_color="#2a2a40",
         )
@@ -2251,6 +2255,11 @@ class CS2GUI:
         mode_var = getattr(self, "_mode_var", None)
         mode     = mode_var.get() if mode_var else ""
 
+        # Section headers stay equally bright — they're titles, not state cues.
+        # Which source is "active" is conveyed by the selected card border instead.
+        self._off_lbl_w.configure(text_color=self.TEXT)
+        self._wk_lbl_w.configure(text_color=self.TEXT)
+
         if self._map_source == "workshop":
             wk = self._wk_var.get().strip()
             # Strip "  [id]" suffix — map name alone is enough for the chip
@@ -2259,15 +2268,11 @@ class CS2GUI:
                 preview = f"▶  {wk_name}  ·  {mode}" if mode else f"▶  {wk_name}"
             else:
                 preview = "▶  (no workshop map selected)"
-            self._off_lbl_w.configure(text_color=self.SUB)
-            self._wk_lbl_w.configure(text_color=self.TEXT)
             self._set_official_active_style(False)
             self._set_workshop_active_style(True)
         else:
             off     = self._off_var.get().strip() or "—"
             preview = f"▶  {off}  ·  {mode}" if mode else f"▶  {off}"
-            self._off_lbl_w.configure(text_color=self.TEXT)
-            self._wk_lbl_w.configure(text_color=self.SUB)
             self._set_official_active_style(True)
             self._set_workshop_active_style(False)
 
@@ -3138,16 +3143,18 @@ class CS2GUI:
         new_state = not self.core._ff_enabled
         self.core.set_friendly_fire(new_state)
         if new_state:
+            # ON: orange fill, dark text — reads as "armed"
             self._ff_btn.configure(
-                text="🔥  Friendly Fire\nON",
+                text="⊙\nFF ON",
                 fg_color=self.ORANGE, hover_color="#d97706",
                 text_color="#0d0d14",
             )
         else:
+            # OFF: same neutral tile look as the other action buttons
             self._ff_btn.configure(
-                text="🔥  Friendly Fire\nOFF",
+                text="⊘\nFF OFF",
                 fg_color=self.DEEP, hover_color="#15151f",
-                text_color=self.SUB,
+                text_color=self.TEXT,
             )
 
     # ── server chat broadcast ─────────────────────────────────────────────────
