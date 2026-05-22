@@ -1132,10 +1132,48 @@ class AppCore:
         threading.Thread(target=_do, daemon=True).start()
 
     def get_ban_list(self, callback: Callable[[list[str]], None]) -> None:
+        """Return the server's current ban list.
+
+        Strategy (in order):
+          1. Read banned_user_ids.cfg from disk — works offline, always current.
+          2. Fall back to RCON 'listid' if the file doesn't exist yet (bans
+             not yet written) or the server is running and has in-memory bans.
+        """
         def _do() -> None:
+            # ── 1. Disk file ──────────────────────────────────────────────────
+            ban_file = os.path.join(
+                os.path.dirname(_config.CS2_ADDONS_DIR),
+                "banned_user_ids.cfg",
+            )
+            if os.path.exists(ban_file):
+                try:
+                    with open(ban_file, encoding="utf-8", errors="replace") as f:
+                        lines = [
+                            l.strip() for l in f
+                            if l.strip() and not l.strip().startswith("//")
+                        ]
+                    self.log(f"[bans] Read {len(lines)} ban(s) from {ban_file}")
+                    callback(lines)
+                    return
+                except Exception as exc:
+                    self.log(f"[bans] Could not read ban file: {exc}")
+
+            # ── 2. RCON listid ────────────────────────────────────────────────
+            if not self.running:
+                self.log("[bans] Server offline and no ban file found on disk")
+                callback([])
+                return
             try:
-                out   = self.rcon.execute("listid")
-                lines = [l.strip() for l in out.splitlines() if l.strip()]
+                out = self.rcon.execute("listid")
+                self.log(f"[bans] listid raw output:\n{out.strip() or '(empty)'}")
+                # Filter to lines that look like actual ban entries
+                # (skip header lines like "UserID filter list:" or "0 bans...")
+                lines = [
+                    l.strip() for l in out.splitlines()
+                    if l.strip() and re.search(
+                        r"(STEAM_|\\[U:|76561|BOT)", l, re.IGNORECASE
+                    )
+                ]
                 callback(lines)
             except Exception as exc:
                 self.log(f"get_ban_list error: {exc}")

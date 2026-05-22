@@ -2990,8 +2990,6 @@ class CS2GUI:
         self.core.ban_player(steamid, duration=0)
 
     def _refresh_ban_list(self) -> None:
-        if not self.core.running:
-            return
         self.core.get_ban_list(
             lambda entries: self.root.after(0, self._populate_ban_list, entries)
         )
@@ -3012,12 +3010,15 @@ class CS2GUI:
         for entry in entries:
             row = ctk.CTkFrame(self._ban_scroll, fg_color="transparent")
             row.pack(fill="x", pady=2)
-            ctk.CTkLabel(row, text=entry[:40],
+            ctk.CTkLabel(row, text=entry[:48],
                          text_color=self.TEXT, font=ctk.CTkFont(size=11),
                          anchor="w").pack(side="left", fill="x", expand=True)
-            # Try to extract STEAM_ id from entry string
-            sid_match = re.search(r'STEAM_\S+', entry)
-            sid = sid_match.group(0) if sid_match else entry.split()[0]
+            # Extract SteamID in any format CS2 may use:
+            #   STEAM_X:X:XXXXXXXX  |  [U:1:XXXXXXXX]  |  76561XXXXXXXXXXXX
+            sid_match = re.search(
+                r'(STEAM_\S+|\[U:[^\]]+\]|765\d{14,})', entry, re.IGNORECASE
+            )
+            sid = sid_match.group(0) if sid_match else entry.strip()
             ctk.CTkButton(
                 row, text="Unban", width=56, height=24,
                 fg_color=self.GREEN, hover_color="#16a34a",
