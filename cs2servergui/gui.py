@@ -1158,8 +1158,31 @@ class CS2GUI:
             text_color=self.SUB, font=ctk.CTkFont(size=12),
             command=self._check_map_updates,
         ).pack(fill="x", padx=12, pady=(0, 6))
+
+        ctk.CTkFrame(card, fg_color=self.BORDER, height=1,
+                     corner_radius=0).pack(fill="x", padx=12, pady=(0, 8))
+        ctk.CTkLabel(card, text="PLUGINS",
+                     font=ctk.CTkFont(size=11, weight="bold"),
+                     text_color=self.SUB).pack(anchor="w", padx=12, pady=(0, 4))
+        ctk.CTkLabel(
+            card,
+            text="Deploy copies bundled plugin files into the server.\n"
+                 "Run this before starting if you changed the game mode.",
+            font=ctk.CTkFont(size=11), text_color=self.DIM,
+            justify="left", anchor="w",
+        ).pack(fill="x", padx=12, pady=(0, 6))
+
+        self._deploy_btn = ctk.CTkButton(
+            card, text="⚡  Deploy Plugins for Current Mode",
+            height=34, corner_radius=8,
+            fg_color=self.ACCENT, hover_color=self.ACCENT_H,
+            text_color="#0d0d14", font=ctk.CTkFont(size=12, weight="bold"),
+            command=self._deploy_plugins,
+        )
+        self._deploy_btn.pack(fill="x", padx=12, pady=(0, 4))
+
         ctk.CTkButton(
-            card, text="⚙  Check Plugins",
+            card, text="⚙  Check Installed Plugins",
             height=32, corner_radius=6,
             fg_color=self.BORDER, hover_color="#2a2a40",
             text_color=self.SUB, font=ctk.CTkFont(size=12),
@@ -2749,6 +2772,47 @@ class CS2GUI:
 
     def _check_plugins(self) -> None:
         self.core.check_plugins()
+
+    def _deploy_plugins(self) -> None:
+        """Deploy bundled plugins for the currently selected game mode."""
+        mode = self._mode_var.get()
+        self._deploy_btn.configure(
+            state="disabled", text="Deploying…",
+            fg_color=self.BORDER, text_color=self.SUB,
+        )
+        self.core.deploy_plugins_async(
+            mode,
+            on_done=lambda ok: self.root.after(0, self._on_deploy_done, mode, ok),
+        )
+
+    def _on_deploy_done(self, mode: str, ok: bool) -> None:
+        if ok:
+            self._deploy_btn.configure(
+                state="normal",
+                text=f"✓  Deployed: {mode}",
+                fg_color=self.GREEN, hover_color=self.GREEN_H,
+                text_color="#0d0d14",
+            )
+            # Reset to default after 4 seconds
+            self.root.after(4000, lambda: self._deploy_btn.configure(
+                state="normal",
+                text="⚡  Deploy Plugins for Current Mode",
+                fg_color=self.ACCENT, hover_color=self.ACCENT_H,
+                text_color="#0d0d14",
+            ))
+        else:
+            self._deploy_btn.configure(
+                state="normal",
+                text="✗  Deploy failed — see console log",
+                fg_color=self.STOP, hover_color=self.STOP_H,
+                text_color=self.TEXT,
+            )
+            self.root.after(4000, lambda: self._deploy_btn.configure(
+                state="normal",
+                text="⚡  Deploy Plugins for Current Mode",
+                fg_color=self.ACCENT, hover_color=self.ACCENT_H,
+                text_color="#0d0d14",
+            ))
 
     def _open_web_panel(self) -> None:
         url = f"http://localhost:{FLASK_PORT}"

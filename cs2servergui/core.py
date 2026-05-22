@@ -17,6 +17,7 @@ import subprocess
 import sys
 import threading
 import time
+import shutil
 import urllib.request
 import zipfile
 from collections.abc import Callable
@@ -34,6 +35,93 @@ from .config import (
     # update_paths() changes are always picked up at call time.
 )
 from .rcon import RCONClient
+
+
+# ── Plugin deployment tables ───────────────────────────────────────────────────
+
+# Bundled plugins live next to this file inside cs2servergui/plugins/
+_PLUGINS_BASE = os.path.join(os.path.dirname(__file__), "plugins")
+
+# Modes that need managed plugins; modes not listed → vanilla server.
+_MODE_PLUGIN_NAMES: dict[str, list[str]] = {
+    "Zombies":    ["zombie"],
+    "Retakes":    ["retakes", "retakes-allocator"],
+    "Deathmatch": ["deathmatch"],
+}
+
+# Copy rules per plugin: list of (src_subdir, dst_subdir_relative_to_csgo).
+# The CONTENTS of src_subdir are merged into dst_subdir.
+_PLUGIN_COPY_RULES: dict[str, list[tuple[str, str]]] = {
+    "zombie": [
+        # zombie/ root mirrors csgo/ layout — metamod-only, no CSS needed
+        ("addons",      "addons"),
+        ("cfg",         "cfg"),
+        ("materials",   "materials"),
+        ("particles",   "particles"),
+        ("soundevents", "soundevents"),
+        ("sounds",      "sounds"),
+    ],
+    "retakes": [
+        # retakes/addons/ mirrors csgo/addons/
+        ("addons", "addons"),
+    ],
+    "retakes-allocator": [
+        # RetakesAllocator folder → csgo/addons/counterstrikesharp/plugins/RetakesAllocator/
+        (os.path.join("extracted", "RetakesAllocator"),
+         os.path.join("addons", "counterstrikesharp", "plugins", "RetakesAllocator")),
+    ],
+    "deathmatch": [
+        # extracted/plugins/ → csgo/addons/counterstrikesharp/plugins/
+        (os.path.join("extracted", "plugins"),
+         os.path.join("addons", "counterstrikesharp", "plugins")),
+        (os.path.join("extracted", "shared"),
+         os.path.join("addons", "counterstrikesharp", "shared")),
+    ],
+    "arenas": [
+        (os.path.join("extracted", "K4-Arenas-Bots", "plugins"),
+         os.path.join("addons", "counterstrikesharp", "plugins")),
+        (os.path.join("extracted", "K4-Arenas-Bots", "shared"),
+         os.path.join("addons", "counterstrikesharp", "shared")),
+    ],
+    "practice": [
+        (os.path.join("windows", "addons", "counterstrikesharp",
+                      "plugins", "MatchZy"),
+         os.path.join("addons", "counterstrikesharp", "plugins", "MatchZy")),
+        ("cfg", "cfg"),
+    ],
+}
+
+# Items relative to csgo/ that are fully owned by each plugin.
+# Directories are rmtree'd, files are unlinked on undeploy.
+_PLUGIN_CLEANUP_ITEMS: dict[str, list[str]] = {
+    "zombie": [
+        os.path.join("addons", "cs2fixes"),
+        os.path.join("addons", "metamod", "cs2fixes.vdf"),
+        os.path.join("cfg", "cs2fixes"),
+        os.path.join("materials", "cs2fixes"),
+        os.path.join("particles", "cs2fixes"),
+        os.path.join("soundevents", "cs2fixes"),
+    ],
+    "retakes": [
+        os.path.join("addons", "counterstrikesharp", "plugins", "RetakesPlugin"),
+        os.path.join("addons", "counterstrikesharp", "shared", "RetakesPluginShared"),
+    ],
+    "retakes-allocator": [
+        os.path.join("addons", "counterstrikesharp", "plugins", "RetakesAllocator"),
+    ],
+    "deathmatch": [
+        os.path.join("addons", "counterstrikesharp", "plugins", "Deathmatch"),
+        os.path.join("addons", "counterstrikesharp", "shared", "DeathmatchAPI"),
+    ],
+    "arenas": [
+        os.path.join("addons", "counterstrikesharp", "plugins", "K4-Arenas-Bots"),
+        os.path.join("addons", "counterstrikesharp", "shared", "K4-ArenaSharedApi"),
+    ],
+    "practice": [
+        os.path.join("addons", "counterstrikesharp", "plugins", "MatchZy"),
+        os.path.join("cfg", "MatchZy"),
+    ],
+}
 
 
 class AppCore:
@@ -189,6 +277,10 @@ class AppCore:
 
     def start_server(self, map_name: str, mode: str,
                      is_workshop: bool = False) -> None:
+        # Deploy plugins synchronously before launching cs2.exe so files are in
+        # place when the engine initialises MetaMod / CounterStrikeSharp.
+        self.deploy_plugins(mode)
+
         s    = MODE_SETTINGS.get(mode, _DEFAULT_MODE)
         maxp = self.max_players_override.strip() or s["maxplayers"]
         cmd  = [
@@ -363,6 +455,20 @@ class AppCore:
     def change_map(self, map_name: str, mode: str,
                    is_workshop: bool = False, caller: str = "local") -> None:
         def _do() -> None:
+            # Deploy plugins when the mode is changing.  Files land on disk
+            # immediately; a full restart is needed for MetaMod/CSS to load them,
+            # but changelevel (same-engine-session) does pick up new CSS plugins.
+            mode_changed = (mode != self.current_mode)
+            if mode_changed:
+                new_managed = _MODE_PLUGIN_NAMES.get(mode, [])
+                old_managed = _MODE_PLUGIN_NAMES.get(self.current_mode, [])
+                if new_managed or old_managed:
+                    self.deploy_plugins(mode)
+                    self.log(
+                        f"[plugins] Mode changed {self.current_mode} → {mode}. "
+                        "Plugin files updated — restart the server for full effect."
+                    )
+
             s = MODE_SETTINGS.get(mode, _DEFAULT_MODE)
             try:
                 self.log(f"[{caller}] Sending map change → {map_name} ({mode})…")
@@ -748,6 +854,115 @@ class AppCore:
                         self.log(f"  ✓  {up_to_date} other map(s) current")
             except Exception as exc:
                 self.log(f"Workshop update check failed: {exc}")
+        threading.Thread(target=_do, daemon=True).start()
+
+    # ── plugin deployment ─────────────────────────────────────────────────────
+
+    def _csgo_dir(self) -> str:
+        """Return the game/csgo/ directory (parent of addons/)."""
+        return os.path.dirname(_config.CS2_ADDONS_DIR)
+
+    def _plugin_manifest_path(self) -> str:
+        return os.path.join(os.path.dirname(_CONFIG_FILE), "oblivion_plugins.json")
+
+    def _load_plugin_manifest(self) -> dict:
+        try:
+            with open(self._plugin_manifest_path(), encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
+    def _save_plugin_manifest(self, mode: str, plugins: list[str]) -> None:
+        try:
+            with open(self._plugin_manifest_path(), "w", encoding="utf-8") as f:
+                json.dump({"mode": mode, "plugins": plugins}, f, indent=2)
+        except Exception as exc:
+            self.log(f"[plugins] Could not save manifest: {exc}")
+
+    def _undeploy_plugins(self, plugin_names: list[str], csgo_dir: str) -> None:
+        """Remove previously deployed plugin files from csgo_dir."""
+        for name in plugin_names:
+            for item in _PLUGIN_CLEANUP_ITEMS.get(name, []):
+                full = os.path.join(csgo_dir, item)
+                if os.path.isdir(full):
+                    try:
+                        shutil.rmtree(full)
+                        self.log(f"[plugins] Removed dir: {item}")
+                    except Exception as exc:
+                        self.log(f"[plugins] Could not remove {item}: {exc}")
+                elif os.path.isfile(full):
+                    try:
+                        os.remove(full)
+                        self.log(f"[plugins] Removed file: {item}")
+                    except Exception as exc:
+                        self.log(f"[plugins] Could not remove {item}: {exc}")
+
+    def deploy_plugins(self, mode: str) -> bool:
+        """Deploy bundled plugins for *mode* into the CS2 server's csgo/ directory.
+
+        1. Removes plugins from the previous mode (reads the manifest).
+        2. Copies the new mode's plugin files in.
+        3. Saves an updated manifest so the next switch can clean up correctly.
+
+        Returns True on success, False if the csgo/ directory doesn't exist yet.
+        Always runs synchronously so the server is not launched before files land.
+        """
+        csgo_dir = self._csgo_dir()
+        if not os.path.isdir(csgo_dir):
+            self.log(f"[plugins] csgo/ not found: {csgo_dir}")
+            self.log("[plugins] Is the server installed? Use Config → Install CS2 Server.")
+            return False
+
+        new_plugins = _MODE_PLUGIN_NAMES.get(mode, [])
+
+        # ── 1. Remove previous mode's plugins ────────────────────────────────
+        manifest    = self._load_plugin_manifest()
+        old_plugins = manifest.get("plugins", [])
+        if old_plugins and set(old_plugins) != set(new_plugins):
+            self.log(f"[plugins] Removing previous: {', '.join(old_plugins)}")
+            self._undeploy_plugins(old_plugins, csgo_dir)
+
+        # ── 2. Deploy new plugins ─────────────────────────────────────────────
+        if not new_plugins:
+            self.log(f"[plugins] No managed plugins for {mode} — vanilla")
+            self._save_plugin_manifest(mode, [])
+            return True
+
+        self.log(f"[plugins] Deploying for {mode}: {', '.join(new_plugins)}")
+        file_count = 0
+        for name in new_plugins:
+            src_base = os.path.join(_PLUGINS_BASE, name)
+            if not os.path.isdir(src_base):
+                self.log(f"[plugins] Source not found, skipping: {name}")
+                continue
+            for src_sub, dst_sub in _PLUGIN_COPY_RULES.get(name, []):
+                src = os.path.join(src_base, src_sub)
+                dst = os.path.join(csgo_dir, dst_sub)
+                if not os.path.exists(src):
+                    self.log(f"[plugins] Skipping missing: {name}/{src_sub}")
+                    continue
+                os.makedirs(dst, exist_ok=True)
+                for root, _dirs, files in os.walk(src):
+                    rel     = os.path.relpath(root, src)
+                    tgt_dir = os.path.join(dst, rel) if rel != "." else dst
+                    os.makedirs(tgt_dir, exist_ok=True)
+                    for fname in files:
+                        shutil.copy2(os.path.join(root, fname),
+                                     os.path.join(tgt_dir, fname))
+                        file_count += 1
+            self.log(f"[plugins]   {name} ✓")
+
+        self.log(f"[plugins] Deploy complete — {file_count} file(s) copied → {csgo_dir}")
+        self._save_plugin_manifest(mode, new_plugins)
+        return True
+
+    def deploy_plugins_async(self, mode: str,
+                              on_done: Callable[[bool], None] | None = None) -> None:
+        """Non-blocking wrapper around deploy_plugins() for GUI use."""
+        def _do() -> None:
+            ok = self.deploy_plugins(mode)
+            if on_done:
+                on_done(ok)
         threading.Thread(target=_do, daemon=True).start()
 
     # ── plugin checker ────────────────────────────────────────────────────────
