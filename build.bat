@@ -23,6 +23,7 @@ pyinstaller ^
   --hidden-import cs2servergui.core ^
   --hidden-import cs2servergui.web ^
   --hidden-import cs2servergui.gui ^
+  --add-data "cs2servergui/plugins;cs2servergui/plugins" ^
   main.py
 
 echo [3/3] Done.

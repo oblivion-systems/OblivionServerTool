@@ -18,6 +18,7 @@ import sys
 import threading
 import time
 import shutil
+import urllib.parse
 import urllib.request
 import zipfile
 from collections.abc import Callable
@@ -27,9 +28,11 @@ from .config import (
     # Non-path constants — safe to bind by name (never change at runtime)
     CS2_APP_ID,
     DEPOTDL_RELEASE_URL,
+    OFFICIAL_MAPS,
     RCON_HOST, RCON_PORT, RCON_PASSWORD,
     MODE_SETTINGS, _DEFAULT_MODE,
     _CONFIG_FILE,
+    APP_VERSION, APP_API_URL, APP_RELEASES_URL,
     # Path constants (CS2_SERVER_DIR, CS2_PATH, STEAMCMD_PATH, WORKSHOP_DIR,
     # DEPOTDL_PATH, CS2_ADDONS_DIR) are accessed via _config.* so that
     # update_paths() changes are always picked up at call time.
@@ -40,13 +43,175 @@ from .rcon import RCONClient
 # ── Plugin deployment tables ───────────────────────────────────────────────────
 
 # Bundled plugins live next to this file inside cs2servergui/plugins/
-_PLUGINS_BASE = os.path.join(os.path.dirname(__file__), "plugins")
+def _resolve_plugins_base() -> str:
+    """Find the bundled plugins/ folder across dev and packaged layouts.
+
+    Tries, in order:
+      1. <this_file>/../plugins         — source layout (python -m / IDE run)
+      2. sys._MEIPASS/cs2servergui/plugins — PyInstaller --onefile temp extract
+      3. <exe_dir>/cs2servergui/plugins — PyInstaller --onedir, nested layout
+      4. <exe_dir>/plugins              — PyInstaller --onedir, flat layout
+
+    Returns the first existing path, or the source-layout fallback so error
+    messages still point somewhere sensible.
+    """
+    candidates: list[str] = [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "plugins"),
+    ]
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            candidates.append(os.path.join(meipass, "cs2servergui", "plugins"))
+        exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+        candidates.append(os.path.join(exe_dir, "cs2servergui", "plugins"))
+        candidates.append(os.path.join(exe_dir, "plugins"))
+    for c in candidates:
+        if os.path.isdir(c):
+            return c
+    return candidates[0]
+
+_PLUGINS_BASE = _resolve_plugins_base()
+
+# Hard upper bound for DepotDownloader workshop downloads (seconds).
+# Named here so it appears in one place — change this to extend/shorten the window.
+_DL_TIMEOUT_SECS: int = 600
+
+
+def _semver_tuple(v: str) -> tuple[int, ...]:
+    """Parse a version string into a comparable tuple.
+
+    Stable release sorts above a same-numbered pre-release:
+      "1.0.0"       → (1, 0, 0, 1)   # stable
+      "1.0.0-beta"  → (1, 0, 0, 0)   # pre-release < same stable
+    """
+    try:
+        clean  = v.strip().lstrip("v")
+        parts  = clean.split("-", 1)          # ["1.0.0"] or ["1.0.0","beta"]
+        nums   = tuple(int(x) for x in parts[0].split("."))
+        stable = 1 if len(parts) == 1 else 0  # stable > pre-release
+        return nums + (stable,)
+    except ValueError:
+        return (0,)
+
+# How each plugin loads into CS2.
+#   "metamod" — loaded at engine init, can ONLY activate after a server restart
+#   "css"     — CounterStrikeSharp; can be hot-reloaded via `css_plugins reload`
+_PLUGIN_KIND: dict[str, str] = {
+    "zombie":            "metamod",   # CS2Fixes — engine-level ZE fixes
+    "zombiesharp":       "css",       # Actual ZE gamemode logic, stacks with CS2Fixes
+    "retakes":           "css",
+    "retakes-allocator": "css",
+    "deathmatch":        "css",
+    "arenas":            "css",
+    "practice":          "css",
+    "jailbreak":         "css",
+    "sharptimer":        "css",       # Surf / Bhop / KZ / MG timer
+    "gungame":           "css",
+    "deathrun":          "css",
+    "scoutsknives":      "css",
+    "chamber":           "css",       # One-in-the-Chamber
+    "instaplant":        "css",       # Pair with retakes
+    "instadefuse":       "css",       # Pair with retakes
+    "mapchooser":        "css",       # LiteMapChooser → RockTheVote plugin
+}
+
+# Canonical post-deploy markers: files that MUST exist relative to csgo/ for
+# the plugin to actually be loadable.  Used to verify the deploy was real and
+# not just "files copied to nowhere".
+_PLUGIN_VERIFY_FILES: dict[str, list[str]] = {
+    "zombie": [
+        os.path.join("addons", "metamod", "cs2fixes.vdf"),
+        os.path.join("addons", "cs2fixes", "bin", "win64", "cs2fixes.dll"),
+    ],
+    "retakes": [
+        os.path.join("addons", "counterstrikesharp", "plugins",
+                     "RetakesPlugin", "RetakesPlugin.dll"),
+    ],
+    "retakes-allocator": [
+        os.path.join("addons", "counterstrikesharp", "plugins",
+                     "RetakesAllocator", "RetakesAllocator.dll"),
+    ],
+    "deathmatch": [
+        os.path.join("addons", "counterstrikesharp", "plugins",
+                     "Deathmatch", "Deathmatch.dll"),
+    ],
+    "arenas": [
+        os.path.join("addons", "counterstrikesharp", "plugins",
+                     "K4-Arenas-Bots", "K4-Arenas-Bots.dll"),
+    ],
+    "practice": [
+        os.path.join("addons", "counterstrikesharp", "plugins",
+                     "MatchZy", "MatchZy.dll"),
+    ],
+    "jailbreak": [
+        os.path.join("addons", "counterstrikesharp", "plugins",
+                     "Jailbreak", "Jailbreak.dll"),
+    ],
+    "sharptimer": [
+        os.path.join("addons", "counterstrikesharp", "plugins",
+                     "SharpTimer", "SharpTimer.dll"),
+    ],
+    "zombiesharp": [
+        os.path.join("addons", "counterstrikesharp", "plugins",
+                     "ZombieSharp", "ZombieSharp.dll"),
+    ],
+    "gungame": [
+        os.path.join("addons", "counterstrikesharp", "plugins",
+                     "GG2", "GG2.dll"),
+    ],
+    "deathrun": [
+        os.path.join("addons", "counterstrikesharp", "plugins",
+                     "DeathrunManager", "DeathrunManager.dll"),
+    ],
+    "scoutsknives": [
+        os.path.join("addons", "counterstrikesharp", "plugins",
+                     "ScoutsNKnives", "ScoutsNKnives.dll"),
+    ],
+    "chamber": [
+        os.path.join("addons", "counterstrikesharp", "plugins",
+                     "cs2-OneInTheChamber", "OneInTheChamber.dll"),
+    ],
+    "instaplant": [
+        os.path.join("addons", "counterstrikesharp", "plugins",
+                     "InstaplantPlugin", "InstaplantPlugin.dll"),
+    ],
+    "instadefuse": [
+        os.path.join("addons", "counterstrikesharp", "plugins",
+                     "InstadefusePlugin", "InstadefusePlugin.dll"),
+    ],
+    "mapchooser": [
+        # LiteMapChooser ships under the "RockTheVote" plugin folder name
+        os.path.join("addons", "counterstrikesharp", "plugins",
+                     "RockTheVote", "RockTheVote.dll"),
+    ],
+}
 
 # Modes that need managed plugins; modes not listed → vanilla server.
 _MODE_PLUGIN_NAMES: dict[str, list[str]] = {
-    "Zombies":    ["zombie"],
-    "Retakes":    ["retakes", "retakes-allocator"],
-    "Deathmatch": ["deathmatch"],
+    # CS2Fixes (engine-level ZE fixes) + ZombieSharp (gamemode logic).
+    # Most Zombie Escape servers run both stacked.
+    "Zombies":             ["zombie", "zombiesharp", "mapchooser"],
+    # Retakes core + allocator + insta-plant/defuse pair for the classic
+    # "instant" feel competitive retake servers run.
+    "Retakes":             ["retakes", "retakes-allocator",
+                            "instaplant", "instadefuse", "mapchooser"],
+    "Deathmatch":          ["deathmatch", "mapchooser"],
+    "1v1":                 ["arenas"],     # fixed-map dueling
+    "3v3":                 ["arenas", "mapchooser"],
+    "4v4":                 ["arenas", "mapchooser"],
+    "Jailbreak":           ["jailbreak"],  # admin-controlled rotation
+    "Practice":            ["practice"],   # MatchZy controls match flow
+    # SharpTimer handles Surf, Bhop, KZ, and MG maps in a single plugin.
+    "Surf":                ["sharptimer", "mapchooser"],
+    "KZ / Climb":          ["sharptimer", "mapchooser"],
+    "Competitive":         ["mapchooser"],
+    "Casual":              ["mapchooser"],
+    "Wingman":             ["mapchooser"],
+    # New CSS-plugin-backed game modes
+    "Gun Game":            ["gungame", "mapchooser"],
+    "Deathrun":            ["deathrun", "mapchooser"],
+    "Scouts & Knives":     ["scoutsknives", "mapchooser"],
+    "One in the Chamber":  ["chamber", "mapchooser"],
 }
 
 # Copy rules per plugin: list of (src_subdir, dst_subdir_relative_to_csgo).
@@ -71,11 +236,10 @@ _PLUGIN_COPY_RULES: dict[str, list[tuple[str, str]]] = {
          os.path.join("addons", "counterstrikesharp", "plugins", "RetakesAllocator")),
     ],
     "deathmatch": [
-        # extracted/plugins/ → csgo/addons/counterstrikesharp/plugins/
-        (os.path.join("extracted", "plugins"),
-         os.path.join("addons", "counterstrikesharp", "plugins")),
-        (os.path.join("extracted", "shared"),
-         os.path.join("addons", "counterstrikesharp", "shared")),
+        # NockyCZ CS2-Deathmatch release ZIP ships plugins/ and shared/ at the
+        # root; README says unzip into csgo/addons/counterstrikesharp/.
+        ("plugins", os.path.join("addons", "counterstrikesharp", "plugins")),
+        ("shared",  os.path.join("addons", "counterstrikesharp", "shared")),
     ],
     "arenas": [
         (os.path.join("extracted", "K4-Arenas-Bots", "plugins"),
@@ -88,6 +252,65 @@ _PLUGIN_COPY_RULES: dict[str, list[tuple[str, str]]] = {
                       "plugins", "MatchZy"),
          os.path.join("addons", "counterstrikesharp", "plugins", "MatchZy")),
         ("cfg", "cfg"),
+    ],
+    "jailbreak": [
+        # Source folder is a flat dump of all Jailbreak DLLs/PDBs; deploy them
+        # into a single CounterStrikeSharp plugin folder named "Jailbreak".
+        ("", os.path.join("addons", "counterstrikesharp", "plugins", "Jailbreak")),
+    ],
+    # SharpTimer release zip extracts to game/csgo/ directly.
+    # User puts unzipped release contents (addons/ + cfg/) into plugins/sharptimer/.
+    "sharptimer": [
+        ("addons", "addons"),
+        ("cfg",    "cfg"),
+    ],
+    # ZombieSharp release zip extracts to game/csgo/ directly.
+    # User puts unzipped release contents into plugins/zombiesharp/.
+    # The release ships addons/, cfg/, characters/, soundevents/, sounds/ — all
+    # are needed (zombie models, sounds, configs, plugin DLL, shared API DLL).
+    "zombiesharp": [
+        ("addons",      "addons"),
+        ("cfg",         "cfg"),
+        ("characters",  "characters"),
+        ("soundevents", "soundevents"),
+        ("sounds",      "sounds"),
+    ],
+    # GunGame v1.2.2 ships csgo/addons/... at the ZIP root — user unzips it
+    # into plugins/gungame/ and we copy the csgo/addons subtree.
+    "gungame": [
+        (os.path.join("csgo", "addons"), "addons"),
+    ],
+    # Deathrun Manager ships plugins/ + configs/ at the ZIP root
+    # (NockyCZ-style — unzip into csgo/addons/counterstrikesharp/).
+    "deathrun": [
+        ("plugins", os.path.join("addons", "counterstrikesharp", "plugins")),
+        ("configs", os.path.join("addons", "counterstrikesharp", "configs")),
+    ],
+    # ScoutsNKnives release: drag-into-csgo style (addons/ at ZIP root).
+    "scoutsknives": [
+        ("addons", "addons"),
+    ],
+    # cs2-OneInTheChamber release ships just one bare plugin folder at the
+    # ZIP root, no addons/counterstrikesharp/plugins/ prefix. Drop it
+    # directly under the CSS plugins directory.
+    "chamber": [
+        ("cs2-OneInTheChamber",
+         os.path.join("addons", "counterstrikesharp", "plugins", "cs2-OneInTheChamber")),
+    ],
+    # cs2-instaplant / cs2-instadefuse releases ship just one bare plugin
+    # folder ("InstaplantPlugin" / "InstadefusePlugin") at the ZIP root.
+    "instaplant": [
+        ("InstaplantPlugin",
+         os.path.join("addons", "counterstrikesharp", "plugins", "InstaplantPlugin")),
+    ],
+    "instadefuse": [
+        ("InstadefusePlugin",
+         os.path.join("addons", "counterstrikesharp", "plugins", "InstadefusePlugin")),
+    ],
+    # LiteMapChooser release nests the standard addons/ tree under an extra
+    # "LiteMapChooser/" wrapper folder.
+    "mapchooser": [
+        (os.path.join("LiteMapChooser", "addons"), "addons"),
     ],
 }
 
@@ -121,6 +344,43 @@ _PLUGIN_CLEANUP_ITEMS: dict[str, list[str]] = {
         os.path.join("addons", "counterstrikesharp", "plugins", "MatchZy"),
         os.path.join("cfg", "MatchZy"),
     ],
+    "jailbreak": [
+        os.path.join("addons", "counterstrikesharp", "plugins", "Jailbreak"),
+    ],
+    "sharptimer": [
+        os.path.join("addons", "counterstrikesharp", "plugins", "SharpTimer"),
+        os.path.join("cfg", "SharpTimer"),
+    ],
+    "zombiesharp": [
+        os.path.join("addons", "counterstrikesharp", "plugins", "ZombieSharp"),
+        os.path.join("addons", "counterstrikesharp", "shared", "ZombieSharpAPI"),
+        os.path.join("addons", "counterstrikesharp", "configs", "zombiesharp"),
+        os.path.join("addons", "counterstrikesharp", "gamedata", "ZombieSharp.json"),
+        os.path.join("cfg", "zombiesharp"),
+        os.path.join("characters", "models", "s2ze", "bsi_zombie"),
+    ],
+    "gungame": [
+        os.path.join("addons", "counterstrikesharp", "plugins", "GG2"),
+    ],
+    "deathrun": [
+        os.path.join("addons", "counterstrikesharp", "plugins", "DeathrunManager"),
+        os.path.join("addons", "counterstrikesharp", "configs", "plugins", "DeathrunManager"),
+    ],
+    "scoutsknives": [
+        os.path.join("addons", "counterstrikesharp", "plugins", "ScoutsNKnives"),
+    ],
+    "chamber": [
+        os.path.join("addons", "counterstrikesharp", "plugins", "cs2-OneInTheChamber"),
+    ],
+    "instaplant": [
+        os.path.join("addons", "counterstrikesharp", "plugins", "InstaplantPlugin"),
+    ],
+    "instadefuse": [
+        os.path.join("addons", "counterstrikesharp", "plugins", "InstadefusePlugin"),
+    ],
+    "mapchooser": [
+        os.path.join("addons", "counterstrikesharp", "plugins", "RockTheVote"),
+    ],
 }
 
 
@@ -145,6 +405,10 @@ class AppCore:
         self._dl_lock  = threading.Lock()
 
         self.update_available: bool = False
+
+        # Pending workshop map to load via RCON once the server is ready.
+        # Set by start_server() when is_workshop=True; cleared by _poll_rcon_ready().
+        self._pending_workshop_map: str | None = None
 
         # Install location — all other paths are derived from this
         self.server_dir: str = ""
@@ -283,6 +547,20 @@ class AppCore:
 
         s    = MODE_SETTINGS.get(mode, _DEFAULT_MODE)
         maxp = self.max_players_override.strip() or s["maxplayers"]
+
+        # CS2 dedicated servers don't reliably honour +host_workshop_map at
+        # startup — the map either fails to load or the server crashes before
+        # the engine downloads it.  The reliable pattern is to start on any
+        # standard map, wait for RCON, then issue host_workshop_map via RCON.
+        # We save the workshop ID and let _poll_rcon_ready fire it automatically.
+        if is_workshop:
+            startup_map = OFFICIAL_MAPS[0]
+            self._pending_workshop_map = map_name
+            self.log(f"[workshop] Will auto-load {map_name} via RCON once server is ready")
+        else:
+            startup_map = map_name
+            self._pending_workshop_map = None
+
         cmd  = [
             _config.CS2_PATH, "-dedicated",
             "-port",          str(RCON_PORT),
@@ -299,8 +577,7 @@ class AppCore:
             cmd += ["-tickrate", "128"]
         if self.gslt_token:
             cmd += ["+sv_setsteamaccount", self.gslt_token]
-        cmd += (["+host_workshop_map", map_name]
-                if is_workshop else ["+map", map_name])
+        cmd += ["+map", startup_map]
         try:
             self.proc = subprocess.Popen(cmd)
         except FileNotFoundError:
@@ -308,7 +585,7 @@ class AppCore:
             return
         self.running      = True
         self.boot_state   = "booting"
-        self.current_map  = map_name
+        self.current_map  = startup_map   # updated to workshop ID by _poll_rcon_ready on success
         self.current_mode = mode
         self.log(f"Server started  |  map: {map_name}  |  mode: {mode}")
         if self.tickrate_128:
@@ -390,7 +667,7 @@ class AppCore:
                 self.log(f"CS2 process found but RCON not reachable: {exc}")
                 return
 
-            # ── 3. Mark as running and parse current map ──────────────────────
+            # ── 3. Mark as running and parse current map + mode ──────────────
             self.running    = True
             self.boot_state = "ready"
 
@@ -399,8 +676,17 @@ class AppCore:
             if map_m:
                 self.current_map = map_m.group(1).split()[0]  # strip trailing junk
 
+            # RCON 'status' doesn't expose game_type/game_mode in a parseable
+            # form.  The plugin manifest records the last deployed mode which is
+            # the best available proxy — far better than leaving it stale as
+            # "Competitive" after a reconnect to a Zombies or Retakes server.
+            manifest = self._load_plugin_manifest()
+            if manifest.get("mode"):
+                self.current_mode = manifest["mode"]
+
             self.log(
                 f"Reconnected to existing server  |  map: {self.current_map}"
+                f"  |  mode: {self.current_mode}"
             )
             if self.on_state_change:
                 self.on_state_change()
@@ -440,6 +726,19 @@ class AppCore:
                 if self.running:
                     self.boot_state = "ready"
                     self.log("Server ready — RCON is responding")
+                    wk = self._pending_workshop_map
+                    if wk:
+                        # Switch to the workshop map now that RCON is live.
+                        # brief pause lets the engine fully settle before changelevel.
+                        self._pending_workshop_map = None
+                        self.log(f"[workshop] Loading workshop map {wk}…")
+                        time.sleep(1)
+                        try:
+                            self.rcon.execute_retry(f"host_workshop_map {wk}")
+                            self.current_map = wk
+                            self.log(f"[workshop] Workshop map {wk} loaded ✓")
+                        except Exception as exc:
+                            self.log(f"[workshop] Auto map switch failed: {exc}")
                     if self.on_state_change:
                         self.on_state_change()
                 return
@@ -455,19 +754,16 @@ class AppCore:
     def change_map(self, map_name: str, mode: str,
                    is_workshop: bool = False, caller: str = "local") -> None:
         def _do() -> None:
-            # Deploy plugins when the mode is changing.  Files land on disk
-            # immediately; a full restart is needed for MetaMod/CSS to load them,
-            # but changelevel (same-engine-session) does pick up new CSS plugins.
+            # Deploy plugins when the mode is changing.  deploy_plugins handles
+            # its own "restart required" / "hot-reloaded" messaging based on
+            # plugin kind (MetaMod vs CounterStrikeSharp).
             mode_changed = (mode != self.current_mode)
             if mode_changed:
                 new_managed = _MODE_PLUGIN_NAMES.get(mode, [])
                 old_managed = _MODE_PLUGIN_NAMES.get(self.current_mode, [])
                 if new_managed or old_managed:
+                    self.log(f"[plugins] Mode change: {self.current_mode} → {mode}")
                     self.deploy_plugins(mode)
-                    self.log(
-                        f"[plugins] Mode changed {self.current_mode} → {mode}. "
-                        "Plugin files updated — restart the server for full effect."
-                    )
 
             s = MODE_SETTINGS.get(mode, _DEFAULT_MODE)
             try:
@@ -490,42 +786,36 @@ class AppCore:
 
     # ── server update ─────────────────────────────────────────────────────────
 
-    def _installed_build(self) -> str | None:
-        manifest = os.path.join(
-            _config.CS2_SERVER_DIR, "steamapps", f"appmanifest_{CS2_APP_ID}.acf"
-        )
-        try:
-            with open(manifest, encoding="utf-8") as f:
-                for line in f:
-                    if '"buildid"' in line:
-                        return line.split('"')[3].strip()
-        except Exception:
-            pass
-        return None
+    def _read_appmanifest(self) -> tuple[str | None, str]:
+        """Read appmanifest_730.acf and return (buildid, beta_key).
 
-    def _installed_beta_key(self) -> str:
-        """Return the BetaKey stored in appmanifest, or '' for public branch."""
+        buildid  — None if the file is absent or buildid is not present.
+        beta_key — '' if on the public branch or the file is unreadable.
+
+        Opens the file once so callers don't repeat the disk I/O.
+        """
         manifest = os.path.join(
             _config.CS2_SERVER_DIR, "steamapps", f"appmanifest_{CS2_APP_ID}.acf"
         )
         try:
             with open(manifest, encoding="utf-8") as f:
                 content = f.read()
-            m = re.search(r'"BetaKey"\s+"([^"]*)"', content)
-            return m.group(1).strip() if m else ""
         except Exception:
-            return ""
+            return None, ""
+        build_m = re.search(r'"buildid"\s+"(\d+)"', content)
+        beta_m  = re.search(r'"BetaKey"\s+"([^"]*)"', content)
+        build   = build_m.group(1).strip() if build_m else None
+        beta    = beta_m.group(1).strip()  if beta_m  else ""
+        return build, beta
 
     def check_update(self) -> None:
         def _do() -> None:
-            from .config import APP_VERSION
-            build = self._installed_build()
+            build, beta_key = self._read_appmanifest()
             if not build:
                 self.log("Update check: appmanifest not found — is the server installed?")
                 if self.on_update_checked:
                     self.on_update_checked(False, "unknown", "unknown")
                 return
-            beta_key = self._installed_beta_key()
             branch_label = f"beta:{beta_key}" if beta_key else "public"
             self.log(f"Update check: installed build = {build}  branch = {branch_label}")
             if beta_key:
@@ -542,7 +832,7 @@ class AppCore:
                 # completely different number and cannot be compared to buildids.
                 req = urllib.request.Request(
                     "https://api.steamcmd.net/v1/info/730",
-                    headers={"User-Agent": f"OblivionServerTool/{APP_VERSION}"},
+                    headers={"User-Agent": f"OblivionServerTool/{APP_VERSION}"},  # module-level constant
                 )
                 with urllib.request.urlopen(req, timeout=15) as resp:
                     data = json.loads(resp.read())
@@ -585,25 +875,6 @@ class AppCore:
         Calls on_app_update_checked(available, current, latest, url) on completion.
         Fails silently — the app repo may be private or the machine may be offline.
         """
-        from .config import APP_VERSION, APP_API_URL, APP_RELEASES_URL
-
-        def _ver(v: str) -> tuple[int, ...]:
-            """Parse semver into a comparable tuple.
-
-            Stable release sorts above a pre-release with the same number:
-              1.0.0         → (1, 0, 0, 1)   # stable
-              1.0.0-beta    → (1, 0, 0, 0)   # pre-release < same stable
-              1.0.0-beta.2  → (1, 0, 0, 0)   # still pre-release
-            """
-            try:
-                clean  = v.strip().lstrip("v")
-                parts  = clean.split("-", 1)          # ["1.0.0"] or ["1.0.0","beta"]
-                nums   = tuple(int(x) for x in parts[0].split("."))
-                stable = 1 if len(parts) == 1 else 0  # stable > pre-release
-                return nums + (stable,)
-            except ValueError:
-                return (0,)
-
         def _do() -> None:
             try:
                 req = urllib.request.Request(
@@ -616,7 +887,7 @@ class AppCore:
                 url = data.get("html_url", APP_RELEASES_URL)
                 if not tag:
                     return
-                available = _ver(tag) > _ver(APP_VERSION)
+                available = _semver_tuple(tag) > _semver_tuple(APP_VERSION)
                 self.log(
                     f"App update check: current=v{APP_VERSION}  "
                     f"latest=v{tag}  "
@@ -819,13 +1090,13 @@ class AppCore:
                 return
             self.log(f"Workshop update check: checking {len(ids)} map(s)…")
             try:
-                body = f"itemcount={len(ids)}"
+                params: dict[str, str | int] = {"itemcount": len(ids)}
                 for i, wid in enumerate(ids):
-                    body += f"&publishedfileids%5B{i}%5D={wid}"
+                    params[f"publishedfileids[{i}]"] = wid
                 req = urllib.request.Request(
                     "https://api.steampowered.com"
                     "/ISteamRemoteStorage/GetPublishedFileDetails/v1/",
-                    data=body.encode(),
+                    data=urllib.parse.urlencode(params).encode(),
                     headers={"Content-Type": "application/x-www-form-urlencoded"},
                     method="POST",
                 )
@@ -862,6 +1133,177 @@ class AppCore:
         """Return the game/csgo/ directory (parent of addons/)."""
         return os.path.dirname(_config.CS2_ADDONS_DIR)
 
+    # ── Plugin infrastructure helpers ─────────────────────────────────────────
+    # MetaMod must be referenced in csgo/gameinfo.gi for the engine to load it.
+    # Without this patch, MetaMod (and therefore CS2Fixes + CounterStrikeSharp,
+    # which are MetaMod plugins) silently never loads, even with files in place.
+
+    def _gameinfo_path(self) -> str:
+        return os.path.join(self._csgo_dir(), "gameinfo.gi")
+
+    def _gameinfo_has_metamod(self) -> bool | None:
+        """True if patched, False if not, None if file missing/unreadable."""
+        try:
+            with open(self._gameinfo_path(), encoding="utf-8",
+                      errors="replace") as f:
+                content = f.read()
+        except FileNotFoundError:
+            return None
+        except Exception:
+            return None
+        return "csgo/addons/metamod" in content
+
+    def _patch_gameinfo(self) -> bool:
+        """Insert the MetaMod search path into gameinfo.gi. Idempotent.
+
+        Inserts a new `Game\\tcsgo/addons/metamod` line just before the first
+        `Game\\tcsgo` entry inside the SearchPaths block.  Backs up the
+        original to gameinfo.gi.oblivion.bak on first patch.
+        """
+        path = self._gameinfo_path()
+        try:
+            with open(path, encoding="utf-8") as f:
+                lines = f.readlines()
+        except FileNotFoundError:
+            self.log(f"[gameinfo] Not found at {path} — cannot patch")
+            return False
+        except Exception as exc:
+            self.log(f"[gameinfo] Read failed: {exc}")
+            return False
+
+        if any("csgo/addons/metamod" in l for l in lines):
+            return True
+
+        new_lines: list[str] = []
+        inserted = False
+        for line in lines:
+            if not inserted and re.match(r"^\s+Game\s+csgo\s*$", line):
+                indent = line[:len(line) - len(line.lstrip())]
+                new_lines.append(f"{indent}Game\tcsgo/addons/metamod\n")
+                inserted = True
+            new_lines.append(line)
+
+        if not inserted:
+            self.log("[gameinfo] Could not locate the SearchPaths 'Game csgo' "
+                     "entry — manual patch required")
+            return False
+
+        try:
+            backup = path + ".oblivion.bak"
+            if not os.path.exists(backup):
+                shutil.copy2(path, backup)
+            with open(path, "w", encoding="utf-8") as f:
+                f.writelines(new_lines)
+            self.log(f"[gameinfo] ✓ Patched — MetaMod search path added "
+                     f"(backup: {os.path.basename(backup)})")
+            return True
+        except Exception as exc:
+            self.log(f"[gameinfo] Write failed: {exc}")
+            return False
+
+    def _metamod_installed(self) -> bool:
+        """MetaMod base = the addons/metamod folder exists with real content."""
+        mm = os.path.join(self._csgo_dir(), "addons", "metamod")
+        if not os.path.isdir(mm):
+            return False
+        # Distinguish a real install (binaries / loader files) from a folder
+        # that only holds plugin-registration VDFs.
+        for entry in os.listdir(mm):
+            full = os.path.join(mm, entry)
+            if os.path.isdir(full):                    # bin/, etc.
+                return True
+            if entry.lower() == "metaplugins.ini":      # loader manifest
+                return True
+        return False
+
+    def _css_installed(self) -> bool:
+        """CounterStrikeSharp base needs both api/ and bin/ subdirectories."""
+        css = os.path.join(self._csgo_dir(), "addons", "counterstrikesharp")
+        return (os.path.isdir(os.path.join(css, "api")) and
+                os.path.isdir(os.path.join(css, "bin")))
+
+    def _verify_plugin_files(self, name: str) -> list[str]:
+        """Return relative paths of expected output files that are missing."""
+        csgo = self._csgo_dir()
+        return [rel for rel in _PLUGIN_VERIFY_FILES.get(name, [])
+                if not os.path.exists(os.path.join(csgo, rel))]
+
+    def _verify_deployment(self, new_plugins: list[str]) -> bool:
+        """Run post-deploy diagnostics; log results; return True if all OK."""
+        if not new_plugins:
+            return True
+
+        self.log("[plugins] ── Verifying deployment ──")
+        all_ok = True
+
+        for name in new_plugins:
+            missing = self._verify_plugin_files(name)
+            kind = _PLUGIN_KIND.get(name, "?").upper()
+            if missing:
+                all_ok = False
+                self.log(f"[plugins]   ✗ {name} [{kind}]: missing expected file(s):")
+                for m in missing:
+                    self.log(f"[plugins]      - {m}")
+            else:
+                self.log(f"[plugins]   ✓ {name} [{kind}]: all expected files present")
+
+        kinds = {_PLUGIN_KIND.get(p) for p in new_plugins}
+        if "metamod" in kinds or "css" in kinds:
+            if self._metamod_installed():
+                self.log("[plugins]   ✓ MetaMod base is installed")
+            else:
+                all_ok = False
+                self.log("[plugins]   ✗ MetaMod base is NOT installed — "
+                         "plugins will NOT load")
+                self.log("[plugins]      → Get it from "
+                         "https://www.sourcemm.net/downloads.php?branch=master")
+                self.log("[plugins]      → Extract into csgo/ "
+                         "(creates addons/metamod/)")
+        if "css" in kinds:
+            if self._css_installed():
+                self.log("[plugins]   ✓ CounterStrikeSharp base is installed")
+            else:
+                all_ok = False
+                self.log("[plugins]   ✗ CounterStrikeSharp base is NOT installed "
+                         "— CSS plugins will NOT load")
+                self.log("[plugins]      → Get it from "
+                         "https://github.com/roflmuffin/CounterStrikeSharp/releases")
+
+        gi = self._gameinfo_has_metamod()
+        if gi is True:
+            self.log("[plugins]   ✓ gameinfo.gi includes MetaMod search path")
+        elif gi is False:
+            all_ok = False
+            self.log("[plugins]   ✗ gameinfo.gi is NOT patched — MetaMod won't load")
+        else:
+            all_ok = False
+            self.log(f"[plugins]   ✗ gameinfo.gi unreadable at {self._gameinfo_path()}")
+
+        if all_ok:
+            self.log("[plugins] ✓✓ All checks passed — plugins should be functional in-game")
+        else:
+            self.log("[plugins] ⚠  Verification found issues (see ✗ lines above)")
+        return all_ok
+
+    @property
+    def _ban_file(self) -> str:
+        """Absolute path to csgo/cfg/banned_user.cfg."""
+        return os.path.join(self._csgo_dir(), "cfg", "banned_user.cfg")
+
+    def _read_ban_lines(self) -> list[str]:
+        """Read banned_user.cfg and return its non-blank lines. Returns [] if absent."""
+        try:
+            with open(self._ban_file, encoding="utf-8", errors="replace") as f:
+                return [l.rstrip("\n") for l in f if l.strip()]
+        except FileNotFoundError:
+            return []
+
+    def _write_ban_lines(self, lines: list[str]) -> None:
+        """Write lines back to banned_user.cfg, creating the directory if needed."""
+        os.makedirs(os.path.dirname(self._ban_file), exist_ok=True)
+        with open(self._ban_file, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + ("\n" if lines else ""))
+
     def _plugin_manifest_path(self) -> str:
         return os.path.join(os.path.dirname(_CONFIG_FILE), "oblivion_plugins.json")
 
@@ -875,7 +1317,11 @@ class AppCore:
     def _save_plugin_manifest(self, mode: str, plugins: list[str]) -> None:
         try:
             with open(self._plugin_manifest_path(), "w", encoding="utf-8") as f:
-                json.dump({"mode": mode, "plugins": plugins}, f, indent=2)
+                json.dump({
+                    "mode":        mode,
+                    "plugins":     plugins,
+                    "deployed_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                }, f, indent=2)
         except Exception as exc:
             self.log(f"[plugins] Could not save manifest: {exc}")
 
@@ -916,30 +1362,48 @@ class AppCore:
         new_plugins = _MODE_PLUGIN_NAMES.get(mode, [])
 
         # ── 1. Remove previous mode's plugins ────────────────────────────────
+        # Only remove plugins that aren't carrying over to the new mode — so
+        # shared plugins like mapchooser don't get torn down and re-installed
+        # on every mode switch (which would also wipe any deployed config).
         manifest    = self._load_plugin_manifest()
         old_plugins = manifest.get("plugins", [])
-        if old_plugins and set(old_plugins) != set(new_plugins):
-            self.log(f"[plugins] Removing previous: {', '.join(old_plugins)}")
-            self._undeploy_plugins(old_plugins, csgo_dir)
+        to_remove   = sorted(set(old_plugins) - set(new_plugins))
+        if to_remove:
+            self.log(f"[plugins] Removing previous: {', '.join(to_remove)}")
+            self._undeploy_plugins(to_remove, csgo_dir)
 
         # ── 2. Deploy new plugins ─────────────────────────────────────────────
         if not new_plugins:
-            self.log(f"[plugins] No managed plugins for {mode} — vanilla")
+            self.log(f"[plugins] No managed plugins for {mode} — vanilla CS2")
             self._save_plugin_manifest(mode, [])
             return True
 
         self.log(f"[plugins] Deploying for {mode}: {', '.join(new_plugins)}")
-        file_count = 0
+        self.log(f"[plugins] Source root: {_PLUGINS_BASE}")
+        per_plugin_count: dict[str, int] = {n: 0 for n in new_plugins}
+        per_plugin_dirs:  dict[str, list[str]] = {n: [] for n in new_plugins}
+        any_failed = False
         for name in new_plugins:
             src_base = os.path.join(_PLUGINS_BASE, name)
             if not os.path.isdir(src_base):
-                self.log(f"[plugins] Source not found, skipping: {name}")
+                self.log(f"[plugins]   ✗ {name}: source folder missing — SKIPPED")
+                self.log(f"[plugins]      Expected at: {src_base}")
+                if os.path.isdir(_PLUGINS_BASE):
+                    siblings = sorted(os.listdir(_PLUGINS_BASE))
+                    self.log(f"[plugins]      Source root contents: "
+                             f"{', '.join(siblings) if siblings else '(empty)'}")
+                else:
+                    self.log(f"[plugins]      Source root does not exist: {_PLUGINS_BASE}")
+                    self.log("[plugins]      → If running as packaged .exe, the plugins/ "
+                             "folder must be alongside the exe (or bundled via PyInstaller)")
+                any_failed = True
                 continue
             for src_sub, dst_sub in _PLUGIN_COPY_RULES.get(name, []):
                 src = os.path.join(src_base, src_sub)
                 dst = os.path.join(csgo_dir, dst_sub)
                 if not os.path.exists(src):
-                    self.log(f"[plugins] Skipping missing: {name}/{src_sub}")
+                    self.log(f"[plugins]   ✗ {name}: missing source piece {src_sub or '(root)'}")
+                    any_failed = True
                     continue
                 os.makedirs(dst, exist_ok=True)
                 for root, _dirs, files in os.walk(src):
@@ -949,12 +1413,79 @@ class AppCore:
                     for fname in files:
                         shutil.copy2(os.path.join(root, fname),
                                      os.path.join(tgt_dir, fname))
-                        file_count += 1
-            self.log(f"[plugins]   {name} ✓")
+                        per_plugin_count[name] += 1
+                per_plugin_dirs[name].append(dst)
 
-        self.log(f"[plugins] Deploy complete — {file_count} file(s) copied → {csgo_dir}")
-        self._save_plugin_manifest(mode, new_plugins)
-        return True
+            # ── Per-plugin verification: confirm files actually landed ────────
+            n = per_plugin_count[name]
+            kind = _PLUGIN_KIND.get(name, "?").upper()
+            if n > 0:
+                self.log(f"[plugins]   ✓ {name} [{kind}]: {n} file(s) → "
+                         f"{', '.join(os.path.relpath(d, csgo_dir) for d in per_plugin_dirs[name])}")
+            else:
+                self.log(f"[plugins]   ✗ {name} [{kind}]: NO files copied — check source folder")
+                any_failed = True
+
+        total = sum(per_plugin_count.values())
+        if any_failed:
+            self.log(f"[plugins] Copy phase finished with WARNINGS — {total} file(s) copied")
+        else:
+            self.log(f"[plugins] Copy phase complete — {total} file(s) → {csgo_dir}")
+        # Manifest records only plugins that actually got files on disk — so the
+        # next mode switch's cleanup matches reality and the diagnostic doesn't
+        # lie about "deployed" plugins that were never copied.
+        actually_deployed = [p for p in new_plugins if per_plugin_count[p] > 0]
+        self._save_plugin_manifest(mode, actually_deployed)
+
+        # ── 3. Auto-patch gameinfo.gi so MetaMod actually loads ───────────────
+        if self._gameinfo_has_metamod() is False:
+            self.log("[plugins] gameinfo.gi missing MetaMod search path — patching…")
+            self._patch_gameinfo()
+
+        # ── 4. Verify deployment actually produced a working install ─────────
+        verified_ok = self._verify_deployment(new_plugins)
+
+        # ── 5. Tell the user what to do next ─────────────────────────────────
+        old_kinds = {_PLUGIN_KIND.get(p) for p in old_plugins}
+        new_kinds = {_PLUGIN_KIND.get(p) for p in new_plugins}
+        needs_metamod_restart = "metamod" in (old_kinds | new_kinds)
+        has_css_changes       = "css" in (old_kinds | new_kinds)
+
+        if not verified_ok:
+            self.log("[plugins] ⚠  Fix the issues above before relying on plugin features.")
+        elif not self.running:
+            self.log("[plugins] Plugins will activate when you start the server.")
+        elif needs_metamod_restart:
+            self.log("[plugins] ⚠  RESTART REQUIRED: MetaMod plugin only loads at server boot.")
+        elif has_css_changes:
+            self.log("[plugins] CSS plugins changed — hot-reloading via RCON…")
+            self._hot_reload_css()
+        return not any_failed and verified_ok
+
+    def _hot_reload_css(self) -> None:
+        """Tell a running CS2 server to reload its CounterStrikeSharp plugins.
+
+        CSS exposes `css_plugins reload` which re-scans
+        addons/counterstrikesharp/plugins/ and reloads everything without a
+        server restart.  Inspects the response: an "unknown command" reply means
+        CSS itself isn't loaded yet and a restart is needed instead.
+        """
+        if not self.running:
+            return
+        try:
+            resp = self.rcon.execute("css_plugins reload")
+            shown = (resp.strip() or "(no output)")[:300]
+            self.log(f"[plugins] css_plugins reload → {shown}")
+            if "unknown command" in resp.lower() or "unknown cmd" in resp.lower():
+                self.log("[plugins] ⚠  css_plugins not recognised — "
+                         "CounterStrikeSharp may not be loaded yet.")
+                self.log("[plugins]    Restart the server to activate plugin changes.")
+            else:
+                self.log("[plugins] ✓ CounterStrikeSharp plugins hot-reloaded — "
+                         "no restart needed")
+        except Exception as exc:
+            self.log(f"[plugins] Hot-reload failed ({exc}). Restart the server "
+                     "to activate plugin changes.")
 
     def deploy_plugins_async(self, mode: str,
                               on_done: Callable[[bool], None] | None = None) -> None:
@@ -968,40 +1499,80 @@ class AppCore:
     # ── plugin checker ────────────────────────────────────────────────────────
 
     def check_plugins(self) -> None:
-        from .config import APP_VERSION
+        """Full diagnostic: infrastructure, gameinfo patch, and per-plugin files."""
         def _do() -> None:
-            addons = _config.CS2_ADDONS_DIR
-            self.log("Plugin check: scanning addons directory…")
-            css_dir = os.path.join(addons, "counterstrikesharp")
-            if os.path.exists(css_dir):
-                self.log("CounterStrikeSharp: ✓ installed")
-                plugins_dir = os.path.join(css_dir, "plugins")
-                if os.path.exists(plugins_dir):
-                    plugins = sorted(
-                        p for p in os.listdir(plugins_dir)
-                        if os.path.isdir(os.path.join(plugins_dir, p))
-                    )
-                    self.log(f"  Plugins ({len(plugins)}): {', '.join(plugins)}"
-                             if plugins else "  No plugins installed")
-                try:
-                    req = urllib.request.Request(
-                        "https://api.github.com/repos/"
-                        "roflmuffin/CounterStrikeSharp/releases/latest",
-                        headers={"User-Agent": f"OblivionServerTool/{APP_VERSION}"},
-                    )
-                    with urllib.request.urlopen(req, timeout=10) as resp:
-                        rel = json.loads(resp.read())
-                    tag  = rel.get("tag_name", "?")
-                    date = rel.get("published_at", "")[:10]
-                    self.log(f"  Latest release: {tag}  ({date})")
-                except Exception as exc:
-                    self.log(f"  GitHub check failed: {exc}")
-            else:
-                self.log("CounterStrikeSharp: not found in addons/")
-            mm_dir = os.path.join(addons, "metamod")
-            self.log("Metamod:Source: " + ("✓ installed" if os.path.exists(mm_dir)
-                                            else "not found in addons/"))
-            self.log(f"Plugin check complete  (addons: {addons})")
+            self.log("─── Plugin install diagnostic ───")
+            csgo = self._csgo_dir()
+            self.log(f"csgo/ = {csgo}")
+
+            # Infrastructure
+            self.log("MetaMod base:           "
+                     + ("✓ installed" if self._metamod_installed()
+                        else "✗ NOT installed (download from sourcemm.net)"))
+            self.log("CounterStrikeSharp:     "
+                     + ("✓ installed" if self._css_installed()
+                        else "✗ NOT installed (github roflmuffin/CounterStrikeSharp)"))
+            gi = self._gameinfo_has_metamod()
+            self.log("gameinfo.gi MetaMod:    "
+                     + ("✓ patched" if gi is True
+                        else "✗ NOT patched (run a plugin deploy to auto-fix)" if gi is False
+                        else "⚠  file unreadable"))
+
+            # What's currently installed in the plugins folder
+            plugins_dir = os.path.join(csgo, "addons", "counterstrikesharp", "plugins")
+            if os.path.isdir(plugins_dir):
+                installed = sorted(
+                    p for p in os.listdir(plugins_dir)
+                    if os.path.isdir(os.path.join(plugins_dir, p))
+                )
+                self.log(f"CSS plugins on disk:    {len(installed)}"
+                         + (f" — {', '.join(installed)}" if installed else " (none)"))
+
+            # Plugin source root (where deploy reads from)
+            src_root_ok = os.path.isdir(_PLUGINS_BASE)
+            self.log(f"Plugin source root:     {_PLUGINS_BASE}")
+            self.log(f"Source root exists:     "
+                     + ("✓ yes" if src_root_ok
+                        else "✗ NO — re-deploy will not find any plugin files"))
+
+            # Per-managed-plugin: file presence
+            manifest      = self._load_plugin_manifest()
+            current_mode  = manifest.get("mode", "(none)")
+            current_names = manifest.get("plugins", [])
+            deployed_at   = manifest.get("deployed_at", "")
+            ts_note = f"  (deployed {deployed_at})" if deployed_at else ""
+            self.log(f"Last deployed mode:     {current_mode}{ts_note}"
+                     + (f" → {', '.join(current_names)}" if current_names else " (vanilla)"))
+            for name in current_names:
+                src_dir = os.path.join(_PLUGINS_BASE, name)
+                src_ok  = os.path.isdir(src_dir)
+                missing = self._verify_plugin_files(name)
+                kind = _PLUGIN_KIND.get(name, "?").upper()
+                src_note = " (source: ✓)" if src_ok else f" (source: ✗ NOT FOUND — redeploy won't fix this)"
+                if missing:
+                    self.log(f"  ✗ {name} [{kind}]: missing {len(missing)} file(s){src_note}")
+                    for m in missing:
+                        self.log(f"      - {m}")
+                    if src_ok:
+                        self.log(f"      → Click 'Deploy Plugins for Current Mode' to fix")
+                else:
+                    self.log(f"  ✓ {name} [{kind}]: all expected files present")
+
+            # Latest CSS release info
+            try:
+                req = urllib.request.Request(
+                    "https://api.github.com/repos/"
+                    "roflmuffin/CounterStrikeSharp/releases/latest",
+                    headers={"User-Agent": f"OblivionServerTool/{APP_VERSION}"},
+                )
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    rel = json.loads(resp.read())
+                self.log(f"CSS latest release:     {rel.get('tag_name', '?')} "
+                         f"({rel.get('published_at', '')[:10]})")
+            except Exception as exc:
+                self.log(f"CSS latest release:     check failed ({exc})")
+
+            self.log("─── End of diagnostic ───")
         threading.Thread(target=_do, daemon=True).start()
 
     # ── workshop download ─────────────────────────────────────────────────────
@@ -1093,7 +1664,6 @@ class AppCore:
 
     def _ensure_depotdownloader(self) -> bool:
         """Download DepotDownloader if not already present. Returns True on success."""
-        from .config import APP_VERSION
         if os.path.isfile(_config.DEPOTDL_PATH):
             return True
         self.log("DepotDownloader not found — downloading from GitHub…")
@@ -1186,24 +1756,55 @@ class AppCore:
                 "-pubfile", workshop_id,
                 "-dir",     dest,
             ] + login_args
-            self.log("  Launching DepotDownloader — "
-                     "enter 2FA/Guard code in the console if prompted (first time only).")
             try:
-                if sys.platform == "win32":
+                # ── Launch ────────────────────────────────────────────────────
+                # Cached-session path runs hidden so we can stream stdout/stderr
+                # into our log — otherwise the new console flashes & closes and
+                # the user never sees DepotDownloader's error.
+                # First-time path needs a real console for 2FA / Steam Guard input.
+                if session_ok:
+                    self.log("  Launching DepotDownloader (silent — output captured below)…")
+                    flags = (subprocess.CREATE_NO_WINDOW
+                             if sys.platform == "win32" else 0)
                     proc = subprocess.Popen(
-                        cmd, creationflags=subprocess.CREATE_NEW_CONSOLE)
+                        cmd,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        bufsize=1,
+                        creationflags=flags,
+                    )
                 else:
-                    proc = subprocess.Popen(
-                        ["x-terminal-emulator", "-e"] + cmd)
+                    self.log("  Launching DepotDownloader — "
+                             "enter 2FA/Guard code in the console if prompted (first time only).")
+                    if sys.platform == "win32":
+                        proc = subprocess.Popen(
+                            cmd, creationflags=subprocess.CREATE_NEW_CONSOLE)
+                    else:
+                        proc = subprocess.Popen(
+                            ["x-terminal-emulator", "-e"] + cmd)
 
                 self._active_dl_proc = proc
-                TIMEOUT   = 600
+
+                # ── Drain captured output (silent path only) ─────────────────
+                # On a background thread so the main wait-loop below can still
+                # enforce TIMEOUT.
+                if session_ok and proc.stdout is not None:
+                    def _drain(pipe) -> None:
+                        for raw in pipe:
+                            line = raw.rstrip()
+                            if line:
+                                self.log(f"  [dd] {line}")
+                    threading.Thread(target=_drain, args=(proc.stdout,),
+                                     daemon=True).start()
+
+                # ── Wait, with periodic progress logs and a hard timeout ─────
                 start     = time.time()
                 warned_at: set[int] = set()
                 while proc.poll() is None:
                     time.sleep(2)
                     elapsed = int(time.time() - start)
-                    if elapsed >= TIMEOUT:
+                    if elapsed >= _DL_TIMEOUT_SECS:
                         self.log("  Timed out — cancelling")
                         try:
                             proc.terminate()
@@ -1232,6 +1833,16 @@ class AppCore:
                 else:
                     self.log(f"  DepotDownloader exit code {proc.returncode}")
                     self.log(f"  No files found at: {dest}")
+                    # A failure on the cached-session path almost always means
+                    # the saved token expired.  Invalidate it so the next
+                    # download attempt forces a fresh interactive login.
+                    if session_ok and self.steam_session_active:
+                        self.steam_session_active = False
+                        self.save_config()
+                        self.log("  ⚠  Cached Steam session looks expired — invalidated.")
+                        self.log("     Next download will prompt for password / Steam Guard.")
+                        if self.on_steam_session_change:
+                            self.on_steam_session_change()
                 self.log("─" * 48)
             except FileNotFoundError:
                 self.log(f"  DepotDownloader not found: {_config.DEPOTDL_PATH}")
@@ -1328,52 +1939,65 @@ class AppCore:
                    duration: int = 0) -> None:
         def _do() -> None:
             try:
-                self.rcon.execute(f"banid {duration} {steamid}")
-                self.rcon.execute("writeid")
-                self.log(f"Banned: {name or steamid} "
-                         f"({'permanent' if duration == 0 else f'{duration} min'})")
+                existing = self._read_ban_lines()
+                if any(steamid in line for line in existing):
+                    self.log(f"[bans] {steamid} is already in the ban list")
+                else:
+                    existing.append(f"banid {duration} {steamid}")
+                    self._write_ban_lines(existing)
+                    dur_str = "permanent" if duration == 0 else f"{duration} min"
+                    self.log(f"Banned: {name or steamid} ({dur_str})")
             except Exception as exc:
-                self.log(f"Ban failed: {exc}")
+                self.log(f"Ban (file write) failed: {exc}")
+            if self.running:
+                try:
+                    self.rcon.execute(f"banid {duration} {steamid}")
+                except Exception as exc:
+                    self.log(f"Ban RCON: {exc}")
         threading.Thread(target=_do, daemon=True).start()
 
     def unban_player(self, steamid: str) -> None:
         def _do() -> None:
             try:
-                self.rcon.execute(f"removeid {steamid}")
-                self.rcon.execute("writeid")
-                self.log(f"Unbanned: {steamid}")
+                lines = self._read_ban_lines()
+                new_lines = [l for l in lines if steamid not in l]
+                removed = len(lines) - len(new_lines)
+                if removed:
+                    self._write_ban_lines(new_lines)
+                    self.log(f"Unbanned: {steamid} "
+                             f"(removed {removed} entr{'ies' if removed != 1 else 'y'})")
+                else:
+                    self.log(f"[bans] {steamid} not found in ban list")
             except Exception as exc:
-                self.log(f"Unban failed: {exc}")
+                self.log(f"Unban (file write) failed: {exc}")
+            if self.running:
+                try:
+                    self.rcon.execute(f"removeid {steamid}")
+                except Exception as exc:
+                    self.log(f"Unban RCON: {exc}")
         threading.Thread(target=_do, daemon=True).start()
 
     def get_ban_list(self, callback: Callable[[list[str]], None]) -> None:
         """Return the server's current ban list.
 
         Strategy (in order):
-          1. Read banned_user_ids.cfg from disk — works offline, always current.
-          2. Fall back to RCON 'listid' if the file doesn't exist yet (bans
-             not yet written) or the server is running and has in-memory bans.
+          1. Read csgo/cfg/banned_user.cfg from disk — works offline, always
+             current.  Each line has the form:  banid <duration> <steamid>
+          2. Fall back to RCON 'listid' if the file doesn't exist yet.
         """
         def _do() -> None:
-            # ── 1. Disk file ──────────────────────────────────────────────────
-            ban_file = os.path.join(
-                os.path.dirname(_config.CS2_ADDONS_DIR),
-                "banned_user_ids.cfg",
-            )
-            if os.path.exists(ban_file):
-                try:
-                    with open(ban_file, encoding="utf-8", errors="replace") as f:
-                        lines = [
-                            l.strip() for l in f
-                            if l.strip() and not l.strip().startswith("//")
-                        ]
-                    self.log(f"[bans] Read {len(lines)} ban(s) from {ban_file}")
+            # 1. Disk file — works offline, always current
+            try:
+                raw = self._read_ban_lines()
+                lines = [s for l in raw if (s := l.strip()) and not s.startswith("//")]
+                if lines or os.path.exists(self._ban_file):
+                    self.log(f"[bans] Read {len(lines)} ban(s) from {self._ban_file}")
                     callback(lines)
                     return
-                except Exception as exc:
-                    self.log(f"[bans] Could not read ban file: {exc}")
+            except Exception as exc:
+                self.log(f"[bans] Could not read ban file: {exc}")
 
-            # ── 2. RCON listid ────────────────────────────────────────────────
+            # 2. Fall back to RCON listid when file is absent
             if not self.running:
                 self.log("[bans] Server offline and no ban file found on disk")
                 callback([])
@@ -1381,12 +2005,10 @@ class AppCore:
             try:
                 out = self.rcon.execute("listid")
                 self.log(f"[bans] listid raw output:\n{out.strip() or '(empty)'}")
-                # Filter to lines that look like actual ban entries
-                # (skip header lines like "UserID filter list:" or "0 bans...")
                 lines = [
-                    l.strip() for l in out.splitlines()
-                    if l.strip() and re.search(
-                        r"(STEAM_|\\[U:|76561|BOT)", l, re.IGNORECASE
+                    s for l in out.splitlines()
+                    if (s := l.strip()) and re.search(
+                        r"(STEAM_|\[U:|765\d{14,}|BOT)", s, re.IGNORECASE
                     )
                 ]
                 callback(lines)
@@ -1411,8 +2033,11 @@ class AppCore:
     def set_friendly_fire(self, enabled: bool) -> None:
         def _do() -> None:
             try:
-                self.rcon.execute(f"mp_friendlyfire {1 if enabled else 0}")
-                self.rcon.execute(f"mp_autokick {0 if enabled else 1}")
+                # Two cvars — batch over one connection instead of opening two
+                self.rcon.execute_many([
+                    f"mp_friendlyfire {1 if enabled else 0}",
+                    f"mp_autokick {0 if enabled else 1}",
+                ])
                 self._ff_enabled = enabled
                 self.log("Friendly fire "
                          + ("ENABLED (autokick off)" if enabled else "DISABLED (autokick on)"))
@@ -1466,9 +2091,10 @@ class AppCore:
         def _do() -> None:
             diff = self._BOT_DIFF.get(self.bot_difficulty, "1")
             try:
-                self.rcon.execute(f"bot_difficulty {diff}")
-                for _ in range(count):
-                    self.rcon.execute("bot_add")
+                # Batch into one connection: bot_difficulty + N × bot_add
+                # (each execute() call previously opened its own TCP socket)
+                cmds = [f"bot_difficulty {diff}"] + ["bot_add"] * count
+                self.rcon.execute_many(cmds)
                 self.log(f"Added {count} bot(s) — difficulty: {self.bot_difficulty}")
             except Exception as exc:
                 self.log(f"Add bot failed: {exc}")
@@ -1494,13 +2120,13 @@ class AppCore:
 
         def _do() -> None:
             try:
-                body = f"itemcount={len(ids)}"
+                params: dict[str, str | int] = {"itemcount": len(ids)}
                 for i, wid in enumerate(ids):
-                    body += f"&publishedfileids%5B{i}%5D={wid}"
+                    params[f"publishedfileids[{i}]"] = wid
                 req = urllib.request.Request(
                     "https://api.steampowered.com"
                     "/ISteamRemoteStorage/GetPublishedFileDetails/v1/",
-                    data=body.encode(),
+                    data=urllib.parse.urlencode(params).encode(),
                     headers={"Content-Type": "application/x-www-form-urlencoded"},
                     method="POST",
                 )

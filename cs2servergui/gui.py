@@ -19,15 +19,21 @@ import urllib.parse
 import urllib.request
 import webbrowser
 from collections.abc import Callable
+from io import BytesIO
 
 import customtkinter as ctk
 from PIL import Image, ImageDraw, ImageTk
 
+from . import config as _config   # module alias — gives live values after update_paths()
 from .config import (
-    OFFICIAL_MAPS, GAME_MODES, MODE_MAPS, MODE_WORKSHOP_SEARCH,
+    OFFICIAL_MAPS, GAME_MODES, MODE_MAPS, MODE_WORKSHOP_SEARCH, MODE_WORKSHOP_TAGS,
     RCON_HOST, RCON_PORT, FLASK_PORT, _WS_BROWSE, load_workshop,
 )
 from .core import AppCore
+
+# Matches a SteamID in any format CS2 may embed in a ban file line:
+#   banid 0 STEAM_X:X:XXXXXXXX  |  [U:1:XXXXXXXX]  |  76561XXXXXXXXXXXX
+_BAN_STEAMID_RE = re.compile(r'(STEAM_\S+|\[U:[^\]]+\]|765\d{14,})', re.IGNORECASE)
 
 # ── Global CTk theme (applied once at import time) ────────────────────────────
 ctk.set_appearance_mode("dark")
@@ -115,6 +121,11 @@ class CS2GUI:
         # grid rebuild, mode switch, or page lift.  Invalidated only when a fresh
         # download replaces a placeholder (see _refresh_*_card_image).
         self._img_cache:           dict[str, ctk.CTkImage]  = {}
+        # Cache rendered glow PIL images by (color, w, h).  The pixel-by-pixel
+        # render in _redraw_btn_glow is slow in pure Python — caching means
+        # <Configure> events at the same size (alt-tab, layout refresh) reuse
+        # the existing image instead of re-rendering.
+        self._glow_cache:          dict[tuple[str | None, int, int], Image.Image] = {}
 
         self.root = ctk.CTk()
         self.root.title("Oblivion Server Tool")
@@ -125,7 +136,6 @@ class CS2GUI:
 
         self._build()
         self._start_monitor()
-        self._tick_uptime()
         # Stagger-warm all map images across idle cycles so the first page-switch
         # never stalls waiting for PhotoImage creation.
         self.root.after(200, self._prewarm_image_cache)
@@ -1225,18 +1235,16 @@ class CS2GUI:
     # ── log / RCON output ─────────────────────────────────────────────────────
 
     def _append_log(self, entry: str) -> None:
-        self._logbox.configure(state="normal")
-        self._logbox.insert("end", entry + "\n")
-        self._logbox.see("end")
-        self._logbox.configure(state="disabled")
+        line = entry + "\n"
         # Mirror every log line to the Workshop tab's download log so download
         # progress is visible without leaving the Workshop page.
-        wk = getattr(self, "_wk_logbox", None)
-        if wk is not None:
-            wk.configure(state="normal")
-            wk.insert("end", entry + "\n")
-            wk.see("end")
-            wk.configure(state="disabled")
+        for box in (self._logbox, getattr(self, "_wk_logbox", None)):
+            if box is None:
+                continue
+            box.configure(state="normal")
+            box.insert("end", line)
+            box.see("end")
+            box.configure(state="disabled")
 
     def _clear_log(self) -> None:
         self._logbox.configure(state="normal")
@@ -1355,36 +1363,40 @@ class CS2GUI:
             c = c.lstrip("#")
             return (int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16))
 
-        br, bgn, bb = _hex(self.CARD)
-        color       = getattr(cv, "_glow_color", None)
-        glow_px     = max(8.0, h / 8)    # depth scales with button height
+        color   = getattr(cv, "_glow_color", None)
+        key     = (color, w, h)
+        img     = self._glow_cache.get(key)
 
-        if color is None:
-            img = Image.new("RGB", (w, h), (br, bgn, bb))
-        else:
-            gr, gg, gb = _hex(color)
-            buf = bytearray(w * h * 3)
-            for y in range(h):
-                v_dist  = min(y, h - 1 - y)
-                v_edge  = max(0.0, 1.0 - v_dist / glow_px)
-                row_off = y * w * 3
-                for x in range(w):
-                    h_dist = min(x, w - 1 - x)
-                    h_edge = max(0.0, 1.0 - h_dist / glow_px)
-                    m      = max(h_edge, v_edge) ** 1.5 * 0.85
-                    inv    = 1.0 - m
-                    i      = row_off + x * 3
-                    buf[i]     = int(br  * inv + gr * m)
-                    buf[i + 1] = int(bgn * inv + gg * m)
-                    buf[i + 2] = int(bb  * inv + gb * m)
-            img = Image.frombytes("RGB", (w, h), bytes(buf))
+        if img is None:
+            br, bgn, bb = _hex(self.CARD)
+            glow_px     = max(8.0, h / 8)
+            if color is None:
+                gradient = Image.new("RGB", (w, h), (br, bgn, bb))
+            else:
+                gr, gg, gb = _hex(color)
+                buf = bytearray(w * h * 3)
+                for y in range(h):
+                    v_dist  = min(y, h - 1 - y)
+                    v_edge  = max(0.0, 1.0 - v_dist / glow_px)
+                    row_off = y * w * 3
+                    for x in range(w):
+                        h_dist = min(x, w - 1 - x)
+                        h_edge = max(0.0, 1.0 - h_dist / glow_px)
+                        m      = max(h_edge, v_edge) ** 1.5 * 0.85
+                        inv    = 1.0 - m
+                        i      = row_off + x * 3
+                        buf[i]     = int(br  * inv + gr * m)
+                        buf[i + 1] = int(bgn * inv + gg * m)
+                        buf[i + 2] = int(bb  * inv + gb * m)
+                gradient = Image.frombytes("RGB", (w, h), bytes(buf))
 
-        # Mask to rounded rectangle so gradient respects wrapper corner_radius=12
-        mask = Image.new("L", (w, h), 0)
-        ImageDraw.Draw(mask).rounded_rectangle([0, 0, w - 1, h - 1],
-                                               radius=12, fill=255)
-        card_bg = Image.new("RGB", (w, h), (br, bgn, bb))
-        img = Image.composite(img, card_bg, mask)
+            # Mask to rounded rectangle so gradient respects corner_radius=12
+            mask = Image.new("L", (w, h), 0)
+            ImageDraw.Draw(mask).rounded_rectangle([0, 0, w - 1, h - 1],
+                                                   radius=12, fill=255)
+            card_bg = Image.new("RGB", (w, h), (br, bgn, bb))
+            img = Image.composite(gradient, card_bg, mask)
+            self._glow_cache[key] = img
 
         photo = ImageTk.PhotoImage(img)
         cv.delete("all")
@@ -1585,7 +1597,6 @@ class CS2GUI:
                         data = resp.read()
                     if len(data) > 2048:   # sanity: skip error pages / placeholders
                         # Re-encode to JPEG via PIL so any source format works
-                        from io import BytesIO
                         pil = Image.open(BytesIO(data)).convert("RGB")
                         pil.save(cache, "JPEG", quality=82)
                         self.root.after(0, self._refresh_official_card_image, map_id)
@@ -1989,8 +2000,7 @@ class CS2GUI:
             self._map_preview_lbl.configure(text=preview)
 
     def _refresh_wk(self) -> None:
-        from . import config as _cfg
-        self.core.log(f"Workshop scan: {_cfg.WORKSHOP_DIR}")
+        self.core.log(f"Workshop scan: {_config.WORKSHOP_DIR}")
         ids = load_workshop()
         self.core.log(f"Workshop scan: {len(ids)} map(s) found")
         self._wk_all_ids    = ids
@@ -2025,7 +2035,6 @@ class CS2GUI:
         labelled.  If zero maps match the filter, fall back to showing all of
         them so the user isn't left with an empty picker.
         """
-        from .config import MODE_WORKSHOP_TAGS
         ids    = self._wk_all_ids
         labels = self._wk_all_labels
         if not ids:
@@ -2090,8 +2099,30 @@ class CS2GUI:
             self._sc_badge_wrap.configure(fg_color=color)
 
     def _on_core_state_change(self) -> None:
-        """Called on the main thread whenever AppCore.boot_state changes."""
-        self._set_state(self.core.boot_state)
+        """Called on the main thread whenever AppCore.boot_state changes.
+
+        Centralises all uptime / boot-pulse housekeeping so every code path
+        (normal start, server crash detection, probe_existing_server reconnect)
+        gets correct ticker behaviour without duplication.
+        """
+        state = self.core.boot_state
+
+        if state == "booting" and self._uptime_start is None:
+            # Fresh boot: start the clock and kick off the animated badge.
+            self._uptime_start = time.time()
+            self._tick_uptime()
+            self._boot_pulse()
+        elif state == "ready" and self._uptime_start is None:
+            # Reached "ready" without going through "booting" — this happens
+            # when probe_existing_server() reconnects to a server that was
+            # already running when the GUI opened.  The uptime will start from
+            # the moment of detection (slightly off, but far better than "—").
+            self._uptime_start = time.time()
+            self._tick_uptime()
+        elif state == "offline":
+            self._uptime_start = None   # stop the ticker on next tick
+
+        self._set_state(state)
 
     def _boot_pulse(self) -> None:
         """Animate the header dot while the server is booting."""
@@ -2105,27 +2136,43 @@ class CS2GUI:
     # ── uptime ticker ─────────────────────────────────────────────────────────
 
     def _tick_uptime(self) -> None:
-        if self._uptime_start is not None and self.core.running:
-            secs  = int(time.time() - self._uptime_start)
-            h, r  = divmod(secs, 3600)
-            m, s  = divmod(r, 60)
-            self._sb_uptime.configure(text=f"{h:02d}:{m:02d}:{s:02d}")
+        # Self-cancel when there's nothing to display.
+        if self._uptime_start is None or not self.core.running:
+            return
+        secs  = int(time.time() - self._uptime_start)
+        h, r  = divmod(secs, 3600)
+        m, s  = divmod(r, 60)
+        self._sb_uptime.configure(text=f"{h:02d}:{m:02d}:{s:02d}")
         self.root.after(1000, self._tick_uptime)
 
     # ── button handlers ───────────────────────────────────────────────────────
 
     def _start(self) -> None:
+        """Start the server non-blocking: plugins are deployed on a daemon thread.
+
+        Disables the START button immediately so the user can't double-click.
+        All UI state transitions happen via the on_state_change callback once
+        AppCore sets boot_state.  If start_server() fails (bad exe path etc.)
+        we reset back to "offline" so the button becomes clickable again.
+        """
         m, is_wk = self._selected_map()
-        self.core.start_server(m, self._mode_var.get(), is_wk)
-        if self.core.running:
-            self._uptime_start = time.time()
-            self._set_state("booting")
-            self._boot_pulse()
+        mode = self._mode_var.get()
+        # Lock the button right away — gives immediate visual feedback
+        self._start_btn.configure(state="disabled")
+
+        def _do() -> None:
+            self.core.start_server(m, mode, is_wk)
+            if not self.core.running:
+                # start_server() returned without launching (bad exe path, etc.).
+                # on_state_change was never called, so reset the UI manually.
+                self.root.after(0, self._set_state, "offline")
+
+        threading.Thread(target=_do, daemon=True).start()
 
     def _stop(self) -> None:
         self.core.stop_server()
-        self._uptime_start = None
-        self._set_state("offline")
+        self._uptime_start = None   # kill the ticker immediately; on_state_change
+        self._set_state("offline")  # also fires, but _set_state is idempotent
 
     def _change(self) -> None:
         m, is_wk = self._selected_map()
@@ -2313,8 +2360,7 @@ class CS2GUI:
             if not path:
                 err_lbl.configure(text="Please select a directory.")
                 return
-            import os as _os
-            if not _os.path.isdir(path):
+            if not os.path.isdir(path):
                 err_lbl.configure(text="Directory does not exist.")
                 return
             self.core.update_server_dir(path)
@@ -2324,8 +2370,7 @@ class CS2GUI:
             dlg.destroy()
             self.core.log("Setup complete — you can change this anytime in Config → Save Settings")
             # If steamcmd.exe is not present, offer to install the server
-            from . import config as _cfg
-            if not _os.path.isfile(_cfg.STEAMCMD_PATH):
+            if not os.path.isfile(_config.STEAMCMD_PATH):
                 self.root.after(150, self._show_install_offer)
 
         ctk.CTkButton(
@@ -2600,6 +2645,13 @@ class CS2GUI:
                 self._redraw_btn_glow(cv, w, h)
 
         if state == "offline":
+            # Cancel any pending auto-refresh so it doesn't poll a dead server.
+            # Covers both manual stop and crash-detection paths since _set_state
+            # is always invoked on the main thread (directly or via root.after).
+            if self._auto_refresh_after:
+                self.root.after_cancel(self._auto_refresh_after)
+                self._auto_refresh_after = None
+                self._auto_refresh_var.set(False)
             self._set_status_badge("OFFLINE", self.RED)
             if self._ff_btn:
                 self._ff_btn.configure(state="disabled")
@@ -2822,22 +2874,31 @@ class CS2GUI:
     # ── process monitor ───────────────────────────────────────────────────────
 
     def _start_monitor(self) -> None:
-        """Daemon thread: detects unexpected server process death."""
+        """Daemon thread: detects unexpected server process death.
+
+        Polls every 2 s.  proc.poll() is non-blocking and cheap — the GIL
+        hold time is negligible.  Only fires the crash-notification path when
+        cs2.exe exits without us calling stop_server() first (proc is not None
+        but poll() returns an exit code).
+        """
         def _watch() -> None:
             while True:
                 time.sleep(2)
-                if (self.core.running
-                        and self.core.proc is not None
-                        and self.core.proc.poll() is not None):
-                    self.core.proc       = None
-                    self.core.running    = False
-                    self.core.boot_state = "offline"
-                    self._uptime_start   = None
-                    self.core.log("Server process exited unexpectedly")
-                    self.root.after(0, self._set_state, "offline")
-                    # Crash notification: bell + bring window to front
-                    self.root.after(100, self.root.bell)
-                    self.root.after(200, self.root.lift)
+                proc = self.core.proc   # snapshot under GIL
+                if proc is None or not self.core.running:
+                    continue
+                if proc.poll() is None:
+                    continue
+                # Process exited unexpectedly
+                self.core.proc       = None
+                self.core.running    = False
+                self.core.boot_state = "offline"
+                self._uptime_start   = None
+                self.core.log("Server process exited unexpectedly")
+                self.root.after(0, self._set_state, "offline")
+                # Crash notification: bell + bring window to front
+                self.root.after(100, self.root.bell)
+                self.root.after(200, self.root.lift)
         threading.Thread(target=_watch, daemon=True).start()
 
     # ── workshop download approval dialog (from web requests) ─────────────────
@@ -3048,9 +3109,6 @@ class CS2GUI:
             self.core.log("[!] Enter a SteamID to ban")
             return
         self._ban_id_var.set("")
-        if not self.core.running:
-            self.core.log("[!] Server not running")
-            return
         self.core.ban_player(steamid, duration=0)
 
     def _refresh_ban_list(self) -> None:
@@ -3074,21 +3132,23 @@ class CS2GUI:
         for entry in entries:
             row = ctk.CTkFrame(self._ban_scroll, fg_color="transparent")
             row.pack(fill="x", pady=2)
-            ctk.CTkLabel(row, text=entry[:48],
+            ctk.CTkLabel(row, text=entry[:52],
                          text_color=self.TEXT, font=ctk.CTkFont(size=11),
                          anchor="w").pack(side="left", fill="x", expand=True)
-            # Extract SteamID in any format CS2 may use:
-            #   STEAM_X:X:XXXXXXXX  |  [U:1:XXXXXXXX]  |  76561XXXXXXXXXXXX
-            sid_match = re.search(
-                r'(STEAM_\S+|\[U:[^\]]+\]|765\d{14,})', entry, re.IGNORECASE
-            )
-            sid = sid_match.group(0) if sid_match else entry.strip()
-            ctk.CTkButton(
-                row, text="Unban", width=56, height=24,
-                fg_color=self.GREEN, hover_color="#16a34a",
-                text_color="#0d0d14", font=ctk.CTkFont(size=11, weight="bold"),
-                command=functools.partial(self.core.unban_player, sid),
-            ).pack(side="right")
+            sid_match = _BAN_STEAMID_RE.search(entry)
+            if sid_match:
+                sid = sid_match.group(0)
+                ctk.CTkButton(
+                    row, text="Unban", width=56, height=24,
+                    fg_color=self.GREEN, hover_color="#16a34a",
+                    text_color="#0d0d14", font=ctk.CTkFont(size=11, weight="bold"),
+                    command=functools.partial(self.core.unban_player, sid),
+                ).pack(side="right")
+            else:
+                ctk.CTkLabel(
+                    row, text="(unparseable)", width=72,
+                    text_color=self.SUB, font=ctk.CTkFont(size=10),
+                ).pack(side="right")
             self._ban_rows.append(row)
 
     # ── config tab handlers ───────────────────────────────────────────────────

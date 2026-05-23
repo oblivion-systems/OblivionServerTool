@@ -42,7 +42,7 @@ DEPOTDL_RELEASE_URL = (
 # ── App self-update ────────────────────────────────────────────────────────────
 # Bump APP_VERSION before each release tag, then push and create a GitHub
 # release tagged "v<APP_VERSION>" — all connected clients will see the update.
-APP_VERSION      = "0.8"
+APP_VERSION      = "0.8.5"
 APP_REPO         = "jacquesvniekerk-eng/OblivionServerTool"
 APP_RELEASES_URL = f"https://github.com/{APP_REPO}/releases/latest"
 APP_API_URL      = f"https://api.github.com/repos/{APP_REPO}/releases/latest"
@@ -115,6 +115,8 @@ GAME_MODES = [
     "Competitive", "Casual", "Wingman", "3v3", "4v4", "1v1",
     "Arms Race", "Demolition", "Deathmatch",
     "Zombies", "Surf", "KZ / Climb", "Retakes",
+    "Jailbreak", "Practice",
+    "Gun Game", "Deathrun", "Scouts & Knives", "One in the Chamber",
 ]
 
 # game_type + game_mode together define CS2's ruleset
@@ -132,6 +134,20 @@ MODE_SETTINGS: dict[str, dict[str, str]] = {
     "Surf":        {"game_type": "6", "game_mode": "0", "maxplayers": "20"},
     "KZ / Climb":  {"game_type": "6", "game_mode": "0", "maxplayers": "10"},
     "Retakes":     {"game_type": "0", "game_mode": "0", "maxplayers": "10"},
+    # Jailbreak: hostage-style ruleset (game_type 0 / game_mode 2) gives the
+    # CT-warden / T-prisoner scoring that the Jailbreak plugin expects.
+    "Jailbreak":   {"game_type": "0", "game_mode": "2", "maxplayers": "32"},
+    # Practice/MatchZy: runs on competitive ruleset; MatchZy drives match flow.
+    "Practice":    {"game_type": "0", "game_mode": "1", "maxplayers": "10"},
+    # Gun Game: classic CS:GO-style progression — Arms Race ruleset base,
+    # plugin overrides weapon progression and round flow.
+    "Gun Game":            {"game_type": "1", "game_mode": "0", "maxplayers": "16"},
+    # Deathrun: hostage rules, T-runners through traps, CT-savers chase.
+    "Deathrun":            {"game_type": "0", "game_mode": "2", "maxplayers": "32"},
+    # Scouts & Knives: competitive ruleset, scout + knife only.
+    "Scouts & Knives":     {"game_type": "0", "game_mode": "1", "maxplayers": "10"},
+    # One in the Chamber: deathmatch-style fun mode, one-bullet pistol kills.
+    "One in the Chamber":  {"game_type": "1", "game_mode": "2", "maxplayers": "16"},
 }
 _DEFAULT_MODE = MODE_SETTINGS["Competitive"]
 
@@ -154,6 +170,12 @@ MODE_MAPS: dict[str, list[str] | None] = {
     "Surf":        None,
     "KZ / Climb":  None,
     "Retakes":     OFFICIAL_MAPS,
+    "Jailbreak":   None,           # jb_* maps come from the workshop
+    "Practice":    OFFICIAL_MAPS,   # MatchZy supports any standard comp map
+    "Gun Game":            OFFICIAL_MAPS,  # cs_/de_ small/mid maps work well
+    "Deathrun":            None,           # dr_* maps from workshop
+    "Scouts & Knives":     OFFICIAL_MAPS,
+    "One in the Chamber":  OFFICIAL_MAPS,
 }
 
 # Search terms for Steam Workshop URL filtering per mode
@@ -171,6 +193,12 @@ MODE_WORKSHOP_SEARCH: dict[str, str] = {
     "Surf":        "surf",
     "KZ / Climb":  "kz climb",
     "Retakes":     "retake",
+    "Jailbreak":   "jailbreak jb_",
+    "Practice":    "competitive practice",
+    "Gun Game":            "gun game gg_",
+    "Deathrun":            "deathrun dr_",
+    "Scouts & Knives":     "scout knife",
+    "One in the Chamber":  "one in the chamber oitc",
 }
 _WS_BROWSE = "https://steamcommunity.com/workshop/browse/?appid=730&browsesort=trend"
 
@@ -197,6 +225,12 @@ MODE_WORKSHOP_TAGS: dict[str, list[str]] = {
     "Surf":        ["surf"],
     "KZ / Climb":  ["kz", "climb"],
     "Retakes":     ["retake", "classic", "competitive"],
+    "Jailbreak":   ["jailbreak", "jb"],
+    "Practice":    ["classic", "competitive"],
+    "Gun Game":            ["gungame", "gun game", "armsrace"],
+    "Deathrun":            ["deathrun", "fun"],
+    "Scouts & Knives":     ["scout", "knife", "classic"],
+    "One in the Chamber":  ["fun", "minigame", "deathmatch"],
 }
 
 

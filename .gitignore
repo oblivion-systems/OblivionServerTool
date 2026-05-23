@@ -37,3 +37,6 @@ Thumbs.db
 
 # ── Nested clone (not a submodule) ────────────────────────────────────────────
 OblivionServerTool/
+
+# Plugin release ZIPs downloaded by the install helper
+.plugin-downloads/

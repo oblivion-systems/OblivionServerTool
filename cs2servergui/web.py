@@ -236,21 +236,24 @@ _attempts:      dict[str, dict] = {}
 _attempts_lock  = threading.Lock()
 
 
-def _prune_attempts() -> None:
+def _check_lockout(ip: str) -> int:
+    """Return seconds remaining in lockout for *ip*, or 0 if not locked out.
+
+    Prunes expired lockouts atomically inside the same lock acquisition so
+    partial-attempt records are never dropped (an attacker who pauses between
+    guesses must still reach _MAX_ATTEMPTS before the lockout window resets).
+    """
     now = time.time()
     with _attempts_lock:
-        stale = [ip for ip, r in _attempts.items()
-                 if r["count"] < _MAX_ATTEMPTS or r["until"] <= now]
-        for ip in stale:
-            del _attempts[ip]
-
-
-def _check_lockout(ip: str) -> int:
-    _prune_attempts()
-    with _attempts_lock:
+        # Prune only fully-locked entries whose window has elapsed
+        stale = [k for k, r in _attempts.items()
+                 if r["count"] >= _MAX_ATTEMPTS and r["until"] <= now]
+        for k in stale:
+            del _attempts[k]
+        # Check this specific IP
         rec = _attempts.get(ip)
         if rec and rec["count"] >= _MAX_ATTEMPTS:
-            remaining = int(rec["until"] - time.time())
+            remaining = int(rec["until"] - now)
             if remaining > 0:
                 return remaining
             del _attempts[ip]

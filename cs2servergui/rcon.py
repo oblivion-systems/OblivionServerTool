@@ -36,14 +36,14 @@ class RCONClient:
     @staticmethod
     def _recv(sock: socket.socket) -> tuple[int, int, str]:
         """Read one RCON packet → (pkt_id, pkt_type, body)."""
-        raw = b""
+        raw = bytearray()
         while len(raw) < 4:
             chunk = sock.recv(4 - len(raw))
             if not chunk:
                 raise ConnectionError("RCON socket closed unexpectedly")
             raw += chunk
         size = struct.unpack("<i", raw)[0]
-        data = b""
+        data = bytearray()
         while len(data) < size:
             chunk = sock.recv(size - len(data))
             if not chunk:
@@ -76,11 +76,49 @@ class RCONClient:
             _, _, body = self._recv(s)
         return body
 
+    def execute_many(self, commands: list[str]) -> list[str]:
+        """Execute multiple commands over a single authenticated RCON connection.
+
+        Authenticates once, then sends each command in sequence and collects
+        the response bodies.  Far cheaper than opening a new TCP connection
+        per command (e.g. bot_add × N, mp_friendlyfire + mp_autokick).
+
+        Returns a list of response bodies in the same order as *commands*.
+        Raises the same exceptions as execute().
+        """
+        if not commands:
+            return []
+        aid = self._next_id()
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(5)
+            s.connect((self.host, self.port))
+
+            # Auth once
+            s.sendall(self._pack(aid, 3, self.password))
+            pkt_id, pkt_type, _ = self._recv(s)
+            if pkt_type == 0:
+                pkt_id, pkt_type, _ = self._recv(s)
+            if pkt_id == -1:
+                raise ConnectionError("RCON auth failed — wrong rcon_password?")
+
+            # Commands — one packet each, responses collected in order
+            results: list[str] = []
+            for cmd in commands:
+                cid = self._next_id()
+                s.sendall(self._pack(cid, 2, cmd))
+                _, _, body = self._recv(s)
+                results.append(body)
+        return results
+
     def execute_retry(self, command: str,
                       retries: int = 6, delay: float = 5.0) -> str:
-        """execute() with retry on ConnectionRefused.
+        """execute() with retry on transient connection failures.
 
         CS2 takes 30-60 s to boot before RCON accepts connections.
+        Retries on ConnectionRefusedError (port not listening yet) and
+        TimeoutError (server overloaded / still initialising).
+        Auth errors (ConnectionError with "auth failed") are NOT retried —
+        they indicate a wrong password and would never succeed.
         Each failed attempt waits `delay` seconds before retrying.
         Raises the last exception if all attempts are exhausted.
         """
@@ -88,7 +126,7 @@ class RCONClient:
         for attempt in range(retries):
             try:
                 return self.execute(command)
-            except ConnectionRefusedError as exc:
+            except (ConnectionRefusedError, TimeoutError) as exc:
                 last_exc = exc
                 if attempt < retries - 1:
                     time.sleep(delay)
