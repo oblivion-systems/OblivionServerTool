@@ -1,0 +1,9 @@
+{
+  "Enabled": true,
+  "AutoHop": true,
+  "Armor": 100,
+  "Knife_Damage": 1,
+  "Scout_Damage": 1,
+  "Gravity": 450,
+  "Speed": 1
+}
