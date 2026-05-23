@@ -2889,12 +2889,16 @@ class CS2GUI:
                     continue
                 if proc.poll() is None:
                     continue
-                # Process exited unexpectedly
+                # Process exited unexpectedly — capture exit code before
+                # clearing proc so the next poll doesn't see a stale handle.
+                exit_code = proc.poll()
                 self.core.proc       = None
                 self.core.running    = False
                 self.core.boot_state = "offline"
                 self._uptime_start   = None
-                self.core.log("Server process exited unexpectedly")
+                self.core.log(
+                    f"Server process exited unexpectedly (exit code: {exit_code})"
+                )
                 self.root.after(0, self._set_state, "offline")
                 # Crash notification: bell + bring window to front
                 self.root.after(100, self.root.bell)

@@ -324,6 +324,7 @@ _PLUGIN_CLEANUP_ITEMS: dict[str, list[str]] = {
         os.path.join("materials", "cs2fixes"),
         os.path.join("particles", "cs2fixes"),
         os.path.join("soundevents", "cs2fixes"),
+        os.path.join("sounds", "cs2fixes"),      # zombie deploys sounds/ too
     ],
     "retakes": [
         os.path.join("addons", "counterstrikesharp", "plugins", "RetakesPlugin"),
@@ -539,11 +540,59 @@ class AppCore:
 
     # ── server control ────────────────────────────────────────────────────────
 
+    def _ensure_dota_gameinfo(self) -> None:
+        """Create game/dota/gameinfo.gi if missing.
+
+        The CS2 dedicated server binary (Source 2 engine) looks for a Dota 2
+        gameinfo.gi alongside csgo/ at startup.  When the file is absent the
+        engine logs "Could not read file: …/dota/gameinfo.gi" and exits with
+        code 1 before loading anything else — including plugins, RCON, or maps.
+        This is a known issue with every fresh CS2 dedicated server install;
+        Valve does not ship the file in the server package.
+
+        The file content is a minimal-but-valid gameinfo.gi stub; the engine
+        only needs to be able to open and parse it.
+        """
+        game_dir  = os.path.dirname(self._csgo_dir())   # …/game/
+        dota_dir  = os.path.join(game_dir, "dota")
+        dota_gi   = os.path.join(dota_dir, "gameinfo.gi")
+        if os.path.isfile(dota_gi):
+            return   # already present — nothing to do
+        self.log("[pre-launch] dota/gameinfo.gi missing — creating stub…")
+        try:
+            os.makedirs(dota_dir, exist_ok=True)
+            with open(dota_gi, "w", encoding="utf-8") as f:
+                f.write(
+                    '"GameInfo"\n'
+                    "{\n"
+                    '\tgame\t"Dota 2"\n'
+                    '\ttitle\t"Dota 2"\n'
+                    "\n"
+                    "\tFileSystem\n"
+                    "\t{\n"
+                    "\t\tSteamAppId\t\t570\n"
+                    "\n"
+                    "\t\tSearchPaths\n"
+                    "\t\t{\n"
+                    "\t\t\tGame\t\tdota\n"
+                    "\t\t}\n"
+                    "\t}\n"
+                    "}\n"
+                )
+            self.log("[pre-launch] ✓ dota/gameinfo.gi created")
+        except Exception as exc:
+            self.log(f"[pre-launch] ✗ Could not create dota/gameinfo.gi: {exc}")
+            self.log("[pre-launch]   Create it manually — see README or docs.")
+
     def start_server(self, map_name: str, mode: str,
                      is_workshop: bool = False) -> None:
         # Deploy plugins synchronously before launching cs2.exe so files are in
         # place when the engine initialises MetaMod / CounterStrikeSharp.
         self.deploy_plugins(mode)
+
+        # Ensure the Source 2 engine cross-game stub exists — the dedicated
+        # server exits with code 1 immediately if this file is missing.
+        self._ensure_dota_gameinfo()
 
         s    = MODE_SETTINGS.get(mode, _DEFAULT_MODE)
         maxp = self.max_players_override.strip() or s["maxplayers"]
@@ -560,6 +609,26 @@ class AppCore:
         else:
             startup_map = map_name
             self._pending_workshop_map = None
+
+        # ── Pre-launch: kill any lingering cs2.exe ────────────────────────────
+        # A previous crash or hard-kill may leave a zombie cs2.exe that still
+        # holds port 27015.  The new instance can't bind the port → it exits
+        # within seconds before RCON ever opens.  Kill it proactively.
+        try:
+            res = subprocess.run(
+                ["tasklist", "/FI", "IMAGENAME eq cs2.exe", "/NH", "/FO", "CSV"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if "cs2.exe" in res.stdout.lower():
+                self.log("[!] Found lingering cs2.exe — killing before new start…")
+                subprocess.run(
+                    ["taskkill", "/F", "/IM", "cs2.exe"],
+                    capture_output=True, timeout=5,
+                )
+                time.sleep(1.5)   # give the OS a moment to release port 27015
+                self.log("  Lingering cs2.exe killed — proceeding with fresh start")
+        except Exception as exc:
+            self.log(f"[!] Pre-launch process check failed: {exc}")
 
         cmd  = [
             _config.CS2_PATH, "-dedicated",
