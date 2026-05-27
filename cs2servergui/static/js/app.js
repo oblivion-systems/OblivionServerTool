@@ -1948,6 +1948,23 @@ async function init() {
     if (state.server.public_ip) copyText(state.server.public_ip, 'Public IP');
   };
 
+  // CS2 update badge — clicking triggers a steamcmd update
+  el('cs2-update-badge').addEventListener('click', () => {
+    if (state.server.running) {
+      toast('Stop the server before updating', 'var(--red)');
+      return;
+    }
+    modal(
+      'Update CS2 Server',
+      '<p style="color:var(--sub);font-size:.86rem">This will run steamcmd to download the latest CS2 server files. The process will be shown in the live log.</p>',
+      async () => {
+        try { await api.updateCs2(); toast('CS2 update started — check the log'); }
+        catch (e) { toast(e.message, 'var(--red)'); }
+      },
+      'Update'
+    );
+  });
+
   // Initial state poll — must happen before setup check so is_local is known
   await pollState();
   _stateInterval = setInterval(pollState, 3000);
