@@ -1,0 +1,31 @@
+﻿{
+  "PlantType": "AutoPlant",
+  "RoundTypeMode": "Sequence",
+  "RoundTypeSequence": [
+    { "RoundType": "Pistol", "AmountOfRounds": 5 },
+    { "RoundType": "Mid", "AmountOfRounds": 3 },
+    { "RoundType": "FullBuy", "AmountOfRounds": -1 }
+  ],
+  "RoundTypeSpecific": "FullBuy",
+  "Allocator": "Command",
+  "SecondsUntilBombPlantedCheck": 5.0,
+  "SpotAnnouncerEnabled": true,
+  "EnableQueue": true,
+  "EnableScramble": true,
+  "EnableSwitchOnRoundWin": true,
+  "ScrambleAfterSubsequentTerroristRoundWins": 5,
+  "MaxPlayers": 10,
+  "TeamBalanceRatio": 0.499,
+  "EnableThankYouMessage": false,
+  "MessageLanguage": "English",
+  "InstaDefuseEnabled": true,
+  "InstaDefuseRequireNoTAlive": true,
+  "InstaDefuseBlockOnHe": true,
+  "InstaDefuseBlockOnMolotov": true,
+  "InstaDefuseBlockOnInferno": true,
+  "InstaDefuseInfernoDistance": 250.0,
+  "InstaDefuseForceExplodeIfNoTime": true,
+  "InstaDefuseChatNotification": true,
+  "EnableDebug": false,
+  "ConfigVersion": 6
+}

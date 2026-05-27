@@ -42,7 +42,7 @@ DEPOTDL_RELEASE_URL = (
 # ── App self-update ────────────────────────────────────────────────────────────
 # Bump APP_VERSION before each release tag, then push and create a GitHub
 # release tagged "v<APP_VERSION>" — all connected clients will see the update.
-APP_VERSION      = "0.8.5"
+APP_VERSION      = "0.9.0"
 APP_REPO         = "jacquesvniekerk-eng/OblivionServerTool"
 APP_RELEASES_URL = f"https://github.com/{APP_REPO}/releases/latest"
 APP_API_URL      = f"https://api.github.com/repos/{APP_REPO}/releases/latest"
@@ -86,20 +86,25 @@ def update_paths(server_dir: str) -> None:
 
 RCON_HOST     = _lan_ip()
 RCON_PORT     = 27015
-RCON_PASSWORD = "qweewq"
+RCON_PASSWORD = ""        # auto-generated at first run; stored in oblivion_config.json
 FLASK_PORT    = 5000
-ADMIN_PIN     = "1234"   # digits only (web keypad); change before deploying
+ADMIN_PIN     = ""        # set at first run; stored in oblivion_config.json
 
 
 # ── Config file ────────────────────────────────────────────────────────────────
-# Stored next to the .exe when packaged (PyInstaller), or at the project root
-# in dev mode.  The config.py file itself lives inside cs2servergui/, so we
-# go one level up to reach the project root in dev mode.
+# Frozen (installed): %APPDATA%\Oblivion Server Tool\  — always user-writable,
+#   survives upgrades, and is never inside the read-only Program Files directory.
+# Dev mode: project root (one level above this file).
 
-_APP_DIR = os.path.dirname(os.path.abspath(
-    sys.executable if getattr(sys, "frozen", False) else
-    os.path.join(os.path.dirname(__file__), "..")
-))
+if getattr(sys, "frozen", False):
+    _APP_DIR = os.path.join(
+        os.environ.get("APPDATA", os.path.expanduser("~")),
+        "Oblivion Server Tool",
+    )
+    os.makedirs(_APP_DIR, exist_ok=True)
+else:
+    _APP_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
 _CONFIG_FILE = os.path.join(_APP_DIR, "oblivion_config.json")
 
 
@@ -111,12 +116,18 @@ OFFICIAL_MAPS = [
     "de_overpass", "de_train",
 ]
 
+# Panorama sub-path within any CS2 install (server or game client).
+# Flask serves these via GET /api/maps/thumb/<map_name> → falls back to 404
+# so the browser shows the placeholder icon when files aren't present.
+CS2_PANORAMA_THUMBS_SUBPATH = os.path.join(
+    "game", "csgo", "panorama", "images",
+    "map_icons", "screenshots", "1080p",
+)
+
 GAME_MODES = [
     "Competitive", "Casual", "Wingman", "3v3", "4v4", "1v1",
     "Arms Race", "Demolition", "Deathmatch",
-    "Zombies", "Surf", "KZ / Climb", "Retakes",
-    "Jailbreak", "Practice",
-    "Gun Game", "Deathrun", "Scouts & Knives", "One in the Chamber",
+    "Retakes", "Jailbreak", "Practice", "Warcraft", "Zombie Escape",
 ]
 
 # game_type + game_mode together define CS2's ruleset
@@ -130,24 +141,20 @@ MODE_SETTINGS: dict[str, dict[str, str]] = {
     "Arms Race":   {"game_type": "1", "game_mode": "0", "maxplayers": "16"},
     "Demolition":  {"game_type": "1", "game_mode": "1", "maxplayers": "10"},
     "Deathmatch":  {"game_type": "1", "game_mode": "2", "maxplayers": "20"},
-    "Zombies":     {"game_type": "6", "game_mode": "0", "maxplayers": "10"},
-    "Surf":        {"game_type": "6", "game_mode": "0", "maxplayers": "20"},
-    "KZ / Climb":  {"game_type": "6", "game_mode": "0", "maxplayers": "10"},
     "Retakes":     {"game_type": "0", "game_mode": "0", "maxplayers": "10"},
     # Jailbreak: hostage-style ruleset (game_type 0 / game_mode 2) gives the
     # CT-warden / T-prisoner scoring that the Jailbreak plugin expects.
     "Jailbreak":   {"game_type": "0", "game_mode": "2", "maxplayers": "32"},
     # Practice/MatchZy: runs on competitive ruleset; MatchZy drives match flow.
     "Practice":    {"game_type": "0", "game_mode": "1", "maxplayers": "10"},
-    # Gun Game: classic CS:GO-style progression — Arms Race ruleset base,
-    # plugin overrides weapon progression and round flow.
-    "Gun Game":            {"game_type": "1", "game_mode": "0", "maxplayers": "16"},
-    # Deathrun: hostage rules, T-runners through traps, CT-savers chase.
-    "Deathrun":            {"game_type": "0", "game_mode": "2", "maxplayers": "32"},
-    # Scouts & Knives: competitive ruleset, scout + knife only.
-    "Scouts & Knives":     {"game_type": "0", "game_mode": "1", "maxplayers": "10"},
-    # One in the Chamber: deathmatch-style fun mode, one-bullet pistol kills.
-    "One in the Chamber":  {"game_type": "1", "game_mode": "2", "maxplayers": "16"},
+    # Warcraft: RPG overlay — 9 character classes, XP system, purchasable items.
+    # Runs on a casual base ruleset; the WarcraftPlugin CSS plugin drives all
+    # RPG logic.  Works on any standard map.
+    "Warcraft":        {"game_type": "0", "game_mode": "0", "maxplayers": "20"},
+    # Zombie Escape: large-team cooperative mode (CTs escape, Ts are zombies).
+    # Casual ruleset gives the relaxed spawning behaviour ZE maps expect.
+    # ZombieMod (cs2fixes fork) + MultiAddonManager + ZombieReborn content pack.
+    "Zombie Escape": {"game_type": "0", "game_mode": "0", "maxplayers": "64"},
 }
 _DEFAULT_MODE = MODE_SETTINGS["Competitive"]
 
@@ -165,17 +172,15 @@ MODE_MAPS: dict[str, list[str] | None] = {
     "Arms Race":   ["ar_shoots", "ar_baggage", "ar_dizzy"],
     "Demolition":  ["de_lake", "de_safehouse", "de_shortdust",
                     "de_stmarc", "de_bank", "de_sugarcane"],
-    "Deathmatch":  OFFICIAL_MAPS,
-    "Zombies":     None,
-    "Surf":        None,
-    "KZ / Climb":  None,
+    # Deathmatch: limited to maps that have pre-configured spawn points in our
+    # bundle (de_dust2, de_inferno, de_mirage, de_vertigo).  Other official maps
+    # can be added after running the in-game spawn editor on the server.
+    "Deathmatch":  ["de_dust2", "de_inferno", "de_mirage", "de_vertigo"],
     "Retakes":     OFFICIAL_MAPS,
     "Jailbreak":   None,           # jb_* maps come from the workshop
-    "Practice":    OFFICIAL_MAPS,   # MatchZy supports any standard comp map
-    "Gun Game":            OFFICIAL_MAPS,  # cs_/de_ small/mid maps work well
-    "Deathrun":            None,           # dr_* maps from workshop
-    "Scouts & Knives":     OFFICIAL_MAPS,
-    "One in the Chamber":  OFFICIAL_MAPS,
+    "Practice":    OFFICIAL_MAPS,  # MatchZy supports any standard comp map
+    "Warcraft":        OFFICIAL_MAPS,  # RPG overlay — works on any standard map
+    "Zombie Escape":   None,          # ze_* maps come from the workshop
 }
 
 # Search terms for Steam Workshop URL filtering per mode
@@ -189,16 +194,11 @@ MODE_WORKSHOP_SEARCH: dict[str, str] = {
     "Arms Race":   "arms race ar_",
     "Demolition":  "demolition",
     "Deathmatch":  "deathmatch",
-    "Zombies":     "zombie escape",
-    "Surf":        "surf",
-    "KZ / Climb":  "kz climb",
     "Retakes":     "retake",
     "Jailbreak":   "jailbreak jb_",
     "Practice":    "competitive practice",
-    "Gun Game":            "gun game gg_",
-    "Deathrun":            "deathrun dr_",
-    "Scouts & Knives":     "scout knife",
-    "One in the Chamber":  "one in the chamber oitc",
+    "Warcraft":        "warcraft rpg",
+    "Zombie Escape":   "zombie escape ze_",
 }
 _WS_BROWSE = "https://steamcommunity.com/workshop/browse/?appid=730&browsesort=trend"
 
@@ -221,16 +221,11 @@ MODE_WORKSHOP_TAGS: dict[str, list[str]] = {
     "Arms Race":   ["armsrace", "arms race"],
     "Demolition":  ["demolition"],
     "Deathmatch":  ["deathmatch"],
-    "Zombies":     ["zombie"],
-    "Surf":        ["surf"],
-    "KZ / Climb":  ["kz", "climb"],
     "Retakes":     ["retake", "classic", "competitive"],
     "Jailbreak":   ["jailbreak", "jb"],
     "Practice":    ["classic", "competitive"],
-    "Gun Game":            ["gungame", "gun game", "armsrace"],
-    "Deathrun":            ["deathrun", "fun"],
-    "Scouts & Knives":     ["scout", "knife", "classic"],
-    "One in the Chamber":  ["fun", "minigame", "deathmatch"],
+    "Warcraft":        ["classic", "competitive", "casual"],
+    "Zombie Escape":   ["zombie", "ze"],
 }
 
 

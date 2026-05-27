@@ -1,5 +1,4 @@
-ï»¿Source2ZE/CS2Fixes v1.18 (Windows build)
-Requires: MetaMod:Source ONLY (no CounterStrikeSharp needed)
-Install: copy 'addons/' folder into game/csgo/
-Zombie Escape logic is embedded inside CS2Fixes
-https://github.com/Source2ZE/CS2Fixes
+JayCroghan/ZombieMod v4.1.0 (fork of CS2Fixes)
+Requires: MetaMod:Source ONLY
+zm_enable=0 by default — safe for DM/Jailbreak engine-fix use
+https://github.com/JayCroghan/ZombieMod

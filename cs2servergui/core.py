@@ -1,9 +1,9 @@
 """
 core.py — AppCore: single source of truth for server state.
 
-Shared between the local GUI (gui.py) and the Flask web panel (web.py).
-All blocking work runs on daemon threads; results are delivered via typed
-callbacks that callers register after construction.
+Consumed by the Flask web panel (web.py).  All blocking work runs on daemon
+threads; results are delivered via typed callbacks that callers register after
+construction, and via instance attributes polled by the REST API.
 """
 from __future__ import annotations
 
@@ -93,26 +93,76 @@ def _semver_tuple(v: str) -> tuple[int, ...]:
     except ValueError:
         return (0,)
 
+# DLL filenames that are part of the CounterStrikeSharp host process and must
+# NOT be copied into a plugin folder.  Plugin release ZIPs often bundle the
+# entire CSS SDK alongside the plugin DLL; loading duplicates inside a plugin's
+# AssemblyLoadContext causes type-identity conflicts and can crash the plugin or
+# the entire CSS host.  These are always resolved from the host's already-loaded
+# assemblies, so having them in the plugin folder is both wrong and harmful.
+_CSS_HOST_DLLS: frozenset[str] = frozenset({
+    "counterstrikesharp.api.dll",
+    "mcmaster.netcore.plugins.dll",
+    "scrutor.dll",
+    # Serilog — CSS's logging stack
+    "serilog.dll",
+    "serilog.extensions.logging.dll",
+    "serilog.sinks.console.dll",
+    "serilog.sinks.file.dll",
+    # Roslyn / compilation — only needed by CSS for script plugins
+    "microsoft.codeanalysis.dll",
+    "microsoft.codeanalysis.csharp.dll",
+    # Microsoft.Extensions family — already provided by the CSS host runtime
+    "microsoft.extensions.configuration.abstractions.dll",
+    "microsoft.extensions.configuration.binder.dll",
+    "microsoft.extensions.configuration.commandline.dll",
+    "microsoft.extensions.configuration.dll",
+    "microsoft.extensions.configuration.environmentvariables.dll",
+    "microsoft.extensions.configuration.fileextensions.dll",
+    "microsoft.extensions.configuration.json.dll",
+    "microsoft.extensions.configuration.usersecrets.dll",
+    "microsoft.extensions.dependencyinjection.abstractions.dll",
+    "microsoft.extensions.dependencyinjection.dll",
+    "microsoft.extensions.dependencymodel.dll",
+    "microsoft.extensions.diagnostics.abstractions.dll",
+    "microsoft.extensions.diagnostics.dll",
+    "microsoft.extensions.fileproviders.abstractions.dll",
+    "microsoft.extensions.fileproviders.physical.dll",
+    "microsoft.extensions.filesystemglobbing.dll",
+    "microsoft.extensions.hosting.abstractions.dll",
+    "microsoft.extensions.hosting.dll",
+    "microsoft.extensions.localization.abstractions.dll",
+    "microsoft.extensions.logging.abstractions.dll",
+    "microsoft.extensions.logging.configuration.dll",
+    "microsoft.extensions.logging.console.dll",
+    "microsoft.extensions.logging.debug.dll",
+    "microsoft.extensions.logging.dll",
+    "microsoft.extensions.logging.eventsource.dll",
+    "microsoft.extensions.logging.eventlog.dll",
+    "microsoft.extensions.options.configurationextensions.dll",
+    "microsoft.extensions.options.dll",
+    "microsoft.extensions.primitives.dll",
+    "microsoft.dotnet.platformabstractions.dll",
+    # System extras already in the .NET 8 runtime shipped with CS2
+    "system.collections.immutable.dll",
+    "system.diagnostics.eventlog.dll",
+    "system.io.pipelines.dll",
+    "system.reflection.metadata.dll",
+    "system.text.encodings.web.dll",
+    "system.text.json.dll",
+})
+
 # How each plugin loads into CS2.
 #   "metamod" — loaded at engine init, can ONLY activate after a server restart
 #   "css"     — CounterStrikeSharp; can be hot-reloaded via `css_plugins reload`
 _PLUGIN_KIND: dict[str, str] = {
-    "zombie":            "metamod",   # CS2Fixes — engine-level ZE fixes
-    "zombiesharp":       "css",       # Actual ZE gamemode logic, stacks with CS2Fixes
-    "retakes":           "css",
-    "retakes-allocator": "css",
-    "deathmatch":        "css",
-    "arenas":            "css",
-    "practice":          "css",
-    "jailbreak":         "css",
-    "sharptimer":        "css",       # Surf / Bhop / KZ / MG timer
-    "gungame":           "css",
-    "deathrun":          "css",
-    "scoutsknives":      "css",
-    "chamber":           "css",       # One-in-the-Chamber
-    "instaplant":        "css",       # Pair with retakes
-    "instadefuse":       "css",       # Pair with retakes
-    "mapchooser":        "css",       # LiteMapChooser → RockTheVote plugin
+    "zombie":    "metamod",   # ZombieMod (CS2Fixes fork) — engine-level ZE/ZM fixes, zm_enable 0
+    "zombie_ze": "metamod",   # ZE layer: MultiAddonManager + zm_enable 1 override cfg
+    "retakes":   "css",       # NeuTroNBZh CS2Retake — weapon select, instadefuse, AWP limit built in
+    "deathmatch":"css",
+    "arenas":    "css",
+    "practice":  "css",
+    "jailbreak": "css",
+    "warcraft":  "css",       # RPG classes, XP, items overlay
 }
 
 # Canonical post-deploy markers: files that MUST exist relative to csgo/ for
@@ -123,19 +173,21 @@ _PLUGIN_VERIFY_FILES: dict[str, list[str]] = {
         os.path.join("addons", "metamod", "cs2fixes.vdf"),
         os.path.join("addons", "cs2fixes", "bin", "win64", "cs2fixes.dll"),
     ],
+    "zombie_ze": [
+        os.path.join("addons", "metamod", "multiaddonmanager.vdf"),
+        os.path.join("addons", "multiaddonmanager", "bin", "multiaddonmanager.dll"),
+    ],
     "retakes": [
         os.path.join("addons", "counterstrikesharp", "plugins",
-                     "RetakesPlugin", "RetakesPlugin.dll"),
-    ],
-    "retakes-allocator": [
-        os.path.join("addons", "counterstrikesharp", "plugins",
-                     "RetakesAllocator", "RetakesAllocator.dll"),
+                     "CS2Retake", "CS2Retake.dll"),
     ],
     "deathmatch": [
         os.path.join("addons", "counterstrikesharp", "plugins",
                      "Deathmatch", "Deathmatch.dll"),
     ],
     "arenas": [
+        os.path.join("addons", "counterstrikesharp", "plugins",
+                     "K4-Arenas", "K4-Arenas.dll"),
         os.path.join("addons", "counterstrikesharp", "plugins",
                      "K4-Arenas-Bots", "K4-Arenas-Bots.dll"),
     ],
@@ -147,71 +199,32 @@ _PLUGIN_VERIFY_FILES: dict[str, list[str]] = {
         os.path.join("addons", "counterstrikesharp", "plugins",
                      "Jailbreak", "Jailbreak.dll"),
     ],
-    "sharptimer": [
+    "warcraft": [
         os.path.join("addons", "counterstrikesharp", "plugins",
-                     "SharpTimer", "SharpTimer.dll"),
-    ],
-    "zombiesharp": [
-        os.path.join("addons", "counterstrikesharp", "plugins",
-                     "ZombieSharp", "ZombieSharp.dll"),
-    ],
-    "gungame": [
-        os.path.join("addons", "counterstrikesharp", "plugins",
-                     "GG2", "GG2.dll"),
-    ],
-    "deathrun": [
-        os.path.join("addons", "counterstrikesharp", "plugins",
-                     "DeathrunManager", "DeathrunManager.dll"),
-    ],
-    "scoutsknives": [
-        os.path.join("addons", "counterstrikesharp", "plugins",
-                     "ScoutsNKnives", "ScoutsNKnives.dll"),
-    ],
-    "chamber": [
-        os.path.join("addons", "counterstrikesharp", "plugins",
-                     "cs2-OneInTheChamber", "OneInTheChamber.dll"),
-    ],
-    "instaplant": [
-        os.path.join("addons", "counterstrikesharp", "plugins",
-                     "InstaplantPlugin", "InstaplantPlugin.dll"),
-    ],
-    "instadefuse": [
-        os.path.join("addons", "counterstrikesharp", "plugins",
-                     "InstadefusePlugin", "InstadefusePlugin.dll"),
-    ],
-    "mapchooser": [
-        # LiteMapChooser ships under the "RockTheVote" plugin folder name
-        os.path.join("addons", "counterstrikesharp", "plugins",
-                     "RockTheVote", "RockTheVote.dll"),
+                     "WarcraftPlugin", "WarcraftPlugin.dll"),
     ],
 }
 
 # Modes that need managed plugins; modes not listed → vanilla server.
 _MODE_PLUGIN_NAMES: dict[str, list[str]] = {
-    # CS2Fixes (engine-level ZE fixes) + ZombieSharp (gamemode logic).
-    # Most Zombie Escape servers run both stacked.
-    "Zombies":             ["zombie", "zombiesharp", "mapchooser"],
-    # Retakes core + allocator + insta-plant/defuse pair for the classic
-    # "instant" feel competitive retake servers run.
-    "Retakes":             ["retakes", "retakes-allocator",
-                            "instaplant", "instadefuse", "mapchooser"],
-    "Deathmatch":          ["deathmatch", "mapchooser"],
+    # NeuTroNBZh CS2Retake — weapon selection, AWP restrictions and instadefuse
+    # are all built into the single plugin; no separate allocator or defuse DLL.
+    "Retakes":             ["retakes"],
+    "Deathmatch":          ["zombie", "deathmatch"],
     "1v1":                 ["arenas"],     # fixed-map dueling
-    "3v3":                 ["arenas", "mapchooser"],
-    "4v4":                 ["arenas", "mapchooser"],
-    "Jailbreak":           ["jailbreak"],  # admin-controlled rotation
+    "3v3":                 ["arenas"],
+    "4v4":                 ["arenas"],
+    "Jailbreak":           ["zombie", "jailbreak"],  # CS2Fixes + admin-controlled rotation
     "Practice":            ["practice"],   # MatchZy controls match flow
-    # SharpTimer handles Surf, Bhop, KZ, and MG maps in a single plugin.
-    "Surf":                ["sharptimer", "mapchooser"],
-    "KZ / Climb":          ["sharptimer", "mapchooser"],
-    "Competitive":         ["mapchooser"],
-    "Casual":              ["mapchooser"],
-    "Wingman":             ["mapchooser"],
-    # New CSS-plugin-backed game modes
-    "Gun Game":            ["gungame", "mapchooser"],
-    "Deathrun":            ["deathrun", "mapchooser"],
-    "Scouts & Knives":     ["scoutsknives", "mapchooser"],
-    "One in the Chamber":  ["chamber", "mapchooser"],
+    # Warcraft: RPG overlay — 9 classes, XP system, purchasable items.
+    "Warcraft":            ["warcraft"],
+    # Zombie Escape: ZombieMod engine fixes (zm_enable 0 from base zombie plugin)
+    # + zombie_ze layer that activates zm_enable 1 and loads ZombieReborn workshop
+    # content pack (ID 3157463861) via MultiAddonManager.
+    "Zombie Escape":       ["zombie", "zombie_ze"],
+    # All other modes (Competitive, Casual, Wingman, Arms Race, Demolition, …)
+    # are not listed here — _MODE_PLUGIN_NAMES.get(mode, []) returns [] for them,
+    # meaning deploy_plugins() runs a vanilla server with no managed plugins.
 }
 
 # Copy rules per plugin: list of (src_subdir, dst_subdir_relative_to_csgo).
@@ -227,13 +240,8 @@ _PLUGIN_COPY_RULES: dict[str, list[tuple[str, str]]] = {
         ("sounds",      "sounds"),
     ],
     "retakes": [
-        # retakes/addons/ mirrors csgo/addons/
+        # CS2-RETAKE ZIP ships addons/ at the root — mirrors csgo/addons/
         ("addons", "addons"),
-    ],
-    "retakes-allocator": [
-        # RetakesAllocator folder → csgo/addons/counterstrikesharp/plugins/RetakesAllocator/
-        (os.path.join("extracted", "RetakesAllocator"),
-         os.path.join("addons", "counterstrikesharp", "plugins", "RetakesAllocator")),
     ],
     "deathmatch": [
         # NockyCZ CS2-Deathmatch release ZIP ships plugins/ and shared/ at the
@@ -242,14 +250,17 @@ _PLUGIN_COPY_RULES: dict[str, list[tuple[str, str]]] = {
         ("shared",  os.path.join("addons", "counterstrikesharp", "shared")),
     ],
     "arenas": [
-        (os.path.join("extracted", "K4-Arenas-Bots", "plugins"),
+        # K4-Arenas main plugin + shared libs (K4-ArenaSharedApi, KitsuneMenu)
+        (os.path.join("K4-Arenas", "plugins"),
          os.path.join("addons", "counterstrikesharp", "plugins")),
-        (os.path.join("extracted", "K4-Arenas-Bots", "shared"),
+        (os.path.join("K4-Arenas", "shared"),
          os.path.join("addons", "counterstrikesharp", "shared")),
+        # K4-Arenas-Bots add-on (bot filling for empty arena slots)
+        (os.path.join("K4-Arenas-Bots", "plugins"),
+         os.path.join("addons", "counterstrikesharp", "plugins")),
     ],
     "practice": [
-        (os.path.join("windows", "addons", "counterstrikesharp",
-                      "plugins", "MatchZy"),
+        (os.path.join("addons", "counterstrikesharp", "plugins", "MatchZy"),
          os.path.join("addons", "counterstrikesharp", "plugins", "MatchZy")),
         ("cfg", "cfg"),
     ],
@@ -258,59 +269,18 @@ _PLUGIN_COPY_RULES: dict[str, list[tuple[str, str]]] = {
         # into a single CounterStrikeSharp plugin folder named "Jailbreak".
         ("", os.path.join("addons", "counterstrikesharp", "plugins", "Jailbreak")),
     ],
-    # SharpTimer release zip extracts to game/csgo/ directly.
-    # User puts unzipped release contents (addons/ + cfg/) into plugins/sharptimer/.
-    "sharptimer": [
+    # WarcraftPlugin release ZIP extracts all DLLs flat (no sub-folder).
+    # Copy the whole directory into a named CSS plugins folder.
+    "warcraft": [
+        ("",
+         os.path.join("addons", "counterstrikesharp", "plugins", "WarcraftPlugin")),
+    ],
+    # zombie_ze: MultiAddonManager MetaMod plugin + cfg overrides.
+    # Mirrors csgo/ layout exactly (addons/ and cfg/).  Deployed AFTER zombie so
+    # the cs2fixes.cfg override (zm_enable 1) wins over zombie's default (zm_enable 0).
+    "zombie_ze": [
         ("addons", "addons"),
         ("cfg",    "cfg"),
-    ],
-    # ZombieSharp release zip extracts to game/csgo/ directly.
-    # User puts unzipped release contents into plugins/zombiesharp/.
-    # The release ships addons/, cfg/, characters/, soundevents/, sounds/ — all
-    # are needed (zombie models, sounds, configs, plugin DLL, shared API DLL).
-    "zombiesharp": [
-        ("addons",      "addons"),
-        ("cfg",         "cfg"),
-        ("characters",  "characters"),
-        ("soundevents", "soundevents"),
-        ("sounds",      "sounds"),
-    ],
-    # GunGame v1.2.2 ships csgo/addons/... at the ZIP root — user unzips it
-    # into plugins/gungame/ and we copy the csgo/addons subtree.
-    "gungame": [
-        (os.path.join("csgo", "addons"), "addons"),
-    ],
-    # Deathrun Manager ships plugins/ + configs/ at the ZIP root
-    # (NockyCZ-style — unzip into csgo/addons/counterstrikesharp/).
-    "deathrun": [
-        ("plugins", os.path.join("addons", "counterstrikesharp", "plugins")),
-        ("configs", os.path.join("addons", "counterstrikesharp", "configs")),
-    ],
-    # ScoutsNKnives release: drag-into-csgo style (addons/ at ZIP root).
-    "scoutsknives": [
-        ("addons", "addons"),
-    ],
-    # cs2-OneInTheChamber release ships just one bare plugin folder at the
-    # ZIP root, no addons/counterstrikesharp/plugins/ prefix. Drop it
-    # directly under the CSS plugins directory.
-    "chamber": [
-        ("cs2-OneInTheChamber",
-         os.path.join("addons", "counterstrikesharp", "plugins", "cs2-OneInTheChamber")),
-    ],
-    # cs2-instaplant / cs2-instadefuse releases ship just one bare plugin
-    # folder ("InstaplantPlugin" / "InstadefusePlugin") at the ZIP root.
-    "instaplant": [
-        ("InstaplantPlugin",
-         os.path.join("addons", "counterstrikesharp", "plugins", "InstaplantPlugin")),
-    ],
-    "instadefuse": [
-        ("InstadefusePlugin",
-         os.path.join("addons", "counterstrikesharp", "plugins", "InstadefusePlugin")),
-    ],
-    # LiteMapChooser release nests the standard addons/ tree under an extra
-    # "LiteMapChooser/" wrapper folder.
-    "mapchooser": [
-        (os.path.join("LiteMapChooser", "addons"), "addons"),
     ],
 }
 
@@ -327,19 +297,18 @@ _PLUGIN_CLEANUP_ITEMS: dict[str, list[str]] = {
         os.path.join("sounds", "cs2fixes"),      # zombie deploys sounds/ too
     ],
     "retakes": [
-        os.path.join("addons", "counterstrikesharp", "plugins", "RetakesPlugin"),
-        os.path.join("addons", "counterstrikesharp", "shared", "RetakesPluginShared"),
-    ],
-    "retakes-allocator": [
-        os.path.join("addons", "counterstrikesharp", "plugins", "RetakesAllocator"),
+        os.path.join("addons", "counterstrikesharp", "plugins", "CS2Retake"),
+        os.path.join("addons", "counterstrikesharp", "configs", "plugins", "CS2Retake"),
     ],
     "deathmatch": [
         os.path.join("addons", "counterstrikesharp", "plugins", "Deathmatch"),
         os.path.join("addons", "counterstrikesharp", "shared", "DeathmatchAPI"),
     ],
     "arenas": [
+        os.path.join("addons", "counterstrikesharp", "plugins", "K4-Arenas"),
         os.path.join("addons", "counterstrikesharp", "plugins", "K4-Arenas-Bots"),
         os.path.join("addons", "counterstrikesharp", "shared", "K4-ArenaSharedApi"),
+        os.path.join("addons", "counterstrikesharp", "shared", "KitsuneMenu"),
     ],
     "practice": [
         os.path.join("addons", "counterstrikesharp", "plugins", "MatchZy"),
@@ -348,39 +317,20 @@ _PLUGIN_CLEANUP_ITEMS: dict[str, list[str]] = {
     "jailbreak": [
         os.path.join("addons", "counterstrikesharp", "plugins", "Jailbreak"),
     ],
-    "sharptimer": [
-        os.path.join("addons", "counterstrikesharp", "plugins", "SharpTimer"),
-        os.path.join("cfg", "SharpTimer"),
+    "warcraft": [
+        os.path.join("addons", "counterstrikesharp", "plugins", "WarcraftPlugin"),
+        os.path.join("addons", "counterstrikesharp", "configs", "plugins", "WarcraftPlugin"),
     ],
-    "zombiesharp": [
-        os.path.join("addons", "counterstrikesharp", "plugins", "ZombieSharp"),
-        os.path.join("addons", "counterstrikesharp", "shared", "ZombieSharpAPI"),
-        os.path.join("addons", "counterstrikesharp", "configs", "zombiesharp"),
-        os.path.join("addons", "counterstrikesharp", "gamedata", "ZombieSharp.json"),
-        os.path.join("cfg", "zombiesharp"),
-        os.path.join("characters", "models", "s2ze", "bsi_zombie"),
-    ],
-    "gungame": [
-        os.path.join("addons", "counterstrikesharp", "plugins", "GG2"),
-    ],
-    "deathrun": [
-        os.path.join("addons", "counterstrikesharp", "plugins", "DeathrunManager"),
-        os.path.join("addons", "counterstrikesharp", "configs", "plugins", "DeathrunManager"),
-    ],
-    "scoutsknives": [
-        os.path.join("addons", "counterstrikesharp", "plugins", "ScoutsNKnives"),
-    ],
-    "chamber": [
-        os.path.join("addons", "counterstrikesharp", "plugins", "cs2-OneInTheChamber"),
-    ],
-    "instaplant": [
-        os.path.join("addons", "counterstrikesharp", "plugins", "InstaplantPlugin"),
-    ],
-    "instadefuse": [
-        os.path.join("addons", "counterstrikesharp", "plugins", "InstadefusePlugin"),
-    ],
-    "mapchooser": [
-        os.path.join("addons", "counterstrikesharp", "plugins", "RockTheVote"),
+    "zombie_ze": [
+        os.path.join("addons", "multiaddonmanager"),
+        os.path.join("addons", "metamod", "multiaddonmanager.vdf"),
+        os.path.join("cfg", "multiaddonmanager"),
+        # Remove zm_enable 1 override so DM/JB don't run in ZE mode after switching.
+        # If zombie stays in new_plugins (e.g. switch to Deathmatch), it re-deploys
+        # its own cs2fixes.cfg (zm_enable 0), restoring the correct default.
+        # If switching to vanilla (zombie also unneeded), the whole cfg/cs2fixes/
+        # folder is wiped by zombie's cleanup items anyway.
+        os.path.join("cfg", "cs2fixes", "cs2fixes.cfg"),
     ],
 }
 
@@ -392,9 +342,13 @@ class AppCore:
         self.proc:         subprocess.Popen | None = None
         self.running:      bool = False
         self.boot_state:   str  = "offline"   # "offline" | "booting" | "ready"
+        self.player_count: int  = 0            # live count; updated every ~15 s by monitor
         self.current_map:  str  = "de_dust2"
         self.current_mode: str  = "Competitive"
-        self.rcon = RCONClient(RCON_HOST, RCON_PORT, RCON_PASSWORD)
+
+        # RCONClient created with empty password; updated after _load_config()
+        # so the runtime-configured password (not the config.py default) is used.
+        self.rcon = RCONClient(RCON_HOST, RCON_PORT, "")
 
         self._log_buf  = collections.deque(maxlen=300)
         self._log_lock = threading.Lock()
@@ -405,7 +359,9 @@ class AppCore:
         self._dl_reqs: list[dict]        = []
         self._dl_lock  = threading.Lock()
 
-        self.update_available: bool = False
+        self.update_available:      bool = False
+        self.app_update_available:  bool = False
+        self.app_latest_version:    str  = ""
 
         # Pending workshop map to load via RCON once the server is ready.
         # Set by start_server() when is_workshop=True; cleared by _poll_rcon_ready().
@@ -414,9 +370,17 @@ class AppCore:
         # Install location — all other paths are derived from this
         self.server_dir: str = ""
 
-        # Steam credentials
+        # Steam credentials (password stored in OS keyring when available)
         self.steam_username: str = ""
         self.steam_password: str = ""
+
+        # Security — loaded from config; auto-generated on first run
+        self.rcon_password: str = ""   # used as CS2's +rcon_password arg
+        self.admin_pin:     str = ""   # 4-digit PIN for the web panel
+
+        # One-time token set by main.py so the local pywebview window can
+        # auto-authenticate without entering the PIN.  Cleared after first use.
+        self.startup_token: str = ""
 
         # Server config (persisted)
         self.hostname:             str  = "CS2 Dedicated Server"
@@ -424,12 +388,14 @@ class AppCore:
         self.gslt_token:           str  = ""   # Steam Game Server Login Token
         self.tickrate_128:         bool = False
         self.auto_start:           bool = False
+        self.auto_restart_on_crash: bool = False
         self.bot_difficulty:       str  = "Normal"
         self.max_players_override: str  = ""
         self.presets:              dict[str, dict] = {}
 
         # Runtime state
         self.public_ip:           str                      = ""
+        self._uptime_start:       float | None             = None   # set when server is ready
         self._map_name_cache:     dict[str, str]           = {}
         self._map_tag_cache:      dict[str, list[str]]    = {}  # wid → lowercase tags
         self._preview_url_cache:  dict[str, str]          = {}  # wid → Steam preview URL
@@ -440,16 +406,23 @@ class AppCore:
         # fired (no args) when steam_session_active changes
         self.on_steam_session_change: Callable[[], None] | None = None
 
-        self._load_config()
-
-        # GUI / web callbacks — registered after construction
+        # GUI / web callbacks — must be initialised before _load_config() because
+        # _load_config() calls self.log() which checks self.on_log.
         self.on_log:                Callable[[str], None] | None                   = None
-        self.on_dl_request:         Callable[[str, str], None] | None              = None
         self.on_state_change:       Callable[[], None] | None                      = None
         self.on_update_checked:     Callable[[bool, str, str], None] | None        = None
         self.on_public_ip:          Callable[[str], None] | None                   = None
         # (available, current_ver, latest_ver, download_url)
         self.on_app_update_checked: Callable[[bool, str, str, str], None] | None   = None
+
+        self._load_config()
+
+        # After config is loaded, sync the RCON password into the client and
+        # the module-level constant so existing code that reads _config.RCON_PASSWORD
+        # gets the runtime value (not the empty-string placeholder in config.py).
+        self.rcon.password = self.rcon_password
+        _config.RCON_PASSWORD = self.rcon_password
+        _config.ADMIN_PIN     = self.admin_pin
 
     # ── logging ───────────────────────────────────────────────────────────────
 
@@ -491,46 +464,109 @@ class AppCore:
         _config.update_paths(path)
         self.log(f"Server directory set: {path}")
 
+    # ── keyring helpers ───────────────────────────────────────────────────────
+
+    @staticmethod
+    def _keyring_save(username: str, password: str) -> bool:
+        """Save *password* in the OS credential store. Returns True on success."""
+        try:
+            import keyring  # type: ignore
+            keyring.set_password("OblivionServerTool", username, password)
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    def _keyring_load(username: str) -> str:
+        """Return the password for *username* from the OS credential store, or ''."""
+        try:
+            import keyring  # type: ignore
+            return keyring.get_password("OblivionServerTool", username) or ""
+        except Exception:
+            return ""
+
     def _load_config(self) -> None:
+        import secrets as _secrets
+
         try:
             with open(_CONFIG_FILE, encoding="utf-8") as f:
                 cfg = json.load(f)
-            # Load server_dir first — everything else depends on it
-            saved_dir = cfg.get("server_dir", "")
-            if saved_dir:
-                self.server_dir = saved_dir
-                _config.update_paths(saved_dir)
-            self.steam_username        = cfg.get("steam_username", "")
-            self.steam_password        = cfg.get("steam_password", "")
-            self.steam_session_active  = bool(cfg.get("steam_session_active", False))
-            self.hostname              = cfg.get("hostname", "CS2 Dedicated Server")
-            self.sv_password           = cfg.get("sv_password", "")
-            self.gslt_token            = cfg.get("gslt_token", "")
-            self.tickrate_128          = bool(cfg.get("tickrate_128", False))
-            self.auto_start            = bool(cfg.get("auto_start", False))
-            self.bot_difficulty        = cfg.get("bot_difficulty", "Normal")
-            self.max_players_override  = cfg.get("max_players_override", "")
-            self.presets               = cfg.get("presets", {})
         except FileNotFoundError:
-            pass
+            cfg = {}
         except Exception as exc:
             self.log(f"Config load warning: {exc}")
+            cfg = {}
+
+        # server_dir first — everything else depends on it
+        saved_dir = cfg.get("server_dir", "")
+        if saved_dir:
+            self.server_dir = saved_dir
+            _config.update_paths(saved_dir)
+
+        # ── Security fields ────────────────────────────────────────────────
+        # RCON password: load from config, or auto-generate and save on first run.
+        self.rcon_password = cfg.get("rcon_password", "").strip()
+        if not self.rcon_password:
+            self.rcon_password = _secrets.token_urlsafe(16)
+            self.log("Generated new RCON password (first run)")
+
+        # Admin PIN: default to "1234" if never configured, prompt user to change.
+        self.admin_pin = cfg.get("admin_pin", "1234")
+
+        # ── Steam credentials ──────────────────────────────────────────────
+        self.steam_username = cfg.get("steam_username", "")
+        self.steam_session_active = bool(cfg.get("steam_session_active", False))
+
+        # Password: prefer OS keyring; fall back to plaintext in config.
+        stored_pw = cfg.get("steam_password", "")
+        if stored_pw == "__keyring__" and self.steam_username:
+            self.steam_password = self._keyring_load(self.steam_username)
+        else:
+            self.steam_password = stored_pw  # legacy plaintext or empty
+
+        # ── Server settings ────────────────────────────────────────────────
+        self.hostname              = cfg.get("hostname", "CS2 Dedicated Server")
+        self.sv_password           = cfg.get("sv_password", "")
+        self.gslt_token            = cfg.get("gslt_token", "")
+        self.tickrate_128          = bool(cfg.get("tickrate_128", False))
+        self.auto_start            = bool(cfg.get("auto_start", False))
+        self.auto_restart_on_crash = bool(cfg.get("auto_restart_on_crash", False))
+        self.bot_difficulty        = cfg.get("bot_difficulty", "Normal")
+        self.max_players_override  = cfg.get("max_players_override", "")
+        self.presets               = cfg.get("presets", {})
+
+        # Persist immediately if we just auto-generated the RCON password so
+        # that the next startup (and the server launch) uses the same value.
+        if not cfg.get("rcon_password"):
+            self.save_config()
 
     def save_config(self) -> None:
         try:
+            # Steam password: try to store in OS keyring; fall back to plaintext.
+            if self.steam_username and self.steam_password:
+                if self._keyring_save(self.steam_username, self.steam_password):
+                    steam_pw_stored = "__keyring__"
+                else:
+                    steam_pw_stored = self.steam_password  # keyring unavailable
+            else:
+                steam_pw_stored = ""
+
             cfg = {
-                "server_dir":           self.server_dir,
-                "steam_username":       self.steam_username,
-                "steam_password":       self.steam_password,
-                "steam_session_active": self.steam_session_active,
-                "hostname":             self.hostname,
-                "sv_password":          self.sv_password,
-                "gslt_token":           self.gslt_token,
-                "tickrate_128":         self.tickrate_128,
-                "auto_start":           self.auto_start,
-                "bot_difficulty":       self.bot_difficulty,
-                "max_players_override": self.max_players_override,
-                "presets":              self.presets,
+                "server_dir":            self.server_dir,
+                "rcon_password":         self.rcon_password,
+                "admin_pin":             self.admin_pin,
+                "steam_username":        self.steam_username,
+                "steam_password":        steam_pw_stored,
+                "steam_session_active":  self.steam_session_active,
+                "hostname":              self.hostname,
+                "sv_password":           self.sv_password,
+                "gslt_token":            self.gslt_token,
+                "tickrate_128":          self.tickrate_128,
+                "auto_start":            self.auto_start,
+                "auto_restart_on_crash": self.auto_restart_on_crash,
+                "bot_difficulty":        self.bot_difficulty,
+                "max_players_override":  self.max_players_override,
+                "presets":               self.presets,
             }
             with open(_CONFIG_FILE, "w", encoding="utf-8") as f:
                 json.dump(cfg, f, indent=2)
@@ -539,6 +575,44 @@ class AppCore:
             self.log(f"Config save failed: {exc}")
 
     # ── server control ────────────────────────────────────────────────────────
+
+    def _fix_metamod_dll_nesting(self) -> None:
+        """Fix MetaMod bin/win64/win64/ nesting caused by incorrect zip extraction.
+
+        When MetaMod is installed from a GitHub zip that internally uses a bin/win64/
+        path, some extraction tools create an extra win64/ subfolder, placing all the
+        per-game DLLs (especially metamod.2.cs2.dll) one level too deep.  MetaMod's
+        server.dll searches for metamod.2.cs2.dll in the SAME directory as itself
+        (bin/win64/), so the nested path causes the fatal-log error:
+            "Detected engine 26 but could not load: The specified module could not be found."
+        The server then runs vanilla — no MetaMod, no CSS, no plugins.
+
+        This method detects the nesting and silently moves DLLs up one level.
+        """
+        mm_bin = os.path.join(self._csgo_dir(), "addons", "metamod", "bin", "win64")
+        nested = os.path.join(mm_bin, "win64")
+        if not os.path.isdir(nested):
+            return  # layout already correct
+
+        dlls = [f for f in os.listdir(nested) if f.lower().endswith(".dll")]
+        if not dlls:
+            return
+
+        self.log("[pre-launch] Detected MetaMod bin/win64/win64/ nesting — fixing…")
+        moved = 0
+        for fname in dlls:
+            src = os.path.join(nested, fname)
+            dst = os.path.join(mm_bin, fname)
+            try:
+                shutil.copy2(src, dst)
+                moved += 1
+            except Exception as exc:
+                self.log(f"[pre-launch]   ✗ Could not move {fname}: {exc}")
+        try:
+            shutil.rmtree(nested)
+        except Exception as exc:
+            self.log(f"[pre-launch]   ✗ Could not remove nested dir: {exc}")
+        self.log(f"[pre-launch] ✓ Moved {moved} DLL(s) to correct path — MetaMod will now load")
 
     def _ensure_dota_gameinfo(self) -> None:
         """Create game/dota/gameinfo.gi if missing.
@@ -590,6 +664,11 @@ class AppCore:
         # place when the engine initialises MetaMod / CounterStrikeSharp.
         self.deploy_plugins(mode)
 
+        # Fix MetaMod bin/win64/win64/ nesting from bad zip extraction — if
+        # metamod.2.cs2.dll landed one level too deep, MetaMod writes to its
+        # fatal log and the server runs vanilla (no plugins) on every start.
+        self._fix_metamod_dll_nesting()
+
         # Ensure the Source 2 engine cross-game stub exists — the dedicated
         # server exits with code 1 immediately if this file is missing.
         self._ensure_dota_gameinfo()
@@ -610,23 +689,33 @@ class AppCore:
             startup_map = map_name
             self._pending_workshop_map = None
 
-        # ── Pre-launch: kill any lingering cs2.exe ────────────────────────────
-        # A previous crash or hard-kill may leave a zombie cs2.exe that still
-        # holds port 27015.  The new instance can't bind the port → it exits
-        # within seconds before RCON ever opens.  Kill it proactively.
+        # ── Pre-launch: kill any lingering dedicated cs2.exe ─────────────────
+        # A previous crash or hard-kill may leave a zombie dedicated server that
+        # still holds port 27015.  The new instance can't bind the port → it
+        # exits within seconds before RCON ever opens.  Kill it proactively.
+        # IMPORTANT: only kill processes launched with -dedicated so we never
+        # accidentally close the user's CS2 game client (also named cs2.exe).
         try:
             res = subprocess.run(
-                ["tasklist", "/FI", "IMAGENAME eq cs2.exe", "/NH", "/FO", "CSV"],
+                ["wmic", "process", "where", "name='cs2.exe'",
+                 "get", "ProcessId,CommandLine", "/format:csv"],
                 capture_output=True, text=True, timeout=5,
             )
-            if "cs2.exe" in res.stdout.lower():
-                self.log("[!] Found lingering cs2.exe — killing before new start…")
-                subprocess.run(
-                    ["taskkill", "/F", "/IM", "cs2.exe"],
-                    capture_output=True, timeout=5,
-                )
+            killed = 0
+            for line in res.stdout.splitlines():
+                if "-dedicated" in line.lower():
+                    # Extract PID — last comma-separated field on CSV rows
+                    parts = line.strip().split(",")
+                    pid = parts[-1].strip()
+                    if pid.isdigit():
+                        subprocess.run(
+                            ["taskkill", "/F", "/PID", pid],
+                            capture_output=True, timeout=5,
+                        )
+                        killed += 1
+            if killed:
                 time.sleep(1.5)   # give the OS a moment to release port 27015
-                self.log("  Lingering cs2.exe killed — proceeding with fresh start")
+                self.log(f"[!] Killed {killed} lingering dedicated cs2.exe — proceeding with fresh start")
         except Exception as exc:
             self.log(f"[!] Pre-launch process check failed: {exc}")
 
@@ -637,7 +726,7 @@ class AppCore:
             "+game_type",     s["game_type"],
             "+game_mode",     s["game_mode"],
             "-maxplayers",    maxp,
-            "+rcon_password", RCON_PASSWORD,
+            "+rcon_password", self.rcon_password,
             "+hostname",      self.hostname or "CS2 Dedicated Server",
         ]
         if self.sv_password:
@@ -679,28 +768,37 @@ class AppCore:
             self.proc = None
         elif self.running:
             # Reattached session — no Popen handle.
-            # Ask the server to quit via RCON; fall back to taskkill if needed.
+            # Ask the server to quit via RCON; fall back to targeted kill if needed.
             self.log("Stopping reattached server…")
             try:
                 self.rcon.execute("quit")
                 time.sleep(1)
             except Exception:
                 pass
-            # Confirm it's gone; if cs2.exe is still in the process list, force-kill.
+            # Confirm it's gone; if a dedicated cs2.exe is still running, kill it.
+            # IMPORTANT: use WMIC to filter on CommandLine containing "-dedicated" so
+            # we never accidentally kill the user's CS2 game client (same binary name).
             try:
-                chk = subprocess.run(
-                    ["tasklist", "/FI", "IMAGENAME eq cs2.exe", "/NH", "/FO", "CSV"],
+                res = subprocess.run(
+                    ["wmic", "process", "where", "name='cs2.exe'",
+                     "get", "ProcessId,CommandLine", "/format:csv"],
                     capture_output=True, text=True, timeout=5,
                 )
-                if "cs2.exe" in chk.stdout.lower():
-                    subprocess.run(
-                        ["taskkill", "/F", "/IM", "cs2.exe"],
-                        capture_output=True, timeout=5,
-                    )
+                for line in res.stdout.splitlines():
+                    if "-dedicated" in line.lower():
+                        parts = line.strip().split(",")
+                        pid = parts[-1].strip()
+                        if pid.isdigit():
+                            subprocess.run(
+                                ["taskkill", "/F", "/PID", pid],
+                                capture_output=True, timeout=5,
+                            )
             except Exception:
                 pass
-        self.running    = False
-        self.boot_state = "offline"
+        self.running       = False
+        self.boot_state    = "offline"
+        self.player_count  = 0
+        self._uptime_start = None
         self.log("Server stopped")
         if self.on_state_change:
             self.on_state_change()
@@ -772,7 +870,7 @@ class AppCore:
                 self.boot_state = "ready"
                 self.log(
                     "Server marked ONLINE after 90 s "
-                    "(RCON TCP unreachable — use TEST RCON to diagnose)"
+                    "(RCON TCP unreachable — check Windows Firewall for port 27015)"
                 )
                 if self.on_state_change:
                     self.on_state_change()
@@ -793,7 +891,8 @@ class AppCore:
             try:
                 self.rcon.execute("status")
                 if self.running:
-                    self.boot_state = "ready"
+                    self.boot_state    = "ready"
+                    self._uptime_start = time.time()
                     self.log("Server ready — RCON is responding")
                     wk = self._pending_workshop_map
                     if wk:
@@ -962,6 +1061,8 @@ class AppCore:
                     f"latest=v{tag}  "
                     f"{'UPDATE AVAILABLE' if available else 'up to date'}"
                 )
+                self.app_update_available = available
+                self.app_latest_version   = tag
                 if self.on_app_update_checked:
                     self.on_app_update_checked(available, APP_VERSION, tag, url)
             except Exception as exc:
@@ -1222,6 +1323,48 @@ class AppCore:
             return None
         return "csgo/addons/metamod" in content
 
+    def _unpatch_gameinfo(self) -> bool:
+        """Remove the MetaMod search path from gameinfo.gi.
+
+        Prefers restoring the clean Valve backup saved on first patch.
+        Falls back to manually stripping the MetaMod line if no backup exists.
+        Idempotent — safe to call when MetaMod is already absent.
+        """
+        path   = self._gameinfo_path()
+        backup = path + ".oblivion.bak"
+
+        # Fast path: restore clean original from backup
+        if os.path.isfile(backup):
+            try:
+                shutil.copy2(backup, path)
+                self.log("[gameinfo] ✓ Restored original gameinfo.gi "
+                         "(MetaMod entry removed — vanilla mode)")
+                return True
+            except Exception as exc:
+                self.log(f"[gameinfo] Backup restore failed: {exc} "
+                         "— attempting manual unpatch")
+
+        # Fallback: strip the MetaMod line in-place
+        try:
+            with open(path, encoding="utf-8") as f:
+                lines = f.readlines()
+        except Exception as exc:
+            self.log(f"[gameinfo] Read failed during unpatch: {exc}")
+            return False
+
+        new_lines = [l for l in lines if "csgo/addons/metamod" not in l]
+        if len(new_lines) == len(lines):
+            return True  # already clean
+
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.writelines(new_lines)
+            self.log("[gameinfo] ✓ Removed MetaMod search path from gameinfo.gi")
+            return True
+        except Exception as exc:
+            self.log(f"[gameinfo] Unpatch write failed: {exc}")
+            return False
+
     def _patch_gameinfo(self) -> bool:
         """Insert the MetaMod search path into gameinfo.gi. Idempotent.
 
@@ -1430,21 +1573,25 @@ class AppCore:
 
         new_plugins = _MODE_PLUGIN_NAMES.get(mode, [])
 
-        # ── 1. Remove previous mode's plugins ────────────────────────────────
-        # Only remove plugins that aren't carrying over to the new mode — so
-        # shared plugins like mapchooser don't get torn down and re-installed
-        # on every mode switch (which would also wipe any deployed config).
-        manifest    = self._load_plugin_manifest()
-        old_plugins = manifest.get("plugins", [])
-        to_remove   = sorted(set(old_plugins) - set(new_plugins))
-        if to_remove:
-            self.log(f"[plugins] Removing previous: {', '.join(to_remove)}")
-            self._undeploy_plugins(to_remove, csgo_dir)
+        # ── 1. Remove every managed plugin not required for this mode ────────
+        # Intentionally manifest-independent: we always clean every slot we
+        # own that isn't needed, regardless of what any previous session recorded.
+        # This prevents leftover plugins from stale manifests or dirty states
+        # loading alongside the new mode's plugins inside CounterStrikeSharp.
+        unneeded = sorted(set(_PLUGIN_CLEANUP_ITEMS) - set(new_plugins))
+        if unneeded:
+            self.log(f"[plugins] Clearing unneeded: {', '.join(unneeded)}")
+            self._undeploy_plugins(unneeded, csgo_dir)
 
         # ── 2. Deploy new plugins ─────────────────────────────────────────────
         if not new_plugins:
             self.log(f"[plugins] No managed plugins for {mode} — vanilla CS2")
             self._save_plugin_manifest(mode, [])
+            # Remove MetaMod from gameinfo.gi so CSS never loads on a vanilla
+            # server (an outdated CSS throws a CLR exception that crashes cs2.exe).
+            if self._gameinfo_has_metamod() is True:
+                self.log("[plugins] Switching to vanilla — removing MetaMod from gameinfo.gi…")
+                self._unpatch_gameinfo()
             return True
 
         self.log(f"[plugins] Deploying for {mode}: {', '.join(new_plugins)}")
@@ -1475,14 +1622,23 @@ class AppCore:
                     any_failed = True
                     continue
                 os.makedirs(dst, exist_ok=True)
+                skipped_host = 0
                 for root, _dirs, files in os.walk(src):
                     rel     = os.path.relpath(root, src)
                     tgt_dir = os.path.join(dst, rel) if rel != "." else dst
                     os.makedirs(tgt_dir, exist_ok=True)
                     for fname in files:
+                        # Skip CSS-host-provided DLLs — they are already loaded
+                        # by the CSS host process and must not be duplicated inside
+                        # a plugin's AssemblyLoadContext.
+                        if fname.lower() in _CSS_HOST_DLLS:
+                            skipped_host += 1
+                            continue
                         shutil.copy2(os.path.join(root, fname),
                                      os.path.join(tgt_dir, fname))
                         per_plugin_count[name] += 1
+                if skipped_host:
+                    self.log(f"[plugins]   {name}: skipped {skipped_host} CSS-host DLL(s)")
                 per_plugin_dirs[name].append(dst)
 
             # ── Per-plugin verification: confirm files actually landed ────────
@@ -1507,7 +1663,15 @@ class AppCore:
         self._save_plugin_manifest(mode, actually_deployed)
 
         # ── 3. Auto-patch gameinfo.gi so MetaMod actually loads ───────────────
-        if self._gameinfo_has_metamod() is False:
+        # Only patch if at least one MetaMod/CSS plugin was actually deployed.
+        # Patching when no plugins landed would cause MetaMod (if installed) to
+        # load CSS on the next server start, which can crash the server with a
+        # CLR exception if CSS is absent or out of date.
+        actually_needs_metamod = any(
+            _PLUGIN_KIND.get(p) in ("metamod", "css")
+            for p in actually_deployed
+        )
+        if actually_needs_metamod and self._gameinfo_has_metamod() is False:
             self.log("[plugins] gameinfo.gi missing MetaMod search path — patching…")
             self._patch_gameinfo()
 
@@ -1515,7 +1679,7 @@ class AppCore:
         verified_ok = self._verify_deployment(new_plugins)
 
         # ── 5. Tell the user what to do next ─────────────────────────────────
-        old_kinds = {_PLUGIN_KIND.get(p) for p in old_plugins}
+        old_kinds = {_PLUGIN_KIND.get(p) for p in unneeded}
         new_kinds = {_PLUGIN_KIND.get(p) for p in new_plugins}
         needs_metamod_restart = "metamod" in (old_kinds | new_kinds)
         has_css_changes       = "css" in (old_kinds | new_kinds)
@@ -1653,20 +1817,8 @@ class AppCore:
                 self.log(f"Download already pending: {workshop_id}")
                 return
             self._dl_reqs.append({"id": workshop_id, "requester": requester})
-        self.log(f"[{requester}] Requested download of workshop map {workshop_id}")
-        if self.on_dl_request:
-            self.on_dl_request(workshop_id, requester)
-
-    def approve_download(self, workshop_id: str,
-                          on_done: Callable[[bool], None] | None = None) -> None:
-        """Download a workshop map. Delegates entirely to DepotDownloader."""
-        self.depotdl_download(workshop_id, on_done=on_done)
-
-    def reject_download(self, workshop_id: str, requester: str = "") -> None:
-        with self._dl_lock:
-            self._dl_reqs = [r for r in self._dl_reqs if r["id"] != workshop_id]
-        note = f" (by {requester})" if requester else ""
-        self.log(f"Download rejected: {workshop_id}{note}")
+        self.log(f"[{requester}] Requested download of workshop map {workshop_id}"
+                 " — approve via the web panel Workshop tab")
 
     def cancel_download(self) -> None:
         """Kill the currently running steamcmd download process, if any."""
@@ -1806,17 +1958,22 @@ class AppCore:
 
             session_ok = self.steam_session_active and bool(self.steam_username)
 
+            # Always pass the full credentials so DepotDownloader can
+            # re-authenticate when its own cached session token has expired.
+            # Passing username-only (token-only) caused "first download always
+            # fails": the silent path produced no files → session invalidated →
+            # second attempt re-added the password → worked.  Alternated every
+            # single time.  With credentials present DepotDownloader refreshes
+            # the token itself; the console is only still opened on the first
+            # run (session_ok=False) in case Steam Guard needs a 2FA code.
+            login_args = [
+                "-username",          self.steam_username,
+                "-password",          self.steam_password,
+                "-remember-password",
+            ]
             if session_ok:
-                # Cached token — no password needed
-                login_args = ["-username", self.steam_username]
-                self.log("  Using cached session — no login prompt expected.")
+                self.log("  Using cached session (with credential fallback)…")
             else:
-                # First time: supply password and ask DepotDownloader to save the token
-                login_args = [
-                    "-username",          self.steam_username,
-                    "-password",          self.steam_password,
-                    "-remember-password",
-                ]
                 self.log("  Logging in and saving session token for future downloads.")
 
             cmd = [
@@ -2221,4 +2378,185 @@ class AppCore:
             finally:
                 if on_done:
                     on_done()
+        threading.Thread(target=_do, daemon=True).start()
+
+    # ── install / setup state ─────────────────────────────────────────────────
+
+    @property
+    def is_installed(self) -> bool:
+        """True when cs2.exe is present at the configured server directory.
+
+        Checked before every start attempt so the UI can show an "Install first"
+        prompt rather than silently failing when the binary is missing.
+        """
+        return bool(self.server_dir) and os.path.isfile(_config.CS2_PATH)
+
+    @property
+    def needs_setup(self) -> bool:
+        """True when the app still needs first-run configuration.
+
+        Conditions:
+          • No server directory has been chosen yet, OR
+          • The admin PIN is still the factory default ("1234").
+        """
+        return not self.server_dir or self.admin_pin == "1234"
+
+    # ── uptime ────────────────────────────────────────────────────────────────
+
+    @property
+    def uptime_seconds(self) -> int:
+        """Seconds since the server became RCON-ready; 0 if offline or booting."""
+        if self._uptime_start is None:
+            return 0
+        return max(0, int(time.time() - self._uptime_start))
+
+    # ── crash monitor ──────────────────────────────────────────────────────────
+
+    def start_monitor(self) -> None:
+        """Daemon thread: detects unexpected server process death.
+
+        Polls every 2 s.  When cs2.exe exits without us calling stop_server()
+        the state is cleaned up and on_state_change is fired.
+
+        Two detection paths:
+          • Popen-started  — proc.poll() returns an exit code (fast, 2 s latency)
+          • Probe-reattached — proc is None; tasklist check every ~10 s
+
+        If auto_restart_on_crash is True the server is automatically restarted
+        with the last known map / mode (up to 3 consecutive attempts).
+        """
+        _MAX_RESTARTS = 3
+        _restart_count = 0
+
+        def _handle_crash(exit_code: int | None = None) -> None:
+            """Shared teardown + optional auto-restart logic."""
+            nonlocal _restart_count
+            self.proc          = None
+            self.running       = False
+            self.boot_state    = "offline"
+            self.player_count  = 0
+            self._uptime_start = None
+            if exit_code is not None:
+                self.log(
+                    f"[!] Server process exited unexpectedly "
+                    f"(exit code: {exit_code})"
+                )
+            else:
+                self.log(
+                    "[!] Server process disappeared unexpectedly "
+                    "(exit code: unknown — was probe-reattached)"
+                )
+            if self.on_state_change:
+                self.on_state_change()
+
+            if self.auto_restart_on_crash and _restart_count < _MAX_RESTARTS:
+                _restart_count += 1
+                self.log(
+                    f"[!] Auto-restart #{_restart_count}/{_MAX_RESTARTS} "
+                    f"in 5 s…"
+                )
+                time.sleep(5)
+                self.log(
+                    f"[!] Restarting server — "
+                    f"map: {self.current_map}  mode: {self.current_mode}"
+                )
+                wk = self.current_map.isdigit()
+                self.start_server(self.current_map, self.current_mode,
+                                  is_workshop=wk)
+            elif _restart_count >= _MAX_RESTARTS:
+                self.log(
+                    "[!] Auto-restart limit reached — "
+                    "manual intervention required."
+                )
+                _restart_count = 0
+
+        def _watch() -> None:
+            nonlocal _restart_count
+            _probe_tick = 0   # counts 2-s ticks; tasklist fires every 5 (≈10 s)
+            while True:
+                try:
+                    time.sleep(2)
+                    proc = self.proc           # snapshot under GIL
+
+                    if not self.running:
+                        _restart_count = 0
+                        _probe_tick    = 0
+                        continue
+
+                    if proc is None:
+                        # ── Probe-reattached server: no Popen handle ──────────
+                        # Fall back to a periodic tasklist check so we still
+                        # detect crashes even though we don't own the process.
+                        _probe_tick += 1
+                        if _probe_tick < 5:    # 5 × 2 s = 10 s between checks
+                            continue
+                        _probe_tick = 0
+                        try:
+                            res = subprocess.run(
+                                ["tasklist", "/FI", "IMAGENAME eq cs2.exe",
+                                 "/NH", "/FO", "CSV"],
+                                capture_output=True, text=True, timeout=5,
+                            )
+                            if "cs2.exe" in res.stdout.lower():
+                                continue       # still alive — nothing to do
+                        except Exception:
+                            continue           # can't determine — assume alive
+                        # cs2.exe has disappeared
+                        _handle_crash(exit_code=None)
+                        continue
+
+                    # ── Popen-started server ──────────────────────────────────
+                    _probe_tick = 0
+                    if proc.poll() is None:
+                        continue               # still running — nothing to do
+
+                    exit_code = proc.poll()
+                    _handle_crash(exit_code=exit_code)
+
+                except Exception as _exc:
+                    # Never let the monitor thread die — log and keep looping.
+                    try:
+                        self.log(f"[monitor] Unexpected error: {_exc}")
+                    except Exception:
+                        pass
+
+        threading.Thread(target=_watch, daemon=True).start()
+
+        # ── Player-count poller ───────────────────────────────────────────────
+        # Runs on its own daemon thread so the crash-detection loop (_watch)
+        # is never blocked by a slow / failing RCON call.
+        def _player_count_loop() -> None:
+            while True:
+                time.sleep(15)
+                if self.boot_state != "ready":
+                    if self.player_count != 0:
+                        self.player_count = 0
+                    continue
+                try:
+                    out = self.rcon.execute("status")
+                    self.player_count = len(self._parse_players(out))
+                except Exception:
+                    pass   # keep the last known count; don't spam the log
+
+        threading.Thread(target=_player_count_loop, daemon=True).start()
+
+    # ── RCON execute (passthrough for the web API) ────────────────────────────
+
+    def rcon_execute(self, command: str,
+                     callback: Callable[[str, str | None], None] | None = None
+                     ) -> None:
+        """Execute an arbitrary RCON command on a background thread.
+
+        *callback* is called with (response_text, error_message_or_None).
+        """
+        def _do() -> None:
+            try:
+                resp = self.rcon.execute(command)
+                self.log(f"[rcon] > {command}  → {resp.strip()[:120]}")
+                if callback:
+                    callback(resp, None)
+            except Exception as exc:
+                self.log(f"[rcon] > {command}  ✗ {exc}")
+                if callback:
+                    callback("", str(exc))
         threading.Thread(target=_do, daemon=True).start()

@@ -1,0 +1,103 @@
+/**
+ * api.js — typed fetch wrappers for the Oblivion Server Tool REST API.
+ * All methods return a Promise that resolves to the parsed JSON body.
+ * On HTTP errors the promise rejects with an Error whose message is the
+ * server's `error` field (or the HTTP status text).
+ */
+
+const api = (() => {
+
+  async function req(method, path, body = null) {
+    const opts = {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+    };
+    if (body !== null) opts.body = JSON.stringify(body);
+    const r = await fetch(path, opts);
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) { const err = new Error(data.error || r.statusText); Object.assign(err, data); throw err; }
+    return data;
+  }
+
+  const get  = (path)        => req('GET',    path);
+  const post = (path, body)  => req('POST',   path, body || {});
+  const del  = (path, body)  => req('DELETE', path, body);
+
+  return {
+    // ── Auth ──────────────────────────────────────────────────────────────
+    login:   (pin)      => post('/api/auth/login',  { pin }),
+    logout:  ()         => post('/api/auth/logout'),
+
+    // ── State ─────────────────────────────────────────────────────────────
+    state:   ()         => get('/api/state'),
+
+    // ── Server control ────────────────────────────────────────────────────
+    start:   (map, mode, workshop = false) =>
+                          post('/api/server/start', { map, mode, workshop }),
+    stop:    ()         => post('/api/server/stop'),
+    map:     (map, mode, workshop = false) =>
+                          post('/api/server/map',   { map, mode, workshop }),
+    broadcast: (message) => post('/api/server/broadcast', { message }),
+    ff:      (enabled)  => post('/api/server/ff',          { enabled }),
+    restartRound: ()    => post('/api/server/round/restart'),
+    endWarmup:    ()    => post('/api/server/round/warmup'),
+    pause:        ()    => post('/api/server/match/pause'),
+    unpause:      ()    => post('/api/server/match/unpause'),
+
+    // ── Bots ──────────────────────────────────────────────────────────────
+    addBots: (count)    => post('/api/bots/add',  { count }),
+    kickBots:()         => post('/api/bots/kick'),
+
+    // ── Players ───────────────────────────────────────────────────────────
+    players: ()         => get('/api/players'),
+    kick:    (userid, name) => post('/api/players/kick', { userid, name }),
+    ban:     (steamid, name, duration = 0) =>
+                          post('/api/players/ban',  { steamid, name, duration }),
+    bans:    ()         => get('/api/bans'),
+    unban:   (steamid)  => post('/api/bans/remove', { steamid }),
+
+    // ── Config ────────────────────────────────────────────────────────────
+    config:    ()       => get('/api/config'),
+    setConfig: (data)   => post('/api/config', data),
+
+    // ── Presets ───────────────────────────────────────────────────────────
+    presets:       ()       => get('/api/presets'),
+    savePreset:    (name)   => post('/api/presets/save', { name }),
+    loadPreset:    (name)   => post('/api/presets/load', { name }),
+    deletePreset:  (name)   => del(`/api/presets/${encodeURIComponent(name)}`),
+
+    // ── RCON ──────────────────────────────────────────────────────────────
+    rcon:    (command)  => post('/api/rcon', { command }),
+
+    // ── Workshop ──────────────────────────────────────────────────────────
+    workshopMaps:     ()    => get('/api/workshop/maps'),
+    workshopDownload: (id)  => post('/api/workshop/download', { id }),
+    workshopCancel:   ()    => post('/api/workshop/cancel'),
+    workshopUpdate:   ()    => post('/api/workshop/update'),
+    requestWorkshop:  (workshop_id) =>
+                          post('/api/request_workshop', { workshop_id }),
+
+    // ── Server install / update ───────────────────────────────────────────
+    install:   ()       => post('/api/server/install'),
+    updateCs2: ()       => post('/api/server/update_cs2'),
+
+    // ── Steam ─────────────────────────────────────────────────────────────
+    steamLogin: ()      => post('/api/steam/login'),
+
+    // ── System ────────────────────────────────────────────────────────────
+    pickDirectory: ()   => get('/api/system/pick_directory'),
+
+    // ── Game data ─────────────────────────────────────────────────────────
+    modes:            ()  => get('/api/data/modes'),
+    maps:             ()  => get('/api/data/maps'),
+    modeMaps:         ()  => get('/api/data/mode_maps'),
+    modeWorkshopTags: ()  => get('/api/data/mode_workshop_tags'),
+
+    // ── Setup (first-run) ─────────────────────────────────────────────────
+    setupStatus:   ()     => get('/api/setup/status'),
+    setupComplete: (data) => post('/api/setup/complete', data),
+
+    // ── Log ───────────────────────────────────────────────────────────────
+    logHistory: ()      => get('/api/log/history'),
+  };
+})();

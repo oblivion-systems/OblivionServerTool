@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Oblivion Server Tool</title>
+  <link rel="icon" type="image/png"     href="/static/favicon.png" sizes="32x32">
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+
+{% if not authed %}
+<!-- ═══════════════════════════════════════════════════════════════ LOGIN PAGE -->
+<div id="login-screen">
+  <div class="login-card">
+    <div class="login-brand-row">
+      <img src="/static/images/emblem.png" class="login-emblem" alt="Oblivion">
+      <div class="login-brand-text">
+        <div class="login-brand-name">Oblivion</div>
+        <div class="login-sub">Server Tool</div>
+      </div>
+    </div>
+    <div class="pin-dots" id="pin-dots">
+      {% for i in range(pin_len) %}
+      <div class="pin-dot" id="pd{{ i }}"></div>
+      {% endfor %}
+    </div>
+    <div class="keypad">
+      <button class="key" data-d="7">7</button>
+      <button class="key" data-d="8">8</button>
+      <button class="key" data-d="9">9</button>
+      <button class="key" data-d="4">4</button>
+      <button class="key" data-d="5">5</button>
+      <button class="key" data-d="6">6</button>
+      <button class="key" data-d="1">1</button>
+      <button class="key" data-d="2">2</button>
+      <button class="key" data-d="3">3</button>
+      <button class="key key-del" id="key-del">⌫</button>
+      <button class="key" data-d="0">0</button>
+      <button class="key key-ok" id="key-ok">↵</button>
+    </div>
+    <div class="login-err" id="login-err"></div>
+    <div class="login-lock" id="login-lock"></div>
+  </div>
+</div>
+<script>
+  const PIN_LEN = {{ pin_len }};
+  let pin = '', locked = false;
+
+  function dots() {
+    for (let i = 0; i < PIN_LEN; i++) {
+      document.getElementById('pd' + i).className =
+        'pin-dot' + (i < pin.length ? ' filled' : '');
+    }
+  }
+  function shake() {
+    document.querySelectorAll('.pin-dot').forEach(d => {
+      d.classList.add('shake');
+      setTimeout(() => d.classList.remove('shake'), 350);
+    });
+  }
+  function press(d) {
+    if (locked || pin.length >= PIN_LEN) return;
+    pin += d; dots();
+    if (pin.length === PIN_LEN) setTimeout(submit, 100);
+  }
+  function del() {
+    if (!locked && pin.length > 0) { pin = pin.slice(0, -1); dots(); }
+  }
+  function submit() {
+    if (!pin.length) return;
+    fetch('/api/auth/login', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({pin})
+    }).then(r => r.json()).then(d => {
+      if (d.ok) { location.reload(); return; }
+      shake(); pin = ''; dots();
+      document.getElementById('login-err').textContent = d.error || 'Wrong PIN';
+      if (d.locked_for) {
+        locked = true;
+        document.getElementById('login-lock').textContent =
+          'Too many attempts. Try again in ' + d.locked_for + 's';
+        setTimeout(() => {
+          locked = false;
+          document.getElementById('login-lock').textContent = '';
+          document.getElementById('login-err').textContent = '';
+        }, d.locked_for * 1000);
+      }
+    });
+  }
+  document.querySelectorAll('.key[data-d]').forEach(b =>
+    b.addEventListener('click', () => press(b.dataset.d)));
+  document.getElementById('key-del').addEventListener('click', del);
+  document.getElementById('key-ok').addEventListener('click', submit);
+  document.addEventListener('keydown', e => {
+    if (e.key >= '0' && e.key <= '9') press(e.key);
+    else if (e.key === 'Backspace') del();
+    else if (e.key === 'Enter') submit();
+  });
+</script>
+
+{% else %}
+<!-- ══════════════════════════════════════════════════════════════ MAIN APP -->
+<div id="app">
+
+  <!-- Header -->
+  <header id="hdr">
+    <div class="hdr-brand">
+      <img src="/static/images/emblem.png" class="hdr-logo" alt="Oblivion">
+      <div class="hdr-brand-text">
+        <span class="brand-name">Oblivion</span>
+        <span class="brand-sub">Server Tool</span>
+      </div>
+    </div>
+    <div id="hdr-state">
+      <div class="state-dot" id="hdr-dot"></div>
+      <span id="hdr-state-label">Offline</span>
+    </div>
+    <div id="hdr-actions">
+      <span id="app-update-badge" class="update-badge hidden"></span>
+      <span id="cs2-update-badge" class="update-badge hidden"></span>
+    </div>
+  </header>
+
+  <!-- Body -->
+  <div id="body">
+
+    <!-- Sidebar -->
+    <nav id="sidebar">
+      <a class="nav-item" data-page="status"   href="#status">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+        Status
+      </a>
+      <a class="nav-item" data-page="players"  href="#players">
+        <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        Players
+      </a>
+      <a class="nav-item" data-page="maps"     href="#maps">
+        <svg viewBox="0 0 24 24"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/><line x1="9" y1="3" x2="9" y2="18"/><line x1="15" y1="6" x2="15" y2="21"/></svg>
+        Maps
+      </a>
+      <a class="nav-item" data-page="workshop" href="#workshop">
+        <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        Workshop
+      </a>
+      <a class="nav-item" data-page="appearance" href="#appearance">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2a10 10 0 1 0 10 10"/><path d="M12 8a4 4 0 1 0 4 4"/></svg>
+        Appearance
+      </a>
+      <a class="nav-item" data-page="config"   href="#config">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        Config
+      </a>
+      <div class="sidebar-spacer"></div>
+      <div class="sidebar-session">
+        <div class="session-dot"></div>
+        <span>Session active</span>
+      </div>
+      <a class="nav-item nav-logout" id="nav-logout" href="#" title="End session and return to PIN screen">
+        <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        Sign Out
+      </a>
+    </nav>
+
+    <!-- Page content (rendered by app.js) -->
+    <main id="content"></main>
+
+  </div>
+
+  <!-- Status bar -->
+  <footer id="statusbar">
+    <div class="sb-item">
+      <span class="sb-label">Map</span>
+      <span class="sb-value" id="sb-map">—</span>
+    </div>
+    <div class="sb-sep"></div>
+    <div class="sb-item">
+      <span class="sb-label">Mode</span>
+      <span class="sb-value" id="sb-mode">—</span>
+    </div>
+    <div class="sb-sep"></div>
+    <div class="sb-item">
+      <span class="sb-label">Uptime</span>
+      <span class="sb-value" id="sb-uptime">—</span>
+    </div>
+    <div class="sb-sep"></div>
+    <div class="sb-item sb-clickable" id="sb-lan" title="Click to copy">
+      <span class="sb-label">LAN</span>
+      <span class="sb-value" id="sb-lan-val">—</span>
+    </div>
+    <div class="sb-sep"></div>
+    <div class="sb-item sb-clickable" id="sb-pub" title="Click to copy">
+      <span class="sb-label">Public IP</span>
+      <span class="sb-value" id="sb-pub-val">—</span>
+    </div>
+    <div class="sb-right">
+      <span id="sb-web-url" class="sb-link"></span>
+    </div>
+  </footer>
+
+  <!-- Toast notification -->
+  <div id="toast"></div>
+
+</div>
+
+<script src="/static/js/api.js"></script>
+<script src="/static/js/app.js"></script>
+{% endif %}
+
+</body>
+</html>
