@@ -1,9 +1,9 @@
 # Oblivion Server Tool
 
-A desktop GUI for managing a **Counter-Strike 2 dedicated server** on Windows.  
-Built with Python + CustomTkinter. No installer required — single `.exe` you drop on any machine.
+A desktop application for managing a **Counter-Strike 2 dedicated server** on Windows.  
+Built with Python + Flask + pywebview (Edge WebView2). Ships as a single `.exe` with an optional installer.
 
-> **Status: v0.7.5 — work in progress.** Core features are working; expect rough edges.
+> **Status: v0.9.0 — work in progress.** Core features are stable; expect rough edges.
 
 ---
 
@@ -11,12 +11,14 @@ Built with Python + CustomTkinter. No installer required — single `.exe` you d
 
 Running a CS2 dedicated server normally means juggling command-line arguments, steamcmd windows, and RCON clients. Oblivion Server Tool puts everything in one place — start the server, manage players, change maps, download workshop content, and administer remotely from your phone, all from a single window.
 
+The desktop app and the remote web panel are the same interface: a Flask SPA rendered in a local pywebview window (Edge WebView2). Any device on your LAN can open the same panel in a browser with PIN authentication.
+
 ---
 
 ## Features
 
 ### Server Control
-- **Start / Stop** the CS2 dedicated server with one click
+- **Start / Stop / Quick Restart** with one click
 - **Change map and game mode** live without restarting
 - Animated status indicator — Offline / Booting / Online
 - Server **uptime counter** in the status bar
@@ -25,28 +27,45 @@ Running a CS2 dedicated server normally means juggling command-line arguments, s
 
 ### Map & Mode Selection
 - Pick from all **official CS2 maps**, filtered per game mode
-- Full **game mode support**: Competitive, Casual, Wingman, 3v3, 4v4, 1v1, Arms Race, Demolition, Deathmatch, Zombies, Surf, KZ / Climb, Retakes
+- **14 game modes**: Competitive, Casual, Wingman, 3v3, 4v4, 1v1, Arms Race, Demolition, Deathmatch, Retakes, Jailbreak, Practice, Warcraft, Zombie Escape
 - **Workshop map picker** — shows downloaded maps by real name, not just ID
+- **Map search** — filter official and workshop maps by name or ID in real time
 - **Browse Steam Workshop** button, pre-filtered by the currently selected game mode
 
+### Mode-Specific Plugin Deployment
+Oblivion automatically deploys the correct CounterStrikeSharp / MetaMod plugins for each mode and cleans them up when switching:
+
+| Mode | Plugins deployed |
+|---|---|
+| Retakes | CS2Retake + RetakesAllocator |
+| Practice | MatchZy |
+| Jailbreak | CS2Fixes (MetaMod) |
+| Deathmatch | CS2Fixes (MetaMod) |
+| Warcraft | CS2-Warcraft-Plugin |
+| Zombie Escape | ZombieMod (CS2Fixes fork) + MultiAddonManager + ZombieReborn addon |
+
+Vanilla modes (Competitive, Casual, Wingman, etc.) run with no managed plugins and have `gameinfo.gi` automatically restored to avoid CSS CLR crashes.
+
 ### Workshop Maps
-- Download any workshop map by **Steam Workshop ID**
-- Uses **DepotDownloader** under the hood — no Steam client interference, no buffering issues
-- Auto-downloads DepotDownloader on first use (no manual setup)
+- Download any workshop map by **Steam Workshop ID or URL**
+- Uses **DepotDownloader** under the hood — no Steam client interference
+- Auto-downloads DepotDownloader on first use
 - Credentials cached after first login — no re-auth on every download
+- Live download status (pulsing dot + real-time DepotDownloader output)
 - **Cancel** an in-progress download at any time
 - **Check for map updates** to keep downloaded maps current
+- **Paste button** — paste a full Steam Workshop URL; the field strips non-numeric characters automatically
 
 ### Player Management
 - Live **player list** with names and ping
 - **Kick** or **ban** any player directly from the list
 - **Manual ban** by SteamID
 - Full **ban list viewer** with one-click unban
-- Auto-refresh every 10 seconds (optional toggle)
+- Auto-refresh every 10 seconds
 
 ### Quick Actions
 - **Broadcast a message** to all connected players
-- **Friendly fire** toggle (on/off with live RCON)
+- **Friendly fire** toggle
 - **Restart round** / **End warmup**
 - **Pause** / **Unpause** match
 
@@ -54,37 +73,37 @@ Running a CS2 dedicated server normally means juggling command-line arguments, s
 - Server **hostname** and **password**
 - **Max players** override (per-mode defaults applied automatically)
 - **Tickrate 128** toggle
-- **Bot management** — add 1 or 5 bots, kick all, set difficulty
+- **Bot management** — add bots, kick all, set difficulty
 - **Config presets** — save, load, and delete named server configurations
+- **Game Server Login Token (GSLT)** — set token for VAC-secured public servers
+- **Steam account** — credentials for workshop downloads (separate account recommended)
 
-### Remote Web Panel
-- Built-in Flask web server accessible from any device on your LAN
-- **PIN-protected** admin interface (4-digit keypad)
-- Remotely change map, mode, and workshop map
-- Request workshop map downloads (requires desktop approval)
-- Broadcast messages to players
-- Real-time log feed via Server-Sent Events
+### Appearance & Settings
+- **Theme** — Dark, Light, or System (follows OS preference)
+- **Accent colour** — Purple, Blue, Teal, Green, Orange, or Red
+- **Compact mode** — tighter spacing for smaller displays
+- **Confirm before stopping** toggle
+- **Auto-scroll log** and configurable log line limit
+- **Browser notifications** on server start / stop / crash
+- **Keybinds** — configurable keyboard shortcuts for any server action (Stop, Quick Restart, Pause, Restart Round, End Warmup, bots, etc.)
 
 ### Status Bar
 - Current **map** and **game mode**
 - Server **uptime**
-- CS2 **build number** (orange when an update is available)
-- **LAN connect string** — click to copy to clipboard
+- **LAN connect string** — click to copy
 - **Public / external IP** — fetched automatically, click to copy
-- Remote admin URL
+- Update badges when a newer CS2 server build or app release is available
 
 ### CS2 Server Updates
 - Checks Steam API on launch for a newer CS2 server build
-- Orange **"⬆ Update!"** button when an update is available
 - One-click update via steamcmd (server stops automatically)
 
 ### App Self-Updates
-- Checks GitHub Releases on launch for a newer version of this tool
-- Orange **"⬆ App vX.X.X available"** label in the header when found
-- Click it to open the releases page and download
+- Checks GitHub Releases on launch
+- Update badge in the header links to the releases page
 
-### First-Run & Installation
-- **Setup wizard** on first launch — just point it at your server folder
+### First-Run Setup
+- **Setup wizard** on first launch — point it at your server folder and set your admin PIN
 - If CS2 server isn't installed yet, one click downloads steamcmd and installs the full server (~15 GB)
 - **Install / Reinstall** button in Config for any machine
 
@@ -98,8 +117,8 @@ Running a CS2 dedicated server normally means juggling command-line arguments, s
 
 ### Option A — Pre-built executable (recommended)
 1. Download `OblivionServerTool.exe` from [Releases](https://github.com/jacquesvniekerk-eng/OblivionServerTool/releases)
-2. Run it — no installer needed
-3. On first launch a setup dialog will ask for your CS2 server directory
+2. Run it — no installer needed (or use the `OblivionServerToolSetup-v*.exe` installer for a Start Menu entry)
+3. On first launch a setup wizard will ask for your CS2 server directory and admin PIN
 4. If you don't have a CS2 server yet, click **Install Now** — it downloads everything automatically
 
 ### Option B — Run from source
@@ -112,8 +131,13 @@ python main.py
 
 ### Building the executable yourself
 ```bash
+# Produces dist\OblivionServerTool.exe
 build.bat
-# Output: dist\OblivionServerTool.exe
+
+# Optional: build the installer (requires Inno Setup)
+# https://jrsoftware.org/isinfo.php
+ISCC installer.iss
+# Output: dist\OblivionServerToolSetup-v0.9.0.exe
 ```
 
 ---
@@ -122,24 +146,28 @@ build.bat
 
 | Requirement | Notes |
 |---|---|
-| Windows 10 / 11 | 64-bit |
+| Windows 10 / 11 (64-bit) | Edge WebView2 runtime required — ships with Windows 11, 1-click install on Windows 10 |
 | CS2 dedicated server | Can be installed by the tool if missing |
 | Steam account (dedicated) | For workshop downloads — **use a separate account**, not your personal one |
 | Port 27015 open (TCP + UDP) | For players to connect |
 | Port 5000 open (TCP, LAN only) | For the remote web panel |
 
 > **Why a dedicated Steam account?**  
-> steamcmd signs into Steam to download workshop maps. If it uses your main account, it will disconnect your Steam desktop client. CS2 is free — create a second account at [store.steampowered.com](https://store.steampowered.com) and enter it under **🔑 Steam** in the tool.
+> steamcmd signs into Steam to download workshop maps. If it uses your main account, it will disconnect your Steam desktop client. CS2 is free — create a second account at [store.steampowered.com](https://store.steampowered.com) and enter it under **Steam Account** in Config.
+
+> **Edge WebView2** is included with Windows 11 and most up-to-date Windows 10 installs. If the app fails to open a window, download the runtime from [microsoft.com/en-us/edge/download/webview2](https://developer.microsoft.com/en-us/microsoft-edge/webview2/).
 
 ---
 
 ## Remote Web Panel
 
-The tool runs a local web server on port 5000. To use it from another device on the same network:
+The tool runs a local Flask server on port 5000. The same interface you see in the desktop window is accessible from any device on your network:
 
-1. Click **🌐 Web Panel** in the tool, or open `http://<server-LAN-ip>:5000` in any browser
-2. Enter the admin PIN (default: `1234` — change it in `config.py` before distributing)
+1. Open `http://<server-LAN-ip>:5000` in any browser (the LAN IP is shown in the status bar)
+2. Enter your admin PIN
 3. Control the server from your phone, tablet, or any browser on the LAN
+
+Remote sessions authenticate with a PIN and expire after 8 hours. The desktop window gets an automatic session and never prompts for the PIN.
 
 ---
 
