@@ -25,7 +25,7 @@
   --radius-sm: 7px;
   --shadow:    0 8px 40px rgba(0,0,0,.7);
   /* ── Glow shortcuts ── */
-  --glow-accent: 0 0 18px rgba(160,58,245,.55), 0 0 40px rgba(160,58,245,.2);
+  --glow-accent: 0 0 20px rgba(160,58,245,.65), 0 0 50px rgba(160,58,245,.28);
   --glow-green:  0 0 16px rgba(34,197,94,.55);
   --glow-red:    0 0 16px rgba(224,92,107,.55);
   --glow-blue:   0 0 16px rgba(78,154,255,.55);
@@ -39,9 +39,10 @@ body {
   background: var(--bg); color: var(--text);
   font-family: 'Segoe UI', system-ui, sans-serif; font-size: 14px;
   background-image:
-    radial-gradient(ellipse at 15% 50%, rgba(160,58,245,.07) 0%, transparent 50%),
-    radial-gradient(ellipse at 85% 15%, rgba(78,154,255,.05) 0%, transparent 45%),
-    radial-gradient(ellipse at 55% 95%, rgba(160,58,245,.04) 0%, transparent 40%);
+    radial-gradient(ellipse at 15% 50%,  rgba(160,58,245,.16) 0%, transparent 50%),
+    radial-gradient(ellipse at 85% 15%,  rgba(100,60,255,.09) 0%, transparent 45%),
+    radial-gradient(ellipse at 55% 95%,  rgba(160,58,245,.10) 0%, transparent 40%),
+    radial-gradient(ellipse at 78% 62%,  rgba(180,55,255,.06) 0%, transparent 38%);
 }
 a { color: inherit; text-decoration: none; }
 button { cursor: pointer; font-family: inherit; }
@@ -259,7 +260,7 @@ svg { display: block; }
   border: 1px solid var(--border);
   border-top-color: var(--accent-gl);
   border-radius: var(--radius); padding: 20px;
-  box-shadow: 0 4px 20px rgba(0,0,0,.35);
+  box-shadow: 0 4px 20px rgba(0,0,0,.35), 0 0 50px -12px var(--accent-gl);
 }
 .card-title {
   font-size: .68rem; font-weight: 700; letter-spacing: 2px;
@@ -438,7 +439,7 @@ svg { display: block; }
   border-top-color: var(--accent-gl);
   border-radius: var(--radius); padding: 28px 24px;
   display: flex; flex-direction: column; align-items: center; gap: 16px;
-  box-shadow: 0 4px 20px rgba(0,0,0,.35);
+  box-shadow: 0 4px 20px rgba(0,0,0,.35), 0 0 50px -12px var(--accent-gl);
   /* needed for .map-ghost and .live-map-info absolute children */
   position: relative; overflow: hidden; isolation: isolate;
 }
