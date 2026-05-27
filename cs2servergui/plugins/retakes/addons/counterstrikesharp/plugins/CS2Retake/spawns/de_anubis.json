@@ -132,54 +132,6 @@
     "QAngleZ": 0.0
   },
   {
-    "SpawnId": "388219d4-1c98-4e66-957a-3c45ead99c05",
-    "Team": 2,
-    "BombSite": 1,
-    "IsInBombZone": false,
-    "PositionX": -1533.19,
-    "PositionY": 799.22,
-    "PositionZ": 38.03,
-    "QAngleX": 0.0,
-    "QAngleY": -93.0,
-    "QAngleZ": 0.0
-  },
-  {
-    "SpawnId": "8a19fc8e-a9e5-4525-a07c-eb2663fe10ac",
-    "Team": 2,
-    "BombSite": 1,
-    "IsInBombZone": false,
-    "PositionX": -583.09,
-    "PositionY": 496.94,
-    "PositionZ": 38.16,
-    "QAngleX": 0.0,
-    "QAngleY": 135.1,
-    "QAngleZ": 0.0
-  },
-  {
-    "SpawnId": "f6b7ca70-f7de-47a6-9f3b-37838cf467ba",
-    "Team": 2,
-    "BombSite": 1,
-    "IsInBombZone": false,
-    "PositionX": -635.26,
-    "PositionY": 923.0,
-    "PositionZ": 38.03,
-    "QAngleX": 0.0,
-    "QAngleY": -158.08,
-    "QAngleZ": 0.0
-  },
-  {
-    "SpawnId": "2a27f46f-01e7-4d42-a9fd-1f4b5f9bedd4",
-    "Team": 2,
-    "BombSite": 1,
-    "IsInBombZone": false,
-    "PositionX": -1160.09,
-    "PositionY": 270.44,
-    "PositionZ": -18.23,
-    "QAngleX": 0.0,
-    "QAngleY": 9.39,
-    "QAngleZ": 0.0
-  },
-  {
     "SpawnId": "45556c43-b78e-4ee1-849f-a8824ca45b5b",
     "Team": 2,
     "BombSite": 1,
@@ -189,18 +141,6 @@
     "PositionZ": -1.97,
     "QAngleX": 0.0,
     "QAngleY": -69.8,
-    "QAngleZ": 0.0
-  },
-  {
-    "SpawnId": "ce4f9f6f-992b-488c-a75b-a27b1e37a0e4",
-    "Team": 2,
-    "BombSite": 1,
-    "IsInBombZone": false,
-    "PositionX": -1383.69,
-    "PositionY": 635.28,
-    "PositionZ": 0.03,
-    "QAngleX": 0.0,
-    "QAngleY": 49.68,
     "QAngleZ": 0.0
   },
   {
@@ -357,66 +297,6 @@
     "PositionZ": -185.02,
     "QAngleX": 0.0,
     "QAngleY": -67.34,
-    "QAngleZ": 0.0
-  },
-  {
-    "SpawnId": "4d5a8550-328a-43cd-be03-3502d924bbda",
-    "Team": 2,
-    "BombSite": 0,
-    "IsInBombZone": false,
-    "PositionX": 1613.31,
-    "PositionY": 1978.65,
-    "PositionZ": -70.47,
-    "QAngleX": 0.0,
-    "QAngleY": -89.02,
-    "QAngleZ": 0.0
-  },
-  {
-    "SpawnId": "fe78c8fa-d903-4177-9ed3-77bcd3a740b8",
-    "Team": 2,
-    "BombSite": 0,
-    "IsInBombZone": false,
-    "PositionX": 1144.71,
-    "PositionY": 2111.3,
-    "PositionZ": -112.95,
-    "QAngleX": 0.0,
-    "QAngleY": 175.94,
-    "QAngleZ": 0.0
-  },
-  {
-    "SpawnId": "7d9d4dcf-d047-4f09-b66f-76c14716e33d",
-    "Team": 2,
-    "BombSite": 0,
-    "IsInBombZone": false,
-    "PositionX": 943.88,
-    "PositionY": 1925.33,
-    "PositionZ": -151.97,
-    "QAngleX": 0.0,
-    "QAngleY": -31.75,
-    "QAngleZ": 0.0
-  },
-  {
-    "SpawnId": "47932674-41a8-4957-b92d-e74a0403680f",
-    "Team": 2,
-    "BombSite": 0,
-    "IsInBombZone": false,
-    "PositionX": 1204.95,
-    "PositionY": 1587.6,
-    "PositionZ": -151.97,
-    "QAngleX": 0.0,
-    "QAngleY": -150.42,
-    "QAngleZ": 0.0
-  },
-  {
-    "SpawnId": "5be03a20-a74d-468d-9980-20f9e3b49d0b",
-    "Team": 2,
-    "BombSite": 0,
-    "IsInBombZone": false,
-    "PositionX": 1425.29,
-    "PositionY": 1686.47,
-    "PositionZ": -151.97,
-    "QAngleX": 0.0,
-    "QAngleY": -51.38,
     "QAngleZ": 0.0
   }
 ]

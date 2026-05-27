@@ -156,42 +156,6 @@
     "QAngleZ": 0.0
   },
   {
-    "SpawnId": "059aa6c2-a804-427d-a3bc-a1ef430483bb",
-    "Team": 2,
-    "BombSite": 0,
-    "IsInBombZone": false,
-    "PositionX": -1527.92,
-    "PositionY": 931.31,
-    "PositionZ": 54.03,
-    "QAngleX": 0.0,
-    "QAngleY": -98.86,
-    "QAngleZ": 0.0
-  },
-  {
-    "SpawnId": "1bc404b4-9ae8-40ff-852c-cee372c4ca41",
-    "Team": 2,
-    "BombSite": 0,
-    "IsInBombZone": false,
-    "PositionX": -1665.46,
-    "PositionY": 1187.97,
-    "PositionZ": 52.03,
-    "QAngleX": 0.0,
-    "QAngleY": -122.5,
-    "QAngleZ": 0.0
-  },
-  {
-    "SpawnId": "4764c4e5-9b5c-47d4-a7ef-46634ca73012",
-    "Team": 2,
-    "BombSite": 0,
-    "IsInBombZone": false,
-    "PositionX": -1466.5,
-    "PositionY": 1148.96,
-    "PositionZ": 97.45,
-    "QAngleX": 0.0,
-    "QAngleY": 45.27,
-    "QAngleZ": 0.0
-  },
-  {
     "SpawnId": "2614c906-b3ab-4ffb-8247-7dd520773483",
     "Team": 3,
     "BombSite": 1,
@@ -357,66 +321,6 @@
     "PositionZ": 130.03,
     "QAngleX": 0.0,
     "QAngleY": 93.37,
-    "QAngleZ": 0.0
-  },
-  {
-    "SpawnId": "20a9464b-bd0a-498f-8d6a-6f3733dcd7d5",
-    "Team": 2,
-    "BombSite": 1,
-    "IsInBombZone": false,
-    "PositionX": 320.03,
-    "PositionY": 292.97,
-    "PositionZ": 161.65,
-    "QAngleX": 0.0,
-    "QAngleY": -78.06,
-    "QAngleZ": 0.0
-  },
-  {
-    "SpawnId": "bf6b5dec-5745-4aed-b36e-3ca94cc300a8",
-    "Team": 2,
-    "BombSite": 1,
-    "IsInBombZone": false,
-    "PositionX": 665.49,
-    "PositionY": -286.0,
-    "PositionZ": 138.04,
-    "QAngleX": 0.0,
-    "QAngleY": 2.8,
-    "QAngleZ": 0.0
-  },
-  {
-    "SpawnId": "f1f8f652-a57a-4cd3-8ac0-ca557af89777",
-    "Team": 2,
-    "BombSite": 1,
-    "IsInBombZone": false,
-    "PositionX": 724.94,
-    "PositionY": -106.86,
-    "PositionZ": 134.03,
-    "QAngleX": 0.0,
-    "QAngleY": 79.79,
-    "QAngleZ": 0.0
-  },
-  {
-    "SpawnId": "8ec85967-bb12-49e8-ad94-4acaf0747674",
-    "Team": 2,
-    "BombSite": 1,
-    "IsInBombZone": false,
-    "PositionX": 1267.56,
-    "PositionY": 323.62,
-    "PositionZ": 123.47,
-    "QAngleX": 0.0,
-    "QAngleY": 100.03,
-    "QAngleZ": 0.0
-  },
-  {
-    "SpawnId": "40ff2d23-1930-4cba-9207-846ce15f8a86",
-    "Team": 2,
-    "BombSite": 1,
-    "IsInBombZone": false,
-    "PositionX": 1036.46,
-    "PositionY": 259.77,
-    "PositionZ": 131.03,
-    "QAngleX": 0.0,
-    "QAngleY": 49.41,
     "QAngleZ": 0.0
   }
 ]
