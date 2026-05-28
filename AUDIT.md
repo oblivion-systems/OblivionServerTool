@@ -189,7 +189,7 @@ XSS findings to the top of the list.
 - **RCON socket hygiene** — `settimeout(5)` + `with socket(...)`; no hang-forever, no leaked sockets; `execute_retry` doesn't retry auth failures.
 - **SSE server-side cleanup** — `log_stream` unsubscribes in `finally`.
 - **Log buffer** — bounded via `deque(maxlen=300)`.
-- **Version consistency** — `APP_VERSION "0.9.0"` matches `installer.iss`.
+- **Version consistency** — `APP_VERSION "0.9.1"` matches `installer.iss`.
 - **PyInstaller bundling** — plugins/templates/static/icon bundled; `_resolve_plugins_base()` handles the frozen `_MEIPASS` path.
 - **No leftover `console.log`/`TODO`/`FIXME`** in the frontend.
 

@@ -3,7 +3,7 @@
 A desktop application for managing a **Counter-Strike 2 dedicated server** on Windows.  
 Built with Python + Flask + pywebview (Edge WebView2). Ships as a single `.exe` with an optional installer.
 
-> **Status: v0.9.0 — work in progress.** Core features are stable; expect rough edges.
+> **Status: v0.9.1 — work in progress.** Core features are stable; expect rough edges.
 
 ---
 
@@ -39,10 +39,10 @@ Oblivion automatically deploys the correct CounterStrikeSharp / MetaMod plugins 
 |---|---|
 | Retakes | B3none cs2-retakes + RetakesAllocator |
 | Practice | MatchZy |
-| 1v1 / 3v3 / 4v4 | K4-Arenas + K4-Arenas-Bots |
+| 1v1 / 3v3 / 4v4 | K4-Arenas (K4-Arenas-Bots optional, via the **Use bots** toggle) |
 | Deathmatch | CS2Fixes (MetaMod) + CS2-Deathmatch |
-| Jailbreak | CS2Fixes (MetaMod) + Jailbreak |
-| Warcraft | CS2-Warcraft-Plugin |
+| Jailbreak | Jailbreak (CS2Fixes removed in v0.9.1 — it crashed the server) |
+| Warcraft | CS2-Warcraft-Plugin + ModelPrecacher |
 | Zombie Escape | ZombieMod (CS2Fixes fork) + MultiAddonManager + ZombieReborn addon |
 
 Vanilla modes (Competitive, Casual, Wingman, etc.) run with no managed plugins and have `gameinfo.gi` automatically restored to avoid CSS CLR crashes.
@@ -52,9 +52,11 @@ Vanilla modes (Competitive, Casual, Wingman, etc.) run with no managed plugins a
 - Uses **DepotDownloader** under the hood — no Steam client interference
 - Auto-downloads DepotDownloader on first use
 - Credentials cached after first login — no re-auth on every download
-- Live download status (pulsing dot + real-time DepotDownloader output)
+- **Real per-MB progress bar** — shows `X / Y MB (Z%)` against Steam's reported size
+- **Verify before use** — downloads stage to a temp folder and are size/`.vpk`-checked before being promoted, so a failed/partial download never leaves a broken map
 - **Cancel** an in-progress download at any time
 - **Check for map updates** to keep downloaded maps current
+- **Command-filter automation** — auto-detects maps that need `-disable_workshop_command_filtering` (from the Steam description) and applies the launch flag only for those, with a per-map override + Scan button
 - **Paste button** — paste a full Steam Workshop URL; the field strips non-numeric characters automatically
 
 ### Player Management
@@ -74,7 +76,7 @@ Vanilla modes (Competitive, Casual, Wingman, etc.) run with no managed plugins a
 - Server **hostname** and **password**
 - **Max players** override (per-mode defaults applied automatically)
 - **Tickrate 128** toggle
-- **Bot management** — add bots, kick all, set difficulty
+- **Bot management** — add bots, kick all, set difficulty; **Use bots** toggle gates Arena bot-fill (humans-only ladder when off)
 - **Config presets** — save, load, and delete named server configurations
 - **Game Server Login Token (GSLT)** — set token for VAC-secured public servers
 - **Steam account** — credentials for workshop downloads (separate account recommended)
@@ -138,7 +140,7 @@ build.bat
 # Optional: build the installer (requires Inno Setup)
 # https://jrsoftware.org/isinfo.php
 ISCC installer.iss
-# Output: dist\OblivionServerToolSetup-v0.9.0.exe
+# Output: dist\OblivionServerToolSetup-v0.9.1.exe
 ```
 
 ---

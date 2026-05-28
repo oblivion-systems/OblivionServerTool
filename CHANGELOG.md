@@ -2,11 +2,23 @@
 
 ---
 
-## Unreleased
+## v0.9.1 — 2026-05-29
 
-> ⚠️ **This section is uncommitted/in-testing.** Items marked **(unverified)** still need
-> an in-game confirmation. See [TODO.md](TODO.md) → "Pending / In-Flight" for the live
-> status of anything not yet ticked off.
+A stability + features pass: Retakes rebuilt on B3none, the Jailbreak native crash fixed,
+Warcraft Barbarian models fixed via a precacher plugin, a full workshop download overhaul
+(progress + verify), workshop command-filter automation, and the Arena modes made
+group-friendly with a dynamic player cap and a Use-bots toggle.
+
+### 🕹️ Arena Modes & Bots
+
+- **Dynamic player ceiling** — 1v1/3v3/4v4 (K4-Arenas) now launch with `maxplayers 16`. It's
+  a ceiling, not a target: K4-Arenas only builds arenas for players actually present, so any
+  turnout fits (4 → 2 arenas, 12 → 6) with no per-session tuning.
+- **"Use bots" toggle** (Config → Bots, default off) — when off, K4-Arenas-Bots is excluded
+  from the deploy so the ladder is humans-only (the odd player out waits at their rank for the
+  next opponent); when on, bots fill empty arenas. (Currently gates Arena bot-fill; Retakes /
+  Deathmatch to follow.)
+- Fixed deploy verification falsely flagging `K4-Arenas-Bots.dll` as missing when bots are off.
 
 ### 🔌 Retakes — B3none cs2-retakes (not MatchZy)
 
@@ -36,12 +48,11 @@ dedicated [cs2-retakes](https://github.com/B3none/cs2-retakes)** `RetakesPlugin`
 - **`!buy` shop command fix** — removed `buy` from WarcraftPlugin's shop-menu triggers; it was
   shadowing CS2's native `buy <weapon>` console command, so buying a gun popped the Warcraft
   shop instead.
-- **In-game menu theming** — added a CS2MenuManager `config.toml` (purple/white theme).
-  WarcraftPlugin renders `!class`/`!skills`/`!shop` via CS2MenuManager; settled on **WasdMenu**
-  after CenterHtmlMenu flickered against the XP HUD and ChatMenu flooded the client network
-  queue (disconnects). All resolution offsets set to the 4:3-safe value so the menu fits both
-  4:3-stretched and 16:9 without per-player setup. **(unverified — pending in-game check that
-  the embedded CS2MenuManager honours config positions.)**
+- **In-game menu theming** — added a CS2MenuManager `config.toml` (purple/white, WasdMenu,
+  4:3-safe position) for menus that route through CS2MenuManager. Note: WarcraftPlugin's
+  `!class`/`!skills`/`!shop` use its *own* compiled menu, which enlarges the highlighted item
+  and can clip tall pages vertically — that's a compiled-in behaviour, deferred to a future
+  recompile (tracked in TODO → Backlog).
 
 ### 🛑 Jailbreak Crash Fix
 
@@ -85,7 +96,12 @@ commands CS2 otherwise blocks). The tool now:
 - **Keyboard cheat sheet** — `?` (or a header `?` button) opens a shortcuts overlay; `Esc` closes.
 - **Richer empty states** — Players / Workshop / Presets / Bans now show an icon + title +
   call-to-action instead of plain text.
-- **Darker theme** — base surfaces and ambient glow toned down a notch from the v0.9.0 lift.
+- **Darker theme** — base surfaces and ambient glow toned down a notch from the v0.9.0 lift;
+  the top-left ambient glow further dimmed so it no longer washes out the sidebar.
+- **Sharper app icon** — `emblem.ico` regenerated from the hi-res source, square-padded and
+  LANCZOS-downscaled at every size (16–256), fixing the pixelated taskbar icon.
+- **Status fixes** — Public IP click now copies `connect ip:port`; the Start button keeps a
+  full border when it's the only control shown.
 - **`-condebug`** added to the server launch so the full engine console (incl. native crash
   output) is captured to `csgo/console.log` — this is what finally pinned the Jailbreak crash.
 

@@ -1,13 +1,13 @@
 # ROADMAP — Oblivion Server Tool
 
-> The **plan**: how we get from where we are (v0.9.0) to a stable, fully tested
+> The **plan**: how we get from where we are (v0.9.1) to a stable, fully tested
 > **v1.0.0** and beyond. This is intentionally rough — it sets direction and sequence,
 > not exact dates. The granular, checkable steps live in [TODO.md](TODO.md); the *why*
 > behind it all lives in [BIBLE.md](BIBLE.md).
 
 ---
 
-## Where We Are — v0.9.0 (current)
+## Where We Are — v0.9.1 (current)
 
 Core features are stable and the UI has been comprehensively redesigned (theming,
 keybinds, settings, workshop UX). Recent foundational work:
@@ -125,6 +125,9 @@ real CS2 server.
 
 Candidate ideas to revisit only after 1.0 ships. None are commitments.
 
+- **Map Veto / Match Setup tab** — guided roster → teams → captain vote → captain links →
+  BO1/3/5 veto, served by the tool so captains can veto from their own devices. Full spec +
+  open decisions in [VETO.md](VETO.md); working prototype at `_prototypes/veto.html`.
 - Scheduled tasks (auto-restart on a cron, nightly map updates).
 - More plugin-backed modes, re-evaluated for upstream health each release.
 - Server metrics / lightweight dashboard (player count over time, uptime history).

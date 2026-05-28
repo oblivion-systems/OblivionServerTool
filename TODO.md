@@ -55,6 +55,10 @@ Unreleased.*
   awaiting a play-test pass.
 
 ### Loose ends / deferred
+- [ ] **"Use bots" toggle — extend beyond Arenas.** Built: arena ceiling 16 + global
+  `bots_enabled` setting (Config → Bots) that excludes K4-Arenas-Bots when off. Still to wire
+  the same toggle into **Retakes** (`bot_quota` in cs2-retakes/retakes.cfg) and **Deathmatch**
+  bot-fill so it's truly global, not arena-only.
 - [ ] **Commit the batch** — everything above is uncommitted; user is holding until tested.
 - [ ] **`-condebug` log growth** — `csgo/console.log` now grows across sessions; consider
   trimming/rotating, or make it a toggle.
@@ -238,6 +242,9 @@ Plugin-backed modes (verify deploy, verify markers, verify defining behaviour):
 ## Backlog / Post-1.0 (unscheduled)
 *Not blocking 1.0. Pull into a phase only when prioritised.*
 
+- [ ] **Map Veto / Match Setup tab** — full spec + open decisions in [VETO.md](VETO.md);
+  prototype at `_prototypes/veto.html`. Self-contained Veto tab; needs server-side session +
+  SSE for the captain links to work across devices. Resolve the 4 open decisions first.
 - [ ] Scheduled tasks (cron-style auto-restart, nightly map updates)
 - [ ] Server metrics / history dashboard
 - [ ] Multi-server management

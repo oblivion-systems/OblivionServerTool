@@ -41,7 +41,7 @@ each with a one-sentence summary. No code, no behavioural changes — reference 
 |--------|---------|
 | `CS2_APP_ID` | Steam App ID for CS2 (`"730"`). |
 | `DEPOTDL_RELEASE_URL` | GitHub API URL for the latest DepotDownloader release. |
-| `APP_VERSION` | Current application version string (e.g. `"0.9.0"`). |
+| `APP_VERSION` | Current application version string (e.g. `"0.9.1"`). |
 | `APP_REPO` | GitHub repository slug for the app (`"jacquesvniekerk-eng/OblivionServerTool"`). |
 | `APP_RELEASES_URL` / `APP_API_URL` | Human and API GitHub release URLs derived from `APP_REPO`. |
 | `CS2_SERVER_DIR` / `STEAMCMD_PATH` / `CS2_PATH` / `WORKSHOP_DIR` / `DEPOTDL_PATH` / `CS2_ADDONS_DIR` | Default path constants; all re-set by `update_paths()`. |
