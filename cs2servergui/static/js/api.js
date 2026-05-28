@@ -81,6 +81,9 @@ const api = (() => {
     workshopDownload: (id)  => post('/api/workshop/download', { id }),
     workshopCancel:   ()    => post('/api/workshop/cancel'),
     workshopUpdate:   ()    => post('/api/workshop/update'),
+    workshopCmdfilterScan:     ()          => post('/api/workshop/cmdfilter/scan'),
+    workshopCmdfilterOverride: (id, value) =>
+                          post('/api/workshop/cmdfilter/override', { id, value }),
     requestWorkshop:  (workshop_id) =>
                           post('/api/request_workshop', { workshop_id }),
 

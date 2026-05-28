@@ -143,6 +143,8 @@
         <span class="hdr-cmd-ph">Search · type a command…</span>
         <span class="hdr-cmd-kbd">Ctrl K</span>
       </button>
+      <!-- Keyboard cheat sheet trigger (?) -->
+      <button id="hdr-help-btn" class="hdr-help" title="Keyboard shortcuts (?)">?</button>
       <span id="app-update-badge" class="update-badge hidden"></span>
       <span id="cs2-update-badge" class="update-badge hidden"></span>
     </div>
@@ -242,6 +244,40 @@
         <span><span class="palette-k">Ctrl P</span>RCON only</span>
         <span class="palette-foot-spacer"></span>
         <span id="palette-count">0 results</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Keyboard cheat sheet — press ? to open -->
+  <div id="cheatsheet-overlay" class="cheatsheet-overlay hidden">
+    <div class="cs-dim" id="cheatsheet-dim"></div>
+    <div class="cheatsheet">
+      <h2>Keyboard shortcuts</h2>
+      <div class="cs-sub">press · esc · to close</div>
+
+      <div class="cs-group">
+        <div class="cs-group-title">Global</div>
+        <div class="cs-row"><span class="desc">Open command palette</span><span class="cs-keys"><kbd class="accent">Ctrl</kbd><kbd class="accent">K</kbd></span></div>
+        <div class="cs-row"><span class="desc">Palette — RCON only</span><span class="cs-keys"><kbd>Ctrl</kbd><kbd>P</kbd></span></div>
+        <div class="cs-row"><span class="desc">Toggle log drawer</span><span class="cs-keys"><kbd>`</kbd></span></div>
+        <div class="cs-row"><span class="desc">Open this cheat sheet</span><span class="cs-keys"><kbd>?</kbd></span></div>
+        <div class="cs-row"><span class="desc">Close any overlay</span><span class="cs-keys"><kbd>Esc</kbd></span></div>
+      </div>
+
+      <div class="cs-group">
+        <div class="cs-group-title">Server &amp; match</div>
+        <div class="cs-row"><span class="desc">Stop server</span><span class="cs-keys"><kbd>F2</kbd></span></div>
+        <div class="cs-row"><span class="desc">Quick restart</span><span class="cs-keys"><kbd>F5</kbd></span></div>
+        <div class="cs-row"><span class="desc">End warmup</span><span class="cs-keys"><kbd>F6</kbd></span></div>
+        <div class="cs-row"><span class="desc">Pause match</span><span class="cs-keys"><kbd>F7</kbd></span></div>
+        <div class="cs-row"><span class="desc">Unpause match</span><span class="cs-keys"><kbd>F8</kbd></span></div>
+        <div class="cs-row"><span class="desc">Restart round</span><span class="cs-keys"><kbd>Ctrl</kbd><kbd>R</kbd></span></div>
+        <div class="cs-row"><span class="desc">Broadcast message</span><span class="cs-keys"><kbd>B</kbd></span></div>
+      </div>
+
+      <div class="cs-foot">
+        <span>Customize keybinds in Appearance →</span>
+        <span>v0.6+</span>
       </div>
     </div>
   </div>

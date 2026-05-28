@@ -291,6 +291,7 @@ def create_flask(core: AppCore) -> Flask:
             "flask_port":         FLASK_PORT,
             "is_local":           is_local,
             "dl_active":          core._active_dl_proc is not None,
+            "dl_progress":        core._dl_progress or None,
         })
 
     # ── Server control ─────────────────────────────────────────────────────────
@@ -634,6 +635,7 @@ def create_flask(core: AppCore) -> Flask:
                 "name":        core._map_name_cache.get(wid, ""),
                 "tags":        core._map_tag_cache.get(wid, []),
                 "preview_url": core._preview_url_cache.get(wid, ""),
+                "cmdfilter":   core.cmdfilter_status(wid),
             }
             for wid in ids
         ])
@@ -671,6 +673,37 @@ def create_flask(core: AppCore) -> Flask:
     def workshop_update():
         core.check_workshop_updates()
         return jsonify({"ok": True})
+
+    @app.route("/api/workshop/cmdfilter/scan", methods=["POST"])
+    @require_auth
+    @require_local
+    def workshop_cmdfilter_scan():
+        """Re-scan all downloaded maps' descriptions for the command-filter flag."""
+        import threading as _threading
+        done   = _threading.Event()
+        result = {}
+        core.scan_cmdfilter(on_done=lambda flagged: (result.update(flagged=flagged),
+                                                     done.set()))
+        done.wait(timeout=30)
+        return jsonify({"ok": True, "flagged": result.get("flagged", [])})
+
+    @app.route("/api/workshop/cmdfilter/override", methods=["POST"])
+    @require_auth
+    @require_local
+    def workshop_cmdfilter_override():
+        """Set/clear the manual per-map command-filter override.
+
+        Body: {"id": "<wid>", "value": true|false|null}  (null → revert to auto)
+        """
+        d   = request.get_json() or {}
+        wid = str(d.get("id", "")).strip()
+        if not wid.isdigit():
+            return jsonify({"error": "Invalid workshop ID — digits only"}), 400
+        value = d.get("value", None)
+        if value is not None and not isinstance(value, bool):
+            return jsonify({"error": "value must be true, false, or null"}), 400
+        core.set_cmdfilter_override(wid, value)
+        return jsonify({"ok": True, "status": core.cmdfilter_status(wid)})
 
     @app.route("/api/request_workshop", methods=["POST"])
     @require_auth

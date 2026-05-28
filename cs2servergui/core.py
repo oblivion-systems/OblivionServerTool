@@ -76,6 +76,12 @@ _PLUGINS_BASE = _resolve_plugins_base()
 # Named here so it appears in one place — change this to extend/shorten the window.
 _DL_TIMEOUT_SECS: int = 600
 
+# Workshop maps that run server commands from their own map logic get those
+# commands blocked unless the server launches with -disable_workshop_command_filtering.
+# Map authors that need it almost always say so in the Workshop description, so we
+# auto-detect by matching the flag name there.
+_CMDFILTER_RE = re.compile(r"-?disable_workshop_command_filtering", re.IGNORECASE)
+
 
 def _semver_tuple(v: str) -> tuple[int, ...]:
     """Parse a version string into a comparable tuple.
@@ -166,6 +172,7 @@ _PLUGIN_KIND: dict[str, str] = {
     "practice":  "css",
     "jailbreak": "css",
     "warcraft":  "css",       # RPG classes, XP, items overlay
+    "retakes_b3none": "css",  # Retakes: B3none RetakesPlugin + yonilerner allocator
 }
 
 # Canonical post-deploy markers: files that MUST exist relative to csgo/ for
@@ -201,19 +208,34 @@ _PLUGIN_VERIFY_FILES: dict[str, list[str]] = {
     "warcraft": [
         os.path.join("addons", "counterstrikesharp", "plugins",
                      "WarcraftPlugin", "WarcraftPlugin.dll"),
+        os.path.join("addons", "counterstrikesharp", "plugins",
+                     "ModelPrecacher", "ModelPrecacher.dll"),
+    ],
+    "retakes_b3none": [
+        os.path.join("addons", "counterstrikesharp", "plugins",
+                     "RetakesPlugin", "RetakesPlugin.dll"),
+        os.path.join("addons", "counterstrikesharp", "plugins",
+                     "RetakesAllocator", "RetakesAllocator.dll"),
     ],
 }
 
 # Modes that need managed plugins; modes not listed → vanilla server.
 _MODE_PLUGIN_NAMES: dict[str, list[str]] = {
-    # Retakes: MatchZy with matchzy_retakes_mode 1 — pre-planted bomb each round,
-    # weapon allocation and team management via MatchZy's built-in retakes mode.
-    "Retakes":             ["practice"],
+    # Retakes: B3none's dedicated RetakesPlugin (curated per-map spawns +
+    # in-game spawn editor) with yonilerner's RetakesAllocator.  (MatchZy has no
+    # retakes feature, so the earlier MatchZy-based Retakes mode was dropped.)
+    "Retakes":             ["retakes_b3none"],
     "Deathmatch":          ["zombie", "deathmatch"],
     "1v1":                 ["arenas"],     # fixed-map dueling
     "3v3":                 ["arenas"],
     "4v4":                 ["arenas"],
-    "Jailbreak":           ["zombie", "jailbreak"],  # CS2Fixes + admin-controlled rotation
+    # Jailbreak runs the self-contained CSS Jailbreak plugin ALONE.  It used to
+    # also deploy "zombie" (CS2Fixes), but loading that heavy native MetaMod
+    # plugin alongside Jailbreak crashed the server with a native access
+    # violation ~1-2s after the plugin loaded — reliably, on every jb start
+    # (3/3 crash dumps on 2026-05-28), while no other mode ever crashed.  The
+    # Jailbreak plugin needs nothing from CS2Fixes, so it's dropped.
+    "Jailbreak":           ["jailbreak"],
     "Practice":            ["practice"],   # MatchZy controls match flow
     # Warcraft: RPG overlay — 9 classes, XP system, purchasable items.
     "Warcraft":            ["warcraft"],
@@ -252,11 +274,14 @@ _PLUGIN_COPY_RULES: dict[str, list[tuple]] = {
     "jailbreak": [
         ("addons", "addons"),
     ],
-    # WarcraftPlugin sets stock CS2 player models (e.g. tm_phoenix_heavy,
-    # ctm_heavy) that already live in pak01.vpk — it ships no model files and
-    # needs none.  We deliberately do NOT deploy any loose characters/ models:
-    # a loose .vmdl_c overrides the real VPK model, and a malformed stub crashes
-    # the engine on SetModel (the cause of the post-warmup !class crash).
+    # WarcraftPlugin's Barbarian class assigns the non-default player models
+    # tm_phoenix_heavy (T) / ctm_heavy (CT).  They live in pak01.vpk but the
+    # engine only auto-precaches the DEFAULT team models, so SetModel on them
+    # logged "requested but is not in the system (Missing from a manifest?)" and
+    # Barbarian rendered the error model.  Loose .vmdl_c copies do NOT help — CS2
+    # only loads models listed in the precache manifest — so the bundled
+    # ModelPrecacher plugin (under addons/) AddResource()s both models in
+    # OnServerPrecacheResources instead.  Hence addons/ only; no characters/.
     "warcraft": [
         ("addons", "addons"),
     ],
@@ -264,6 +289,15 @@ _PLUGIN_COPY_RULES: dict[str, list[tuple]] = {
     # Mirrors csgo/ layout exactly (addons/ and cfg/).  Deployed AFTER zombie so
     # the cs2fixes.cfg override (zm_enable 1) wins over zombie's default (zm_enable 0).
     "zombie_ze": [
+        ("addons", "addons"),
+        ("cfg",    "cfg"),
+    ],
+    # Retakes (B3none) — addons/ (RetakesPlugin + RetakesAllocator +
+    # RetakesPluginShared + retakes_config.json that disables fallback allocation
+    # so the allocator owns weapons) and cfg/ (our cs2-retakes/retakes.cfg that
+    # auto-fills bots instead of B3none's default bot_kick / bot_quota 0, so
+    # retake rounds form on a low-population server; RetakesPlugin execs it).
+    "retakes_b3none": [
         ("addons", "addons"),
         ("cfg",    "cfg"),
     ],
@@ -294,6 +328,9 @@ _PLUGIN_CLEANUP_ITEMS: dict[str, list[str]] = {
     "practice": [
         os.path.join("addons", "counterstrikesharp", "plugins", "MatchZy"),
         os.path.join("cfg", "MatchZy"),
+        # Legacy scrub: older builds deployed this for the (defunct) MatchZy
+        # retakes mode.  We no longer ship it; keep the entry so existing installs
+        # get the orphaned file removed on the next mode switch.
         os.path.join("cfg", "retakes.cfg"),
     ],
     "jailbreak": [
@@ -301,14 +338,16 @@ _PLUGIN_CLEANUP_ITEMS: dict[str, list[str]] = {
     ],
     "warcraft": [
         os.path.join("addons", "counterstrikesharp", "plugins", "WarcraftPlugin"),
+        os.path.join("addons", "counterstrikesharp", "plugins", "ModelPrecacher"),
         os.path.join("addons", "counterstrikesharp", "configs", "plugins", "WarcraftPlugin"),
-        # Legacy broken model stubs: earlier builds shipped loose .vmdl_c files
-        # here that OVERRODE the real stock CS2 models in pak01.vpk and crashed
-        # the engine on SetModel.  We no longer deploy them; keep these cleanup
-        # entries so any install that still has the bad stubs gets them removed
-        # on the next mode switch.  Both paths only ever contained our stubs, so
-        # removing them never touches real game files.
+        # Legacy scrubs: earlier attempts shipped loose Barbarian model files
+        # here (and a wrong ctm_st6 variant).  Loose models don't fix precache,
+        # so we no longer deploy any characters/ files; keep these entries so
+        # installs that still carry them get the orphans removed on the next
+        # mode switch.  These paths only ever held our own files, never stock
+        # game assets, so removing them is safe.
         os.path.join("characters", "models", "tm_phoenix_heavy"),
+        os.path.join("characters", "models", "ctm_heavy"),
         os.path.join("characters", "models", "ctm_st6", "ctm_st6_variantn.vmdl_c"),
     ],
     "zombie_ze": [
@@ -321,6 +360,16 @@ _PLUGIN_CLEANUP_ITEMS: dict[str, list[str]] = {
         # If switching to vanilla (zombie also unneeded), the whole cfg/cs2fixes/
         # folder is wiped by zombie's cleanup items anyway.
         os.path.join("cfg", "cs2fixes", "cs2fixes.cfg"),
+    ],
+    # EXPERIMENTAL B3none retakes — remove every piece so switching back to the
+    # MatchZy "Retakes" mode (or anything else) leaves no cross-contamination.
+    "retakes_b3none": [
+        os.path.join("addons", "counterstrikesharp", "plugins", "RetakesPlugin"),
+        os.path.join("addons", "counterstrikesharp", "plugins", "RetakesAllocator"),
+        os.path.join("addons", "counterstrikesharp", "shared", "RetakesPluginShared"),
+        os.path.join("addons", "counterstrikesharp", "configs", "plugins", "RetakesPlugin"),
+        os.path.join("addons", "counterstrikesharp", "configs", "plugins", "RetakesAllocator"),
+        os.path.join("cfg", "cs2-retakes"),
     ],
 }
 
@@ -396,8 +445,19 @@ class AppCore:
         self._map_name_cache:     dict[str, str]           = {}
         self._map_tag_cache:      dict[str, list[str]]    = {}  # wid → lowercase tags
         self._preview_url_cache:  dict[str, str]          = {}  # wid → Steam preview URL
+        # Workshop command-filter handling (wid → bool).  _auto is derived from the
+        # Steam description; _override is the manual GUI choice and wins when set.
+        # Both persist in the config.  Effective value gates the launch flag
+        # -disable_workshop_command_filtering for that map.
+        self._cmdfilter_auto:     dict[str, bool]          = {}
+        self._cmdfilter_override: dict[str, bool]          = {}
         self._ff_enabled:         bool                     = False
         self._active_dl_proc:     subprocess.Popen | None  = None
+        # Live workshop-download progress, surfaced via /api/state for the UI.
+        # Empty dict = no download in flight.  While downloading:
+        #   {"id", "downloaded", "total", "pct", "phase"}  (bytes; phase is one
+        #   of "downloading" | "verifying").
+        self._dl_progress:        dict                     = {}
         self.steam_session_active: bool                    = False
 
         # fired (no args) when steam_session_active changes
@@ -532,6 +592,10 @@ class AppCore:
         self.max_players_override  = cfg.get("max_players_override", "")
         self.presets               = cfg.get("presets", {})
 
+        # Workshop command-filter detection results + manual overrides (wid → bool).
+        self._cmdfilter_auto       = dict(cfg.get("cmdfilter_auto", {}))
+        self._cmdfilter_override   = dict(cfg.get("cmdfilter_override", {}))
+
         # Persist immediately if we just auto-generated the RCON password so
         # that the next startup (and the server launch) uses the same value.
         if not cfg.get("rcon_password"):
@@ -564,6 +628,8 @@ class AppCore:
                 "bot_difficulty":        self.bot_difficulty,
                 "max_players_override":  self.max_players_override,
                 "presets":               self.presets,
+                "cmdfilter_auto":        self._cmdfilter_auto,
+                "cmdfilter_override":    self._cmdfilter_override,
             }
             with open(_CONFIG_FILE, "w", encoding="utf-8") as f:
                 json.dump(cfg, f, indent=2)
@@ -718,6 +784,11 @@ class AppCore:
 
         cmd  = [
             _config.CS2_PATH, "-dedicated",
+            # Mirror the full engine console (incl. native crash output) to
+            # csgo/console.log.  CSS/MetaMod logs live elsewhere, so without this
+            # a native access violation leaves no trace — which is exactly what
+            # made the Jailbreak crash hard to diagnose.
+            "-condebug",
             "-port",          str(RCON_PORT),
             "+sv_lan",        "0",
             "+game_type",     s["game_type"],
@@ -732,10 +803,14 @@ class AppCore:
             cmd += ["-tickrate", "128"]
         if self.gslt_token:
             cmd += ["+sv_setsteamaccount", self.gslt_token]
-        # Retakes mode: exec retakes.cfg to activate matchzy_retakes_mode and
-        # configure team management settings.
-        if mode == "Retakes":
-            cmd += ["+exec", "retakes"]
+        # Some workshop maps run server commands from their own map logic, which
+        # CS2 blocks unless launched with this flag.  Only added for workshop maps
+        # that are flagged (auto-detected from the Steam description or a manual
+        # override) so the command filter stays ON for everything else.
+        if is_workshop and self.cmdfilter_effective(map_name):
+            cmd.append("-disable_workshop_command_filtering")
+            self.log("[workshop] Launching with -disable_workshop_command_filtering "
+                     f"for {map_name}")
         cmd += ["+map", startup_map]
         _server_env = os.environ.copy()
 
@@ -828,6 +903,46 @@ class AppCore:
             self.log("Server stopped")
 
         threading.Thread(target=_terminate, daemon=True).start()
+
+    def _dedicated_running(self) -> bool:
+        """True if a dedicated cs2.exe (our server, launched with -dedicated) is
+        still alive.  Filters on the -dedicated command line so the user's CS2
+        game client (same binary name) is never mistaken for the server."""
+        try:
+            res = subprocess.run(
+                ["wmic", "process", "where", "name='cs2.exe'",
+                 "get", "CommandLine", "/format:csv"],
+                capture_output=True, text=True, timeout=5,
+            )
+            return any("-dedicated" in line.lower()
+                       for line in res.stdout.splitlines())
+        except Exception:
+            # If we can't tell, assume it's gone so a restart isn't blocked.
+            return False
+
+    def _restart_into(self, map_name: str, mode: str,
+                      is_workshop: bool, caller: str) -> None:
+        """Stop the server, wait for the process to fully exit, then start it in
+        the new mode.
+
+        Used for live mode changes that swap plugins.  Deleting a CSS plugin's
+        DLL while the server has it loaded can fail on Windows (file lock),
+        leaving the old plugin to reload alongside the new one.  Restarting means
+        deploy_plugins() runs while the server is offline — no locked files, no
+        cross-contamination, and MetaMod modes load cleanly at boot.
+        """
+        self.stop_server()
+        # Wait for the dedicated process to actually exit so its plugin DLLs
+        # unlock before start_server() redeploys.
+        deadline = time.time() + 30
+        while time.time() < deadline:
+            time.sleep(1)
+            if not self._dedicated_running():
+                break
+        else:
+            self.log("[plugins] ⚠  Old server still running after 30s — starting "
+                     "anyway (pre-launch cleanup will force-kill leftovers).")
+        self.start_server(map_name, mode, is_workshop=is_workshop)
 
     def probe_existing_server(self) -> None:
         """Detect a CS2 server that was already running when the GUI launched.
@@ -954,32 +1069,34 @@ class AppCore:
     def change_map(self, map_name: str, mode: str,
                    is_workshop: bool = False, caller: str = "local") -> None:
         def _do() -> None:
-            # Deploy plugins when the mode is changing.  deploy_plugins handles
-            # its own "restart required" / "hot-reloaded" messaging based on
-            # plugin kind (MetaMod vs CounterStrikeSharp).
-            mode_changed = (mode != self.current_mode)
-            if mode_changed:
-                new_managed = _MODE_PLUGIN_NAMES.get(mode, [])
-                old_managed = _MODE_PLUGIN_NAMES.get(self.current_mode, [])
-                if new_managed or old_managed:
-                    self.log(f"[plugins] Mode change: {self.current_mode} → {mode}")
-                    self.deploy_plugins(mode)
+            mode_changed     = (mode != self.current_mode)
+            new_managed      = _MODE_PLUGIN_NAMES.get(mode, [])
+            old_managed      = _MODE_PLUGIN_NAMES.get(self.current_mode, [])
+            plugins_involved = bool(new_managed or old_managed)
+
+            # A mode change that adds/removes/swaps plugins is done as a clean
+            # restart: deploy_plugins() then runs while the server is offline, so
+            # no loaded CSS DLL can be file-locked (Windows), the old mode's
+            # plugins can't reload alongside the new ones, and MetaMod modes load
+            # at boot.  Same-mode map changes and vanilla↔vanilla switches (no
+            # plugins on either side) stay live below.
+            if mode_changed and plugins_involved and self.running:
+                self.log(f"[{caller}] Mode change {self.current_mode} → {mode}: "
+                         "restarting for a clean plugin swap…")
+                self._restart_into(map_name, mode, is_workshop, caller)
+                return
+
+            # Offline + plugin mode change (not normally reachable via the web
+            # route, which requires a running server): stage plugins so the next
+            # start is correct.
+            if mode_changed and plugins_involved:
+                self.deploy_plugins(mode)
 
             s = MODE_SETTINGS.get(mode, _DEFAULT_MODE)
             try:
                 self.log(f"[{caller}] Sending map change → {map_name} ({mode})…")
                 self.rcon.execute_retry(f"game_type {s['game_type']}")
                 self.rcon.execute_retry(f"game_mode {s['game_mode']}")
-                # Retakes mode: exec retakes.cfg to activate matchzy_retakes_mode
-                # and team settings.  deploy_plugins() copies it to disk; we exec
-                # it here so a live mode switch picks it up without a restart.
-                if mode == "Retakes":
-                    try:
-                        self.rcon.execute_retry("exec retakes")
-                        self.log("[plugins] exec retakes → matchzy_retakes_mode applied")
-                    except Exception as _exc:
-                        self.log(f"[plugins] exec retakes failed: {_exc} "
-                                 "(retakes mode may not apply until next restart)")
                 rcon_cmd = (f"host_workshop_map {map_name}"
                             if is_workshop else f"changelevel {map_name}")
                 resp = self.rcon.execute_retry(rcon_cmd)
@@ -1887,6 +2004,9 @@ class AppCore:
             self.log("No download in progress")
             return
         self.log("Cancelling download — terminating steamcmd…")
+        # Clear progress now so a state poll can't briefly re-show the bar
+        # before the worker thread's finally block clears it.
+        self._dl_progress = {}
         try:
             proc.terminate()
             proc.wait(timeout=5)
@@ -1991,9 +2111,52 @@ class AppCore:
             self.log(f"  DepotDownloader install failed: {exc}")
             return False
 
+    @staticmethod
+    def _dir_size(path: str) -> int:
+        """Total size in bytes of every file under *path* (0 if missing)."""
+        total = 0
+        for root, _dirs, files in os.walk(path):
+            for f in files:
+                try:
+                    total += os.path.getsize(os.path.join(root, f))
+                except OSError:
+                    pass
+        return total
+
+    def _fetch_workshop_size(self, workshop_id: str) -> int:
+        """Steam's reported file_size (bytes) for a workshop item, 0 on failure.
+
+        Used as the denominator for the download progress bar and as the
+        expected size for the post-download verification.
+        """
+        try:
+            params = {"itemcount": 1, "publishedfileids[0]": workshop_id}
+            req = urllib.request.Request(
+                "https://api.steampowered.com"
+                "/ISteamRemoteStorage/GetPublishedFileDetails/v1/",
+                data=urllib.parse.urlencode(params).encode(),
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read())
+            details = data.get("response", {}).get("publishedfiledetails", [])
+            if details:
+                return int(details[0].get("file_size", 0) or 0)
+        except Exception as exc:
+            self.log(f"  Could not fetch expected size (progress % unavailable): {exc}")
+        return 0
+
     def depotdl_download(self, workshop_id: str,
                          on_done: Callable[[bool], None] | None = None) -> None:
-        """Download a workshop item via DepotDownloader (more reliable than steamcmd)."""
+        """Download a workshop item via DepotDownloader (more reliable than steamcmd).
+
+        Downloads into a sibling ``<id>.partial`` staging folder, streams real
+        per-MB progress (vs Steam's reported size) into ``self._dl_progress``,
+        verifies the finished size before promoting the staging folder to the
+        live ``<id>`` workshop dir.  A failed/cancelled download therefore never
+        leaves a half-written map in the maps list.
+        """
         def _run() -> None:
             success = False
             self.log("─" * 48)
@@ -2013,8 +2176,21 @@ class AppCore:
                     on_done(False)
                 return
 
-            dest = os.path.join(_config.WORKSHOP_DIR, workshop_id)
-            os.makedirs(dest, exist_ok=True)
+            # Download into a staging folder, not the live <id> dir — so a
+            # failed/cancelled/partial download never appears as a usable map.
+            dest      = os.path.join(_config.WORKSHOP_DIR, workshop_id)
+            dest_tmp  = dest + ".partial"
+            if os.path.isdir(dest_tmp):
+                shutil.rmtree(dest_tmp, ignore_errors=True)
+            os.makedirs(dest_tmp, exist_ok=True)
+
+            # Expected size (bytes) drives the progress %% and the final verify.
+            expected = self._fetch_workshop_size(workshop_id)
+            if expected > 0:
+                self.log(f"  Expected size: {expected / 1048576:.1f} MB")
+            self._dl_progress = {"id": workshop_id, "downloaded": 0,
+                                 "total": expected, "pct": 0.0,
+                                 "phase": "downloading"}
 
             session_ok = self.steam_session_active and bool(self.steam_username)
 
@@ -2040,7 +2216,7 @@ class AppCore:
                 _config.DEPOTDL_PATH,
                 "-app",     CS2_APP_ID,
                 "-pubfile", workshop_id,
-                "-dir",     dest,
+                "-dir",     dest_tmp,
             ] + login_args
             try:
                 # ── Launch ────────────────────────────────────────────────────
@@ -2084,9 +2260,9 @@ class AppCore:
                     threading.Thread(target=_drain, args=(proc.stdout,),
                                      daemon=True).start()
 
-                # ── Wait, with periodic progress logs and a hard timeout ─────
-                start     = time.time()
-                warned_at: set[int] = set()
+                # ── Wait, with real per-MB progress and a hard timeout ───────
+                start       = time.time()
+                last_logged = -1.0   # last MB value we emitted a log line for
                 while proc.poll() is None:
                     time.sleep(2)
                     elapsed = int(time.time() - start)
@@ -2101,13 +2277,53 @@ class AppCore:
                             except Exception:
                                 pass
                         break
-                    for t in (30, 60, 120, 180, 300, 480):
-                        if t not in warned_at and elapsed >= t:
-                            warned_at.add(t)
-                            self.log(f"  … downloading ({elapsed}s)")
+                    done_b = self._dir_size(dest_tmp)
+                    pct    = (done_b / expected * 100.0) if expected > 0 else 0.0
+                    self._dl_progress = {"id": workshop_id, "downloaded": done_b,
+                                         "total": expected, "pct": round(pct, 1),
+                                         "phase": "downloading"}
+                    done_mb = done_b / 1048576
+                    # Log on every ~10 MB of progress so the text log isn't spammy
+                    # but still moves; the UI bar updates every poll regardless.
+                    if done_mb - last_logged >= 10 or last_logged < 0:
+                        last_logged = done_mb
+                        if expected > 0:
+                            self.log(f"  … {done_mb:.0f} / {expected / 1048576:.0f} MB "
+                                     f"({pct:.0f}%)  [{elapsed}s]")
+                        else:
+                            self.log(f"  … {done_mb:.0f} MB downloaded  [{elapsed}s]")
 
+                # ── Verify before promoting staging → live maps dir ───────────
                 self.log("─" * 48)
-                if os.path.isdir(dest) and os.listdir(dest):
+                self.log("  Verifying download…")
+                actual    = self._dir_size(dest_tmp)
+                has_vpk   = any(f.lower().endswith(".vpk")
+                                for _r, _d, fs in os.walk(dest_tmp) for f in fs)
+                self._dl_progress = {"id": workshop_id, "downloaded": actual,
+                                     "total": expected,
+                                     "pct": (round(actual / expected * 100.0, 1)
+                                             if expected > 0 else 0.0),
+                                     "phase": "verifying"}
+                # A complete download is at least the Steam-reported size (it can
+                # be slightly larger because of DepotDownloader's manifest cache).
+                # 1%% slack absorbs rounding; a partial download falls well short.
+                size_ok = (expected <= 0) or (actual >= expected * 0.99)
+                if has_vpk and size_ok:
+                    if expected > 0:
+                        self.log(f"  ✓ Verified {actual / 1048576:.1f} MB "
+                                 f"(expected {expected / 1048576:.1f} MB)")
+                    else:
+                        self.log(f"  ✓ Verified {actual / 1048576:.1f} MB "
+                                 "(no expected size to compare — .vpk present)")
+                    # Promote: replace any existing copy with the staged one.
+                    try:
+                        if os.path.isdir(dest):
+                            shutil.rmtree(dest, ignore_errors=True)
+                        os.replace(dest_tmp, dest)
+                    except Exception as exc:
+                        self.log(f"  ✗ Could not move into place: {exc}")
+                        shutil.rmtree(dest_tmp, ignore_errors=True)
+                        raise
                     self.log(f"  DOWNLOAD COMPLETE — {workshop_id}")
                     if not session_ok:
                         self.steam_session_active = True
@@ -2117,8 +2333,16 @@ class AppCore:
                             self.on_steam_session_change()
                     success = True
                 else:
-                    self.log(f"  DepotDownloader exit code {proc.returncode}")
-                    self.log(f"  No files found at: {dest}")
+                    if not has_vpk:
+                        self.log(f"  ✗ Verify FAILED — no .vpk in download "
+                                 f"(exit code {proc.returncode})")
+                    else:
+                        self.log(f"  ✗ Verify FAILED — incomplete: got "
+                                 f"{actual / 1048576:.1f} MB of "
+                                 f"{expected / 1048576:.1f} MB "
+                                 f"(exit code {proc.returncode})")
+                    # Drop the partial so it never shows up as a usable map.
+                    shutil.rmtree(dest_tmp, ignore_errors=True)
                     # A failure on the cached-session path almost always means
                     # the saved token expired.  Invalidate it so the next
                     # download attempt forces a fresh interactive login.
@@ -2136,6 +2360,12 @@ class AppCore:
                 self.log(f"  DepotDownloader error: {exc}")
             finally:
                 self._active_dl_proc = None
+                self._dl_progress = {}
+                # Belt-and-braces: never leave a staging folder behind.
+                if not success:
+                    shutil.rmtree(os.path.join(_config.WORKSHOP_DIR,
+                                               workshop_id + ".partial"),
+                                  ignore_errors=True)
                 with self._dl_lock:
                     self._dl_reqs = [r for r in self._dl_reqs
                                      if r["id"] != workshop_id]
@@ -2418,6 +2648,7 @@ class AppCore:
                 )
                 with urllib.request.urlopen(req, timeout=15) as resp:
                     data = json.loads(resp.read())
+                changed = False
                 for item in data.get("response", {}).get("publishedfiledetails", []):
                     wid   = item.get("publishedfileid", "")
                     title = item.get("title", "").strip()
@@ -2431,13 +2662,111 @@ class AppCore:
                             self._map_tag_cache[wid] = tags
                         if preview:
                             self._preview_url_cache[wid] = preview
+                        # Detect command-filter need from the description.
+                        needs = bool(_CMDFILTER_RE.search(item.get("description", "")))
+                        if self._cmdfilter_auto.get(wid) != needs:
+                            self._cmdfilter_auto[wid] = needs
+                            changed = True
                         tag_str = f"  [{', '.join(tags[:4])}]" if tags else ""
-                        self.log(f"  Workshop: {wid} → {title or '(no title)'}{tag_str}")
+                        flag_str = "  (needs -disable_workshop_command_filtering)" if needs else ""
+                        self.log(f"  Workshop: {wid} → {title or '(no title)'}{tag_str}{flag_str}")
+                if changed:
+                    self.save_config()
             except Exception as exc:
                 self.log(f"Workshop name fetch failed: {exc}")
             finally:
                 if on_done:
                     on_done()
+        threading.Thread(target=_do, daemon=True).start()
+
+    # ── workshop command-filter handling ────────────────────────────────────────
+
+    def cmdfilter_effective(self, wid: str) -> bool:
+        """Whether map *wid* should launch with -disable_workshop_command_filtering.
+
+        Manual override (set in the GUI) wins; otherwise the auto-detected value
+        from the Steam description; default False (filter stays on).
+        """
+        if wid in self._cmdfilter_override:
+            return bool(self._cmdfilter_override[wid])
+        return bool(self._cmdfilter_auto.get(wid, False))
+
+    def cmdfilter_status(self, wid: str) -> dict:
+        """Per-map status for the UI: auto-detected, override, effective."""
+        return {
+            "auto":      bool(self._cmdfilter_auto.get(wid, False)),
+            "override":  self._cmdfilter_override.get(wid),  # None | True | False
+            "effective": self.cmdfilter_effective(wid),
+        }
+
+    def set_cmdfilter_override(self, wid: str, value: bool | None) -> None:
+        """Set (True/False) or clear (None → back to auto) the manual override."""
+        if value is None:
+            self._cmdfilter_override.pop(wid, None)
+        else:
+            self._cmdfilter_override[wid] = bool(value)
+        self.save_config()
+
+    def scan_cmdfilter(self, on_done: Callable[[list[str]], None] | None = None) -> None:
+        """Re-fetch descriptions for every downloaded workshop map and refresh the
+        auto-detected command-filter flags.  Reports the list of flagged wids."""
+        def _do() -> None:
+            try:
+                wsdir = _config.WORKSHOP_DIR
+                ids = []
+                if os.path.isdir(wsdir):
+                    for name in os.listdir(wsdir):
+                        p = os.path.join(wsdir, name)
+                        if (name.isdigit() and os.path.isdir(p)
+                                and any(os.scandir(p))):
+                            ids.append(name)
+                if not ids:
+                    self.log("[cmdfilter] No downloaded workshop maps to scan")
+                    if on_done:
+                        on_done([])
+                    return
+                self.log(f"[cmdfilter] Scanning {len(ids)} downloaded map(s)…")
+                flagged: list[str] = []
+                # Steam caps detail requests; batch in chunks of 50.
+                for start in range(0, len(ids), 50):
+                    chunk = ids[start:start + 50]
+                    params: dict[str, str | int] = {"itemcount": len(chunk)}
+                    for i, wid in enumerate(chunk):
+                        params[f"publishedfileids[{i}]"] = wid
+                    req = urllib.request.Request(
+                        "https://api.steampowered.com"
+                        "/ISteamRemoteStorage/GetPublishedFileDetails/v1/",
+                        data=urllib.parse.urlencode(params).encode(),
+                        headers={"Content-Type": "application/x-www-form-urlencoded"},
+                        method="POST",
+                    )
+                    with urllib.request.urlopen(req, timeout=20) as resp:
+                        data = json.loads(resp.read())
+                    for item in data.get("response", {}).get("publishedfiledetails", []):
+                        wid = item.get("publishedfileid", "")
+                        if not wid:
+                            continue
+                        title = item.get("title", "").strip()
+                        if title:
+                            self._map_name_cache[wid] = title
+                        needs = bool(_CMDFILTER_RE.search(item.get("description", "")))
+                        self._cmdfilter_auto[wid] = needs
+                        if needs:
+                            flagged.append(wid)
+                self.save_config()
+                if flagged:
+                    self.log(f"[cmdfilter] {len(flagged)} map(s) need "
+                             "-disable_workshop_command_filtering:")
+                    for wid in flagged:
+                        self.log(f"  • {self._map_name_cache.get(wid, wid)} ({wid})")
+                else:
+                    self.log("[cmdfilter] No maps document needing the flag")
+                if on_done:
+                    on_done(flagged)
+            except Exception as exc:
+                self.log(f"[cmdfilter] Scan failed: {exc}")
+                if on_done:
+                    on_done([])
         threading.Thread(target=_do, daemon=True).start()
 
     # ── install / setup state ─────────────────────────────────────────────────

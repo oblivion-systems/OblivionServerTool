@@ -141,6 +141,7 @@ MODE_SETTINGS: dict[str, dict[str, str]] = {
     "Arms Race":   {"game_type": "1", "game_mode": "0", "maxplayers": "16"},
     "Demolition":  {"game_type": "1", "game_mode": "1", "maxplayers": "10"},
     "Deathmatch":  {"game_type": "1", "game_mode": "2", "maxplayers": "20"},
+    # Retakes: B3none RetakesPlugin + yonilerner allocator, competitive ruleset.
     "Retakes":     {"game_type": "0", "game_mode": "1", "maxplayers": "10"},
     # Jailbreak: hostage-style ruleset (game_type 0 / game_mode 2) gives the
     # CT-warden / T-prisoner scoring that the Jailbreak plugin expects.
@@ -176,11 +177,14 @@ MODE_MAPS: dict[str, list[str] | None] = {
     # bundle (de_dust2, de_inferno, de_mirage, de_vertigo).  Other official maps
     # can be added after running the in-game spawn editor on the server.
     "Deathmatch":  ["de_dust2", "de_inferno", "de_mirage", "de_vertigo"],
-    "Retakes":     OFFICIAL_MAPS,
+    "Retakes":     OFFICIAL_MAPS,   # B3none ships per-map spawn configs
     "Jailbreak":   None,           # jb_* maps come from the workshop
     "Practice":    OFFICIAL_MAPS,  # MatchZy supports any standard comp map
     "Warcraft":        OFFICIAL_MAPS,  # RPG overlay — works on any standard map
-    "Zombie Escape":   None,          # ze_* maps come from the workshop
+    # Official maps run ZR zombie infection (ZM); ze_* workshop maps run full
+    # Zombie Escape.  Both are selectable — official via this picker, ze_ via the
+    # workshop tab.
+    "Zombie Escape":   OFFICIAL_MAPS,
 }
 
 # Search terms for Steam Workshop URL filtering per mode
