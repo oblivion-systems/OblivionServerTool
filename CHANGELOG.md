@@ -4,43 +4,97 @@
 
 ## Unreleased
 
-### 🔌 Retakes Rebuilt on MatchZy
+> ⚠️ **This section is uncommitted/in-testing.** Items marked **(unverified)** still need
+> an in-game confirmation. See [TODO.md](TODO.md) → "Pending / In-Flight" for the live
+> status of anything not yet ticked off.
 
-The Retakes mode no longer depends on the abandoned **CS2Retake** plugin. It now runs on
-**MatchZy's built-in retakes mode** (`matchzy_retakes_mode 1`), the same well-maintained
-plugin already used for Practice.
+### 🔌 Retakes — B3none cs2-retakes (not MatchZy)
 
-- **Removed CS2Retake entirely** — all DLLs, per-map spawn JSONs, `System.Data.SQLite` /
-  `SQLite.Interop.dll` native libraries, and `CommandAllocator` configs deleted.
-- **New `retakes.cfg`** — deployed via the Practice (MatchZy) bundle's `cfg/` copy rule;
-  sets `matchzy_retakes_mode 1` and disables auto team-balance / team limits. Exec'd at
-  launch via `+exec retakes` and re-applied on live mode switches via RCON.
-- **Removed the SQLite.Interop.dll deployment hack** — CS2Retake required a fragile
-  multi-location native-DLL copy plus a `PreLoadSQLite_BaseDirectory` env var to avoid a
-  CLR crash. MatchZy uses SQLitePCLRaw and needs none of it.
-- **Fixed Retakes ruleset** — `MODE_SETTINGS["Retakes"]` corrected from casual
-  (`game_mode 0`) to competitive (`game_mode 1`), which MatchZy requires for correct buy
-  menus, round times, and retakes logic.
+An earlier plan to base Retakes on "MatchZy's built-in retakes mode" was **abandoned: MatchZy
+has no retakes feature** (verified in its source and docs). Retakes now runs on **B3none's
+dedicated [cs2-retakes](https://github.com/B3none/cs2-retakes)** `RetakesPlugin` paired with
+**yonilerner's `RetakesAllocator`**.
 
-### 🧹 Plugin Bundle Restructure
+- Bundled `RetakesPlugin` + `RetakesAllocator` + `RetakesPluginShared`; `retakes_config.json`
+  sets `EnableFallbackAllocation=false` (the allocator owns weapons) and `RoundsToScramble=3`.
+- **Spawn-coordinate fix** — B3none's bundled `map_config/*.json` used thousands-separator
+  commas (`1,229.99`) that failed float-parsing and spawned players inside walls; stripped
+  271 bad commas across the map configs.
+- **Bot auto-fill** — a deployed `cfg/cs2-retakes/retakes.cfg` enables `bot_quota_mode fill`
+  so retake rounds still form on a low-population server.
+- `_MODE_PLUGIN_NAMES["Retakes"] = ["retakes_b3none"]`; competitive ruleset (`game_mode 1`).
 
-Every plugin bundle now mirrors the CS2 `csgo/` directory layout (`addons/`, `cfg/`,
-`characters/`, …), matching how the zombie and practice bundles were already organised.
+### 🧙 Warcraft Fixes
 
-- Arenas, Deathmatch, Jailbreak, and Warcraft bundles reorganised into the standard
-  `addons/counterstrikesharp/...` layout.
-- All `_PLUGIN_COPY_RULES` collapsed to the uniform `("addons", "addons")` pattern — no
-  more per-plugin bespoke copy paths or `extracted/` staging folders.
-- Pruned all non-Windows SQLite runtimes from the Warcraft bundle (Windows-only tool).
-- Removed the orphaned `_plugins_src/` directory.
+- **Barbarian models fixed via a new `ModelPrecacher` plugin.** Barbarian assigns the
+  non-default player models `tm_phoenix_heavy` / `ctm_heavy`, which exist in `pak01.vpk` but
+  aren't auto-precached — so `SetModel` logged "requested but is not in the system" and the
+  model failed. Loose `.vmdl_c` copies were proven *not* to fix this (CS2 only loads models in
+  the precache manifest). A tiny bundled CounterStrikeSharp plugin (`ModelPrecacher`, source in
+  `_plugins_src/`) now registers both via `OnServerPrecacheResources` → models render, all 14
+  classes intact. *Confirmed working.*
+- **`!buy` shop command fix** — removed `buy` from WarcraftPlugin's shop-menu triggers; it was
+  shadowing CS2's native `buy <weapon>` console command, so buying a gun popped the Warcraft
+  shop instead.
+- **In-game menu theming** — added a CS2MenuManager `config.toml` (purple/white theme).
+  WarcraftPlugin renders `!class`/`!skills`/`!shop` via CS2MenuManager; settled on **WasdMenu**
+  after CenterHtmlMenu flickered against the XP HUD and ChatMenu flooded the client network
+  queue (disconnects). All resolution offsets set to the 4:3-safe value so the menu fits both
+  4:3-stretched and 16:9 without per-player setup. **(unverified — pending in-game check that
+  the embedded CS2MenuManager honours config positions.)**
+
+### 🛑 Jailbreak Crash Fix
+
+Jailbreak mode crashed with a native access violation ~1–2 s after the plugin loaded — every
+time, while no other mode crashed. Cause: the mode loaded **CS2Fixes (a heavy native MetaMod
+plugin) alongside the self-contained CSS Jailbreak plugin**, and the two conflict at the native
+level. Dropped `zombie`/CS2Fixes from the mode (`_MODE_PLUGIN_NAMES["Jailbreak"] = ["jailbreak"]`).
+*Confirmed working.*
+
+### ⬇️ Workshop Download Overhaul
+
+- **Real per-MB progress** — downloads report `X / Y MB (Z%)` against Steam's reported file size
+  (`/api/state` → `dl_progress`); the UI bar is now a determinate fill, not an indeterminate stripe.
+- **Stage → verify → promote** — DepotDownloader now writes to an `<id>.partial` folder; only
+  after verifying a `.vpk` is present and the size matches Steam (≥99%) is it promoted to the live
+  workshop dir. Failed/cancelled/partial downloads are deleted instead of leaving empty folders.
+- **Fixed the download UI not updating live** — the progress bar/status only refreshed on a tab
+  switch because the update code gated on `currentPage === 'workshop'` (the page is actually
+  `maps`); removed the bad guard. Also fixed a stale grid id and a post-cancel flicker.
+
+### 🚩 Workshop Command-Filter Automation
+
+Some workshop maps need `-disable_workshop_command_filtering` (their map logic runs server
+commands CS2 otherwise blocks). The tool now:
+- **Auto-detects** the need by scanning each map's Steam description for the flag.
+- Adds the launch flag **only for flagged workshop maps** (filter stays on for everything else).
+- Provides a per-map override chip (auto → ON → OFF) and a "Scan command-filter needs" button.
+- Persists results in the config (`cmdfilter_auto` / `cmdfilter_override`).
+
+### 🧟 Zombie / Mode Plumbing
+
+- **Zombie Escape ZM fix** — `zombie_ze`'s `cs2fixes.cfg` is now a full copy of the base config
+  with `zm_enable 1` (the previous 3-line override clobbered the whole config). Zombie Escape now
+  also allows official (non-workshop) maps.
+- **Mode-switch hardening** — plugin-swapping mode changes route through a clean
+  stop → wait-for-exit → start (`_restart_into`); a lifecycle `RLock` makes start/stop/boot/crash
+  transitions atomic; `stop_server` is non-blocking (fixes the dropped-fetch "stop button" bug).
+
+### 🎨 UI & Diagnostics
+
+- **Keyboard cheat sheet** — `?` (or a header `?` button) opens a shortcuts overlay; `Esc` closes.
+- **Richer empty states** — Players / Workshop / Presets / Bans now show an icon + title +
+  call-to-action instead of plain text.
+- **Darker theme** — base surfaces and ambient glow toned down a notch from the v0.9.0 lift.
+- **`-condebug`** added to the server launch so the full engine console (incl. native crash
+  output) is captured to `csgo/console.log` — this is what finally pinned the Jailbreak crash.
 
 ### 📚 Documentation
 
 - Added [BIBLE.md](BIBLE.md), [ROADMAP.md](ROADMAP.md), [TODO.md](TODO.md), and
-  [INGEST.md](INGEST.md) — project vision, phased plan, working checklist, and a complete
-  structural index of the source tree.
-- Updated the README plugin table to reflect the MatchZy-based Retakes mode and the full
-  set of plugins deployed per mode.
+  [INGEST.md](INGEST.md) — project vision, phased plan, working checklist, and a structural
+  index of the source tree.
+- README plugin table reflects B3none Retakes and the full per-mode plugin set.
 
 ---
 

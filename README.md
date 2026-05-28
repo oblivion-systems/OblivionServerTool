@@ -37,7 +37,7 @@ Oblivion automatically deploys the correct CounterStrikeSharp / MetaMod plugins 
 
 | Mode | Plugins deployed |
 |---|---|
-| Retakes | MatchZy (built-in retakes mode) |
+| Retakes | B3none cs2-retakes + RetakesAllocator |
 | Practice | MatchZy |
 | 1v1 / 3v3 / 4v4 | K4-Arenas + K4-Arenas-Bots |
 | Deathmatch | CS2Fixes (MetaMod) + CS2-Deathmatch |
