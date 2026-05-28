@@ -54,9 +54,9 @@
   "command.factoryreset": "factoryreset, fullreset, resetlevels",
   "command.addxp": "addxp, givexp, xpadd",
   "command.skills": "skills, level",
-  "command.shopmenu": "shopmenu, shop, buymenu, buy",
+  "command.shopmenu": "shopmenu, shop, buymenu",
   "command.help": "rpg_help, commands, wcs, war3menu", //"help" is a reserved keyword
-  "command.help.description": "{Green}Commands: {Gold}!class{Green} change class | {Gold}!skills{Green} level up | {Gold}!shop{Green}/{Gold}!buy{Green} item shop | {Gold}!ult{Green} ultimate | {Gold}!info{Green} stats | {Gold}!reset{Green} reset skills",
+  "command.help.description": "{Green}Commands: {Gold}!class{Green} change class | {Gold}!skills{Green} level up | {Gold}!shop{Green} item shop | {Gold}!ult{Green} ultimate | {Gold}!info{Green} stats | {Gold}!reset{Green} reset skills",
   "command.info": "info,stats,wcinfo",
   "command.info.header": "{0}'s Warcraft profile",
   "command.info.race": "Race",
