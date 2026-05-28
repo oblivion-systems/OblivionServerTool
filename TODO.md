@@ -245,6 +245,11 @@ Plugin-backed modes (verify deploy, verify markers, verify defining behaviour):
 - [ ] **Map Veto / Match Setup tab** — full spec + open decisions in [VETO.md](VETO.md);
   prototype at `_prototypes/veto.html`. Self-contained Veto tab; needs server-side session +
   SSE for the captain links to work across devices. Resolve the 4 open decisions first.
+- [ ] **Arena team size per mode (3v3/4v4 actually 3v3/4v4).** Today 1v1/3v3/4v4 all deploy the
+  same "arenas" bundle and don't configure K4-Arenas' arena *team size*, so all three run the
+  plugin's default arena behaviour — only the player cap differed (now all 16). K4-Arenas
+  supports 2v2/3v3/etc., so the fix is to ship/generate a per-mode K4-Arenas config setting the
+  arena size (1/3/4 per side) when deploying each mode. Latent label/config gap, not a fault.
 - [ ] Scheduled tasks (cron-style auto-restart, nightly map updates)
 - [ ] Server metrics / history dashboard
 - [ ] Multi-server management
