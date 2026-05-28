@@ -148,7 +148,11 @@ _CSS_HOST_DLLS: frozenset[str] = frozenset({
     "system.io.pipelines.dll",
     "system.reflection.metadata.dll",
     "system.text.encodings.web.dll",
-    "system.text.json.dll",
+    # NOTE: "system.text.json.dll" intentionally NOT listed here.
+    # WarcraftPlugin bundles System.Text.Json v10.0.8 which is newer than the
+    # v8.x shipped with the CS2 .NET 8 runtime. Listing it here would cause
+    # CSS to skip deploying the plugin's copy, resulting in a
+    # FileNotFoundException when WarcraftPlugin tries to load.
 })
 
 # How each plugin loads into CS2.
@@ -157,7 +161,6 @@ _CSS_HOST_DLLS: frozenset[str] = frozenset({
 _PLUGIN_KIND: dict[str, str] = {
     "zombie":    "metamod",   # ZombieMod (CS2Fixes fork) — engine-level ZE/ZM fixes, zm_enable 0
     "zombie_ze": "metamod",   # ZE layer: MultiAddonManager + zm_enable 1 override cfg
-    "retakes":   "css",       # NeuTroNBZh CS2Retake — weapon select, instadefuse, AWP limit built in
     "deathmatch":"css",
     "arenas":    "css",
     "practice":  "css",
@@ -176,10 +179,6 @@ _PLUGIN_VERIFY_FILES: dict[str, list[str]] = {
     "zombie_ze": [
         os.path.join("addons", "metamod", "multiaddonmanager.vdf"),
         os.path.join("addons", "multiaddonmanager", "bin", "multiaddonmanager.dll"),
-    ],
-    "retakes": [
-        os.path.join("addons", "counterstrikesharp", "plugins",
-                     "CS2Retake", "CS2Retake.dll"),
     ],
     "deathmatch": [
         os.path.join("addons", "counterstrikesharp", "plugins",
@@ -207,9 +206,9 @@ _PLUGIN_VERIFY_FILES: dict[str, list[str]] = {
 
 # Modes that need managed plugins; modes not listed → vanilla server.
 _MODE_PLUGIN_NAMES: dict[str, list[str]] = {
-    # NeuTroNBZh CS2Retake — weapon selection, AWP restrictions and instadefuse
-    # are all built into the single plugin; no separate allocator or defuse DLL.
-    "Retakes":             ["retakes"],
+    # Retakes: MatchZy with matchzy_retakes_mode 1 — pre-planted bomb each round,
+    # weapon allocation and team management via MatchZy's built-in retakes mode.
+    "Retakes":             ["practice"],
     "Deathmatch":          ["zombie", "deathmatch"],
     "1v1":                 ["arenas"],     # fixed-map dueling
     "3v3":                 ["arenas"],
@@ -227,9 +226,10 @@ _MODE_PLUGIN_NAMES: dict[str, list[str]] = {
     # meaning deploy_plugins() runs a vanilla server with no managed plugins.
 }
 
-# Copy rules per plugin: list of (src_subdir, dst_subdir_relative_to_csgo).
+# Copy rules per plugin: list of (src_subdir, dst_subdir_relative_to_csgo[, exclude_subdirs]).
 # The CONTENTS of src_subdir are merged into dst_subdir.
-_PLUGIN_COPY_RULES: dict[str, list[tuple[str, str]]] = {
+# Optional third element: frozenset of immediate subdirectory names to skip during the walk.
+_PLUGIN_COPY_RULES: dict[str, list[tuple]] = {
     "zombie": [
         # zombie/ root mirrors csgo/ layout — metamod-only, no CSS needed
         ("addons",      "addons"),
@@ -239,41 +239,24 @@ _PLUGIN_COPY_RULES: dict[str, list[tuple[str, str]]] = {
         ("soundevents", "soundevents"),
         ("sounds",      "sounds"),
     ],
-    "retakes": [
-        # CS2-RETAKE ZIP ships addons/ at the root — mirrors csgo/addons/
+    "deathmatch": [
         ("addons", "addons"),
     ],
-    "deathmatch": [
-        # NockyCZ CS2-Deathmatch release ZIP ships plugins/ and shared/ at the
-        # root; README says unzip into csgo/addons/counterstrikesharp/.
-        ("plugins", os.path.join("addons", "counterstrikesharp", "plugins")),
-        ("shared",  os.path.join("addons", "counterstrikesharp", "shared")),
-    ],
     "arenas": [
-        # K4-Arenas main plugin + shared libs (K4-ArenaSharedApi, KitsuneMenu)
-        (os.path.join("K4-Arenas", "plugins"),
-         os.path.join("addons", "counterstrikesharp", "plugins")),
-        (os.path.join("K4-Arenas", "shared"),
-         os.path.join("addons", "counterstrikesharp", "shared")),
-        # K4-Arenas-Bots add-on (bot filling for empty arena slots)
-        (os.path.join("K4-Arenas-Bots", "plugins"),
-         os.path.join("addons", "counterstrikesharp", "plugins")),
+        ("addons", "addons"),
     ],
     "practice": [
-        (os.path.join("addons", "counterstrikesharp", "plugins", "MatchZy"),
-         os.path.join("addons", "counterstrikesharp", "plugins", "MatchZy")),
+        ("addons", "addons"),
         ("cfg", "cfg"),
     ],
     "jailbreak": [
-        # Source folder is a flat dump of all Jailbreak DLLs/PDBs; deploy them
-        # into a single CounterStrikeSharp plugin folder named "Jailbreak".
-        ("", os.path.join("addons", "counterstrikesharp", "plugins", "Jailbreak")),
+        ("addons", "addons"),
     ],
-    # WarcraftPlugin release ZIP extracts all DLLs flat (no sub-folder).
-    # Copy the whole directory into a named CSS plugins folder.
+    # warcraft/characters/ deploys loose .vmdl_c model files so that
+    # PrecacheModel() can find them on dedicated servers.
     "warcraft": [
-        ("",
-         os.path.join("addons", "counterstrikesharp", "plugins", "WarcraftPlugin")),
+        ("addons", "addons"),
+        ("characters", "characters"),
     ],
     # zombie_ze: MultiAddonManager MetaMod plugin + cfg overrides.
     # Mirrors csgo/ layout exactly (addons/ and cfg/).  Deployed AFTER zombie so
@@ -296,10 +279,6 @@ _PLUGIN_CLEANUP_ITEMS: dict[str, list[str]] = {
         os.path.join("soundevents", "cs2fixes"),
         os.path.join("sounds", "cs2fixes"),      # zombie deploys sounds/ too
     ],
-    "retakes": [
-        os.path.join("addons", "counterstrikesharp", "plugins", "CS2Retake"),
-        os.path.join("addons", "counterstrikesharp", "configs", "plugins", "CS2Retake"),
-    ],
     "deathmatch": [
         os.path.join("addons", "counterstrikesharp", "plugins", "Deathmatch"),
         os.path.join("addons", "counterstrikesharp", "shared", "DeathmatchAPI"),
@@ -313,6 +292,7 @@ _PLUGIN_CLEANUP_ITEMS: dict[str, list[str]] = {
     "practice": [
         os.path.join("addons", "counterstrikesharp", "plugins", "MatchZy"),
         os.path.join("cfg", "MatchZy"),
+        os.path.join("cfg", "retakes.cfg"),
     ],
     "jailbreak": [
         os.path.join("addons", "counterstrikesharp", "plugins", "Jailbreak"),
@@ -320,6 +300,12 @@ _PLUGIN_CLEANUP_ITEMS: dict[str, list[str]] = {
     "warcraft": [
         os.path.join("addons", "counterstrikesharp", "plugins", "WarcraftPlugin"),
         os.path.join("addons", "counterstrikesharp", "configs", "plugins", "WarcraftPlugin"),
+        # Loose model directories deployed from VPK for dedicated-server precaching.
+        # tm_phoenix_heavy/ is entirely ours (doesn't exist on a stock dedicated server),
+        # so clean up the whole directory.  ctm_st6/ exists natively so only remove our
+        # specific variant file — leave the rest of the directory untouched.
+        os.path.join("characters", "models", "tm_phoenix_heavy"),
+        os.path.join("characters", "models", "ctm_st6", "ctm_st6_variantn.vmdl_c"),
     ],
     "zombie_ze": [
         os.path.join("addons", "multiaddonmanager"),
@@ -358,6 +344,13 @@ class AppCore:
 
         self._dl_reqs: list[dict]        = []
         self._dl_lock  = threading.Lock()
+
+        # Guards the server-lifecycle state block (proc / running / boot_state /
+        # _uptime_start) so the stop, boot-ready, and crash transitions can't
+        # interleave — e.g. stop flipping running=False between the poller's
+        # "is it still running?" check and its "mark ready" write. Held only for
+        # the brief state mutations, never across blocking I/O.
+        self._lifecycle_lock = threading.RLock()
 
         self.update_available:      bool = False
         self.app_update_available:  bool = False
@@ -735,16 +728,23 @@ class AppCore:
             cmd += ["-tickrate", "128"]
         if self.gslt_token:
             cmd += ["+sv_setsteamaccount", self.gslt_token]
+        # Retakes mode: exec retakes.cfg to activate matchzy_retakes_mode and
+        # configure team management settings.
+        if mode == "Retakes":
+            cmd += ["+exec", "retakes"]
         cmd += ["+map", startup_map]
+        _server_env = os.environ.copy()
+
         try:
-            self.proc = subprocess.Popen(cmd)
+            self.proc = subprocess.Popen(cmd, env=_server_env)
         except FileNotFoundError:
             self.log(f"CS2 executable not found: {_config.CS2_PATH}")
             return
-        self.running      = True
-        self.boot_state   = "booting"
-        self.current_map  = startup_map   # updated to workshop ID by _poll_rcon_ready on success
-        self.current_mode = mode
+        with self._lifecycle_lock:
+            self.running      = True
+            self.boot_state   = "booting"
+            self.current_map  = startup_map   # updated to workshop ID by _poll_rcon_ready on success
+            self.current_mode = mode
         self.log(f"Server started  |  map: {map_name}  |  mode: {mode}")
         if self.tickrate_128:
             self.log("  Tickrate 128 enabled")
@@ -758,15 +758,29 @@ class AppCore:
         threading.Thread(target=self._poll_rcon_ready, daemon=True).start()
 
     def stop_server(self) -> None:
-        if self.proc:
-            self.proc.terminate()
+        # Flip lifecycle state to "stopped" BEFORE terminating the process.
+        # The crash monitor and the RCON-ready poller both key off running/proc;
+        # if we terminate first and clear the flags afterwards, the monitor sees
+        # a live `running` flag with a dead process and fires a spurious
+        # "crashed" auto-restart, and the poller can race to re-mark a
+        # just-stopped server "ready".
+        with self._lifecycle_lock:
+            proc               = self.proc
+            was_running        = self.running
+            self.proc          = None
+            self.running       = False
+            self.boot_state    = "offline"
+            self.player_count  = 0
+            self._uptime_start = None
+
+        if proc:
+            proc.terminate()
             try:
-                self.proc.wait(timeout=5)
+                proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 self.log("Server did not exit cleanly — killing process")
-                self.proc.kill()
-            self.proc = None
-        elif self.running:
+                proc.kill()
+        elif was_running:
             # Reattached session — no Popen handle.
             # Ask the server to quit via RCON; fall back to targeted kill if needed.
             self.log("Stopping reattached server…")
@@ -795,10 +809,6 @@ class AppCore:
                             )
             except Exception:
                 pass
-        self.running       = False
-        self.boot_state    = "offline"
-        self.player_count  = 0
-        self._uptime_start = None
         self.log("Server stopped")
         if self.on_state_change:
             self.on_state_change()
@@ -890,9 +900,15 @@ class AppCore:
                 continue
             try:
                 self.rcon.execute("status")
-                if self.running:
-                    self.boot_state    = "ready"
-                    self._uptime_start = time.time()
+                # Atomically confirm the server is still meant to be running and
+                # claim the boot→ready transition, so a concurrent stop_server()
+                # can't be undone here (it would have set running=False first).
+                with self._lifecycle_lock:
+                    became_ready = self.running and self.boot_state == "booting"
+                    if became_ready:
+                        self.boot_state    = "ready"
+                        self._uptime_start = time.time()
+                if became_ready:
                     self.log("Server ready — RCON is responding")
                     wk = self._pending_workshop_map
                     if wk:
@@ -938,6 +954,16 @@ class AppCore:
                 self.log(f"[{caller}] Sending map change → {map_name} ({mode})…")
                 self.rcon.execute_retry(f"game_type {s['game_type']}")
                 self.rcon.execute_retry(f"game_mode {s['game_mode']}")
+                # Retakes mode: exec retakes.cfg to activate matchzy_retakes_mode
+                # and team settings.  deploy_plugins() copies it to disk; we exec
+                # it here so a live mode switch picks it up without a restart.
+                if mode == "Retakes":
+                    try:
+                        self.rcon.execute_retry("exec retakes")
+                        self.log("[plugins] exec retakes → matchzy_retakes_mode applied")
+                    except Exception as _exc:
+                        self.log(f"[plugins] exec retakes failed: {_exc} "
+                                 "(retakes mode may not apply until next restart)")
                 rcon_cmd = (f"host_workshop_map {map_name}"
                             if is_workshop else f"changelevel {map_name}")
                 resp = self.rcon.execute_retry(rcon_cmd)
@@ -1573,6 +1599,10 @@ class AppCore:
 
         new_plugins = _MODE_PLUGIN_NAMES.get(mode, [])
 
+        # Read the manifest BEFORE we overwrite it — used later to compute
+        # which plugin kinds were genuinely active in the previous session.
+        prev_manifest = self._load_plugin_manifest()
+
         # ── 1. Remove every managed plugin not required for this mode ────────
         # Intentionally manifest-independent: we always clean every slot we
         # own that isn't needed, regardless of what any previous session recorded.
@@ -1614,7 +1644,10 @@ class AppCore:
                              "folder must be alongside the exe (or bundled via PyInstaller)")
                 any_failed = True
                 continue
-            for src_sub, dst_sub in _PLUGIN_COPY_RULES.get(name, []):
+            for rule in _PLUGIN_COPY_RULES.get(name, []):
+                src_sub, dst_sub = rule[0], rule[1]
+                # Optional third element: frozenset of immediate subdir names to exclude.
+                exclude_subdirs: frozenset[str] = rule[2] if len(rule) > 2 else frozenset()
                 src = os.path.join(src_base, src_sub)
                 dst = os.path.join(csgo_dir, dst_sub)
                 if not os.path.exists(src):
@@ -1623,7 +1656,10 @@ class AppCore:
                     continue
                 os.makedirs(dst, exist_ok=True)
                 skipped_host = 0
-                for root, _dirs, files in os.walk(src):
+                for root, dirs, files in os.walk(src):
+                    # Prune excluded subdirectories (only at the top level of src).
+                    if exclude_subdirs and os.path.normpath(root) == os.path.normpath(src):
+                        dirs[:] = [d for d in dirs if d not in exclude_subdirs]
                     rel     = os.path.relpath(root, src)
                     tgt_dir = os.path.join(dst, rel) if rel != "." else dst
                     os.makedirs(tgt_dir, exist_ok=True)
@@ -1679,7 +1715,15 @@ class AppCore:
         verified_ok = self._verify_deployment(new_plugins)
 
         # ── 5. Tell the user what to do next ─────────────────────────────────
-        old_kinds = {_PLUGIN_KIND.get(p) for p in unneeded}
+        # Derive "what was actually running before" from the saved manifest,
+        # NOT from the full unneeded list.  The unneeded list includes every
+        # plugin that exists in _PLUGIN_CLEANUP_ITEMS but isn't needed for the
+        # new mode — even plugins that were never deployed (e.g. zombie when
+        # switching Retakes→Warcraft).  Using unneeded caused needs_metamod_restart
+        # to fire falsely for CSS→CSS mode switches (zombie kind=metamod appearing
+        # in unneeded), which suppressed the hot-reload and left the server vanilla.
+        prev_deployed = set(prev_manifest.get("plugins", []))
+        old_kinds = {_PLUGIN_KIND.get(p) for p in prev_deployed if p not in set(new_plugins)}
         new_kinds = {_PLUGIN_KIND.get(p) for p in new_plugins}
         needs_metamod_restart = "metamod" in (old_kinds | new_kinds)
         has_css_changes       = "css" in (old_kinds | new_kinds)
@@ -2431,11 +2475,12 @@ class AppCore:
         def _handle_crash(exit_code: int | None = None) -> None:
             """Shared teardown + optional auto-restart logic."""
             nonlocal _restart_count
-            self.proc          = None
-            self.running       = False
-            self.boot_state    = "offline"
-            self.player_count  = 0
-            self._uptime_start = None
+            with self._lifecycle_lock:
+                self.proc          = None
+                self.running       = False
+                self.boot_state    = "offline"
+                self.player_count  = 0
+                self._uptime_start = None
             if exit_code is not None:
                 self.log(
                     f"[!] Server process exited unexpectedly "

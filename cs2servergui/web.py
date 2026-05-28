@@ -1,256 +1,97 @@
 """
-web.py — Flask remote admin panel.
+web.py — Flask server: serves the SPA frontend and the REST API.
 
-Provides a PIN-protected web interface for basic server control and
-a server-sent-events (SSE) log stream.  Runs on a daemon thread in main.py.
+Shared between the local pywebview window and the remote web panel.
+The local window is auto-authenticated via a one-time startup token.
+Remote clients must enter the admin PIN.
+
+Auth model:
+  - On login (POST /api/auth/login), a random session token is generated
+    and stored server-side.  The token is sent to the browser as an
+    httpOnly cookie named "session".  The raw PIN is never stored anywhere.
+  - The auto-auth endpoint (/auth/auto?token=...) creates a privileged
+    "local" session so the pywebview window never shows the PIN keypad.
+  - Local sessions never expire; remote sessions expire after 8 hours.
+  - Some endpoints (server install, Steam credentials) are local-only.
 """
 from __future__ import annotations
 
 import functools
 import queue
+import re
+import secrets
 import threading
 import time
 from collections.abc import Callable
 
-from flask import Flask, Response, jsonify, render_template_string, request
+from flask import (Flask, Response, abort, jsonify, redirect,
+                   render_template, request, send_file)
 
-from .config import ADMIN_PIN, GAME_MODES, OFFICIAL_MAPS, load_workshop
+from . import config as _config
+from .config import (FLASK_PORT, GAME_MODES, OFFICIAL_MAPS, RCON_HOST,
+                     RCON_PORT, MODE_MAPS, load_workshop)
 from .core import AppCore
 
 
-# ── HTML template ──────────────────────────────────────────────────────────────
-
-_WEB = r"""<!DOCTYPE html><html lang="en"><head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Oblivion Server Tool</title>
-<style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{background:#09090e;color:#e8e8f4;font-family:'Segoe UI',sans-serif;min-height:100vh}
-.hdr{background:#0f0f16;border-bottom:2px solid #a78bfa;padding:0 24px;height:56px;display:flex;align-items:center;gap:8px}
-.hdr-brand{font-size:1.1rem;font-weight:700;color:#a78bfa;letter-spacing:2px}
-.hdr-sub{font-size:.72rem;color:#6b6b80;letter-spacing:1px;padding-top:6px}
-.badge{background:#a78bfa;color:#09090e;font-size:.68rem;padding:2px 9px;border-radius:10px;text-transform:uppercase;font-weight:700;margin-left:auto}
-.wrap{max-width:860px;margin:28px auto;padding:0 16px;display:grid;grid-template-columns:1fr 1fr;gap:20px}
-.card{background:#0f0f16;border-radius:12px;padding:20px;border:1px solid #1c1c28;transition:border-color .2s}
-.card:hover{border-color:#2a2a40}
-.card h2{font-size:.75rem;color:#6b6b80;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:14px}
-label{display:block;font-size:.82rem;color:#6b6b80;margin:10px 0 3px}
-select,input[type=text]{width:100%;background:#060609;color:#e8e8f4;border:1px solid #1c1c28;border-radius:6px;padding:8px 10px;font-size:.88rem;outline:none;margin-top:3px;transition:border-color .15s}
-select:focus,input[type=text]:focus{border-color:#a78bfa}
-.btn{width:100%;margin-top:14px;padding:10px;border:none;border-radius:8px;font-size:.88rem;font-weight:700;cursor:pointer;transition:background .18s,transform .08s}
-.btn-red{background:#a78bfa;color:#09090e}.btn-red:hover{background:#8b5cf6}
-.btn-red:active{transform:scale(.97)}
-.sb{grid-column:1/-1;background:#0f0f16;border-radius:12px;padding:14px 20px;border:1px solid #1c1c28;display:flex;gap:28px;align-items:center}
-.dot{width:10px;height:10px;border-radius:50%}.on{background:#22c55e;box-shadow:0 0 8px #22c55e70}.off{background:#ef4444}
-.sl{font-size:.82rem;color:#6b6b80}.sv{color:#e8e8f4;font-weight:500}
-.lp{grid-column:1/-1}
-.lb{background:#060609;border-radius:8px;padding:12px;height:190px;overflow-y:auto;font-family:Consolas,monospace;font-size:.78rem;color:#6b9080;border:1px solid #1c1c28}
-.lb::-webkit-scrollbar{width:4px}.lb::-webkit-scrollbar-track{background:#09090e}.lb::-webkit-scrollbar-thumb{background:#2a2a40;border-radius:2px}
-.le{padding:1px 0;border-bottom:1px solid #1c1c2820}
-.toast{position:fixed;bottom:22px;right:22px;background:#a78bfa;color:#09090e;padding:10px 18px;border-radius:8px;font-size:.82rem;font-weight:600;display:none}
-.req-st{font-size:.78rem;margin-top:8px;min-height:1.1em}
-.req-ok{color:#22c55e}.req-err{color:#ef4444}.req-pend{color:#f59e0b}
-.login{display:flex;align-items:center;justify-content:center;min-height:100vh;background:#09090e}
-.lc{background:#0f0f16;border-radius:16px;padding:36px 28px;width:310px;border:1px solid #1c1c28;text-align:center;position:relative;overflow:hidden}
-.lc::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:#a78bfa}
-.lc-brand{color:#a78bfa;font-size:1.3rem;font-weight:700;letter-spacing:3px;margin-bottom:4px}
-.lc-sub{color:#6b6b80;font-size:.7rem;letter-spacing:2px;margin-bottom:24px}
-.pin-dots{display:flex;justify-content:center;gap:14px;margin-bottom:24px}
-.pin-dot{width:13px;height:13px;border-radius:50%;background:#060609;border:2px solid #1c1c28;transition:background .15s,border-color .15s,box-shadow .15s}
-.pin-dot.filled{background:#a78bfa;border-color:#a78bfa;box-shadow:0 0 8px #a78bfa80}
-.pin-dot.shake{animation:shake .3s}
-@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-5px)}75%{transform:translateX(5px)}}
-.keypad{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}
-.key{background:#060609;border:1px solid #1c1c28;color:#e8e8f4;border-radius:10px;padding:14px 0;font-size:1.1rem;font-weight:600;cursor:pointer;transition:background .12s,border-color .12s,transform .08s;user-select:none}
-.key:hover{background:#13131e;border-color:#a78bfa}
-.key:active{transform:scale(.93)}
-.key.del{color:#a78bfa}
-.err{color:#ef4444;font-size:.78rem;min-height:1.1em;margin-top:4px}
-.lockout{color:#f59e0b;font-size:.8rem;margin-top:6px}
-</style></head><body>
-{% if not authed %}
-<div class="login"><div class="lc">
-<div class="lc-brand">OBLIVION</div><div class="lc-sub">SERVER TOOL</div>
-<div class="pin-dots">
-  {% for i in range(pin_len) %}<div class="pin-dot" id="d{{i}}"></div>{% endfor %}
-</div>
-<div class="keypad">
-  <button class="key" onclick="press('7')">7</button>
-  <button class="key" onclick="press('8')">8</button>
-  <button class="key" onclick="press('9')">9</button>
-  <button class="key" onclick="press('4')">4</button>
-  <button class="key" onclick="press('5')">5</button>
-  <button class="key" onclick="press('6')">6</button>
-  <button class="key" onclick="press('1')">1</button>
-  <button class="key" onclick="press('2')">2</button>
-  <button class="key" onclick="press('3')">3</button>
-  <button class="key del" onclick="del()">⌫</button>
-  <button class="key" onclick="press('0')">0</button>
-  <button class="key" onclick="submit()">↵</button>
-</div>
-<div class="err" id="err"></div>
-<div class="lockout" id="lk"></div>
-</div></div>
-<script>
-const PIN_LEN = {{ pin_len }};
-let pin = '', locked = false;
-function updateDots() {
-  for (let i = 0; i < PIN_LEN; i++)
-    document.getElementById('d' + i).className = 'pin-dot' + (i < pin.length ? ' filled' : '');
-}
-function press(d) {
-  if (locked || pin.length >= PIN_LEN) return;
-  pin += d; updateDots();
-  if (pin.length === PIN_LEN) setTimeout(submit, 120);
-}
-function del() { if (!locked && pin.length > 0) { pin = pin.slice(0, -1); updateDots(); } }
-function shake() {
-  document.querySelectorAll('.pin-dot').forEach(d => {
-    d.classList.add('shake');
-    setTimeout(() => d.classList.remove('shake'), 350);
-  });
-}
-function submit() {
-  if (!pin.length) return;
-  fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ pin }) })
-  .then(r => r.json()).then(d => {
-    if (d.ok) { location.reload(); return; }
-    shake(); pin = ''; updateDots();
-    document.getElementById('err').textContent = d.error || 'Wrong PIN';
-    if (d.locked_for) {
-      locked = true;
-      document.getElementById('lk').textContent = 'Too many attempts. Try again in ' + d.locked_for + 's';
-      setTimeout(() => {
-        locked = false;
-        document.getElementById('lk').textContent = '';
-        document.getElementById('err').textContent = '';
-      }, d.locked_for * 1000);
-    }
-  });
-}
-document.addEventListener('keydown', e => {
-  if (e.key >= '0' && e.key <= '9') press(e.key);
-  else if (e.key === 'Backspace') del();
-  else if (e.key === 'Enter') submit();
-});
-</script>
-{% else %}
-<div class="hdr"><span class="hdr-brand">OBLIVION</span><span class="hdr-sub">SERVER TOOL</span><span class="badge">Remote Admin</span></div>
-<div class="wrap">
-  <div class="sb">
-    <div class="dot off" id="sdot"></div>
-    <div><div class="sl">Status <span class="sv" id="sst">—</span></div></div>
-    <div><div class="sl">Map <span class="sv" id="smp">—</span></div></div>
-    <div><div class="sl">Mode <span class="sv" id="smd">—</span></div></div>
-  </div>
-  <div class="card">
-    <h2>Official Maps</h2>
-    <label>Map</label>
-    <select id="om">{% for m in official_maps %}<option>{{m}}</option>{% endfor %}</select>
-    <label>Mode</label>
-    <select id="omode">{% for m in modes %}<option>{{m}}</option>{% endfor %}</select>
-    <button class="btn btn-red" onclick="go(false)">Change Map</button>
-  </div>
-  <div class="card">
-    <h2>Workshop Maps</h2>
-    <label>Workshop folder</label>
-    <select id="wm">
-      {% if workshop_maps %}{% for m in workshop_maps %}<option>{{m}}</option>{% endfor %}
-      {% else %}<option value="">No workshop maps found</option>{% endif %}
-    </select>
-    <label>Mode</label>
-    <select id="wmode">{% for m in modes %}<option>{{m}}</option>{% endfor %}</select>
-    <button class="btn btn-red" onclick="go(true)">Change Map</button>
-  </div>
-  <div class="card" style="grid-column:1/-1">
-    <h2>Request Workshop Map Download</h2>
-    <label>Steam Workshop Map ID</label>
-    <input type="text" id="wsid" placeholder="e.g. 3070720081" maxlength="20"
-           oninput="this.value=this.value.replace(/\D/g,'')">
-    <button class="btn btn-red" style="margin-top:10px" onclick="reqWS()">Request Download</button>
-    <div class="req-st" id="req-st"></div>
-  </div>
-  <div class="card lp"><h2>Live Log</h2><div class="lb" id="lb"></div></div>
-</div>
-<div class="toast" id="toast"></div>
-<script>
-function toast(m) {
-  const t = document.getElementById('toast');
-  t.textContent = m; t.style.display = 'block';
-  setTimeout(() => t.style.display = 'none', 2600);
-}
-function go(wk) {
-  const map  = document.getElementById(wk ? 'wm'    : 'om').value;
-  const mode = document.getElementById(wk ? 'wmode' : 'omode').value;
-  if (!map) return;
-  fetch('/api/change_map', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ map, mode, workshop: wk }) })
-  .then(r => r.json()).then(d => toast(d.ok ? 'Map change sent' : 'Error: ' + d.error));
-}
-function poll() {
-  fetch('/api/status').then(r => r.json()).then(d => {
-    document.getElementById('sdot').className = 'dot ' + (d.running ? 'on' : 'off');
-    document.getElementById('sst').textContent = d.running ? 'Online' : 'Offline';
-    document.getElementById('smp').textContent = d.map  || '—';
-    document.getElementById('smd').textContent = d.mode || '—';
-  }).catch(() => {});
-}
-setInterval(poll, 3000); poll();
-const es = new EventSource('/api/log/stream');
-const lb = document.getElementById('lb');
-es.onmessage = e => {
-  const d = document.createElement('div');
-  d.className = 'le'; d.textContent = e.data;
-  lb.appendChild(d); lb.scrollTop = lb.scrollHeight;
-};
-fetch('/api/log/history').then(r => r.json()).then(lines => {
-  lines.forEach(l => {
-    const d = document.createElement('div');
-    d.className = 'le'; d.textContent = l; lb.appendChild(d);
-  });
-  lb.scrollTop = lb.scrollHeight;
-});
-function reqWS() {
-  const id = document.getElementById('wsid').value.trim();
-  const st = document.getElementById('req-st');
-  if (!id) { st.className = 'req-st req-err'; st.textContent = 'Enter a workshop ID first'; return; }
-  st.className = 'req-st req-pend'; st.textContent = 'Sending request…';
-  fetch('/api/request_workshop', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ workshop_id: id }) })
-  .then(r => r.json()).then(d => {
-    if (d.ok) { st.className = 'req-st req-ok'; st.textContent = 'Request sent — waiting for approval'; }
-    else { st.className = 'req-st req-err'; st.textContent = d.error || 'Error'; }
-  }).catch(() => { st.className = 'req-st req-err'; st.textContent = 'Network error'; });
-}
-</script>
-{% endif %}
-</body></html>"""
+# ── Input validation ────────────────────────────────────────────────────────────
+# CS2's console treats ';' and newlines as command separators, so any value
+# interpolated into an RCON command line must be format-validated first.
+_MAP_NAME_RE = re.compile(r"^[A-Za-z0-9_]+$")   # official map names
+_DIGITS_RE   = re.compile(r"^[0-9]+$")          # workshop IDs, userids
+_STEAMID_RE  = re.compile(r"^[A-Za-z0-9:\[\]_]+$")  # STEAM_/[U:..]/765... forms
 
 
-# ── PIN rate limiter ───────────────────────────────────────────────────────────
+# ── Session store ──────────────────────────────────────────────────────────────
 
-_MAX_ATTEMPTS = 5
-_LOCKOUT_SECS = 300
-_attempts:      dict[str, dict] = {}
+_REMOTE_SESSION_TTL = 8 * 3600     # 8 hours for remote sessions
+_sessions:      dict[str, dict] = {}   # token → {ip, is_local, created_at}
+_sessions_lock  = threading.Lock()
+
+
+def _create_session(ip: str, is_local: bool = False) -> str:
+    token = secrets.token_hex(32)
+    with _sessions_lock:
+        _sessions[token] = {
+            "ip":         ip,
+            "is_local":   is_local,
+            "created_at": time.time(),
+        }
+    return token
+
+
+def _get_session(token: str) -> dict | None:
+    now = time.time()
+    with _sessions_lock:
+        session = _sessions.get(token)
+        if session is None:
+            return None
+        if not session["is_local"]:
+            if now - session["created_at"] > _REMOTE_SESSION_TTL:
+                del _sessions[token]
+                return None
+        return session
+
+
+def _clear_session(token: str) -> None:
+    with _sessions_lock:
+        _sessions.pop(token, None)
+
+
+# ── PIN brute-force lockout ────────────────────────────────────────────────────
+
+_MAX_ATTEMPTS  = 5
+_LOCKOUT_SECS  = 300
+_attempts:      dict[str, dict] = {}   # ip → {count, until}
 _attempts_lock  = threading.Lock()
 
 
 def _check_lockout(ip: str) -> int:
-    """Return seconds remaining in lockout for *ip*, or 0 if not locked out.
-
-    Prunes expired lockouts atomically inside the same lock acquisition so
-    partial-attempt records are never dropped (an attacker who pauses between
-    guesses must still reach _MAX_ATTEMPTS before the lockout window resets).
-    """
     now = time.time()
     with _attempts_lock:
-        # Prune only fully-locked entries whose window has elapsed
         stale = [k for k, r in _attempts.items()
                  if r["count"] >= _MAX_ATTEMPTS and r["until"] <= now]
         for k in stale:
             del _attempts[k]
-        # Check this specific IP
         rec = _attempts.get(ip)
         if rec and rec["count"] >= _MAX_ATTEMPTS:
             remaining = int(rec["until"] - now)
@@ -273,45 +114,135 @@ def _clear_attempts(ip: str) -> None:
         _attempts.pop(ip, None)
 
 
+# Global backoff — defends against a distributed brute force that spreads
+# attempts across many source IPs to dodge the per-IP lockout above.
+_GLOBAL_MAX_ATTEMPTS = 20
+_GLOBAL_LOCKOUT_SECS = 300
+_GLOBAL_DECAY_SECS   = 600     # forget the running count after this much quiet
+_global: dict[str, float] = {"count": 0.0, "until": 0.0, "last": 0.0}
+_global_lock = threading.Lock()
+
+
+def _check_global_lockout() -> int:
+    now = time.time()
+    with _global_lock:
+        if _global["count"] >= _GLOBAL_MAX_ATTEMPTS and _global["until"] > now:
+            return int(_global["until"] - now)
+        if _global["last"] and now - _global["last"] > _GLOBAL_DECAY_SECS:
+            _global["count"] = 0.0
+    return 0
+
+
+def _record_global_fail() -> None:
+    now = time.time()
+    with _global_lock:
+        _global["count"] += 1
+        _global["last"]   = now
+        if _global["count"] >= _GLOBAL_MAX_ATTEMPTS:
+            _global["until"] = now + _GLOBAL_LOCKOUT_SECS
+
+
+def _clear_global() -> None:
+    with _global_lock:
+        _global["count"] = 0.0
+        _global["until"] = 0.0
+
+
 # ── Flask app factory ──────────────────────────────────────────────────────────
 
 def create_flask(core: AppCore) -> Flask:
-    app = Flask(__name__)
+    app = Flask(__name__)   # static_folder=<pkg>/static, template_folder=<pkg>/templates
+
+    # ── Auth helpers ───────────────────────────────────────────────────────────
+
+    def _current_session() -> dict | None:
+        token = request.cookies.get("session")
+        return _get_session(token) if token else None
 
     def require_auth(f: Callable) -> Callable:
         @functools.wraps(f)
         def wrapper(*args, **kwargs):
-            if request.cookies.get("adm") != ADMIN_PIN:
+            session = _current_session()
+            if not session:
                 return jsonify({"error": "unauthorized"}), 401
+            # Bind remote sessions to their origin IP: a stolen cookie replayed
+            # from a different address is rejected (the local pywebview session
+            # is exempt — it's always loopback).
+            if (not session.get("is_local")
+                    and session.get("ip") != (request.remote_addr or "")):
+                token = request.cookies.get("session")
+                if token:
+                    _clear_session(token)
+                return jsonify({"error": "unauthorized"}), 401
+            request.session = session       # type: ignore[attr-defined]
             return f(*args, **kwargs)
         return wrapper
 
+    def require_local(f: Callable) -> Callable:
+        """Must be stacked on top of require_auth."""
+        @functools.wraps(f)
+        def wrapper(*args, **kwargs):
+            session = getattr(request, "session", None)
+            if not session or not session.get("is_local"):
+                return jsonify({"error": "local access only"}), 403
+            return f(*args, **kwargs)
+        return wrapper
+
+    # ── SPA shell ──────────────────────────────────────────────────────────────
+
     @app.route("/")
     def index():
-        return render_template_string(
-            _WEB,
-            authed        = (request.cookies.get("adm") == ADMIN_PIN),
-            official_maps = OFFICIAL_MAPS,
-            workshop_maps = load_workshop(),
-            modes         = GAME_MODES,
-            pin_len       = len(ADMIN_PIN),
+        session = _current_session()
+        return render_template(
+            "index.html",
+            authed=bool(session),
+            pin_len=len(core.admin_pin),
         )
 
-    @app.route("/api/login", methods=["POST"])
-    def login():
-        ip   = request.remote_addr
-        wait = _check_lockout(ip)
+    @app.route("/auth/auto")
+    def auto_auth():
+        """One-time auto-login for the local pywebview window."""
+        # Only the loopback pywebview window may use the startup token; a remote
+        # caller who learns the token (e.g. from a leaked URL) must not be able
+        # to mint a privileged local session.
+        if (request.remote_addr or "") not in ("127.0.0.1", "::1"):
+            return redirect("/")
+        token = request.args.get("token", "")
+        if token and core.startup_token and secrets.compare_digest(token, core.startup_token):
+            core.startup_token = ""    # invalidate immediately — single-use
+            session_token = _create_session("127.0.0.1", is_local=True)
+            core.log("Local window authenticated (auto-auth)")
+            resp = redirect("/")
+            resp.set_cookie(
+                "session", session_token,
+                httponly=True, samesite="Strict",
+            )
+            return resp
+        return redirect("/")
+
+    # ── Auth API ───────────────────────────────────────────────────────────────
+
+    @app.route("/api/auth/login", methods=["POST"])
+    def auth_login():
+        ip   = request.remote_addr or "unknown"
+        wait = _check_lockout(ip) or _check_global_lockout()
         if wait:
             return jsonify({"ok": False, "error": "Too many attempts",
                             "locked_for": wait}), 429
         pin = (request.get_json() or {}).get("pin", "")
-        if pin == ADMIN_PIN:
+        if secrets.compare_digest(str(pin), str(core.admin_pin)):
             _clear_attempts(ip)
+            _clear_global()
             core.log(f"Web login from {ip}")
+            session_token = _create_session(ip, is_local=False)
             resp = jsonify({"ok": True})
-            resp.set_cookie("adm", ADMIN_PIN, httponly=True, samesite="Lax")
+            resp.set_cookie(
+                "session", session_token,
+                httponly=True, samesite="Strict",
+            )
             return resp
         _record_fail(ip)
+        _record_global_fail()
         remaining = max(0, _MAX_ATTEMPTS - _attempts.get(ip, {}).get("count", 0))
         core.log(f"Failed web login from {ip} ({remaining} attempt(s) left)")
         out  = {"ok": False, "error": "Wrong PIN"}
@@ -320,36 +251,591 @@ def create_flask(core: AppCore) -> Flask:
             out["locked_for"] = wait
         return jsonify(out), 401
 
-    @app.route("/api/status")
+    @app.route("/api/auth/logout", methods=["POST"])
+    def auth_logout():
+        token = request.cookies.get("session")
+        if token:
+            _clear_session(token)
+        resp = jsonify({"ok": True})
+        resp.delete_cookie("session")
+        return resp
+
+    # ── Health check (no auth) ─────────────────────────────────────────────────
+
+    @app.route("/api/ping")
+    def ping():
+        return jsonify({"ok": True})
+
+    # ── Server state ───────────────────────────────────────────────────────────
+
+    @app.route("/api/state")
     @require_auth
-    def status():
+    def api_state():
+        session  = _current_session()
+        is_local = bool(session and session.get("is_local"))
         return jsonify({
-            "running": core.running,
-            "map":     core.current_map,
-            "mode":    core.current_mode,
+            "running":            core.running,
+            "is_installed":       core.is_installed,
+            "boot_state":         core.boot_state,
+            "player_count":       core.player_count,
+            "map":                core.current_map,
+            "mode":               core.current_mode,
+            "uptime":             core.uptime_seconds,
+            "ff_enabled":         core._ff_enabled,
+            "update_available":   core.update_available,
+            "app_update":         core.app_update_available,
+            "app_version":        core.app_latest_version,
+            "public_ip":          core.public_ip,
+            "lan_ip":             RCON_HOST,
+            "rcon_port":          RCON_PORT,
+            "flask_port":         FLASK_PORT,
+            "is_local":           is_local,
+            "dl_active":          core._active_dl_proc is not None,
         })
 
-    @app.route("/api/change_map", methods=["POST"])
+    # ── Server control ─────────────────────────────────────────────────────────
+
+    @app.route("/api/server/start", methods=["POST"])
     @require_auth
-    def change_map():
+    def server_start():
+        if core.running:
+            return jsonify({"error": "Server is already running"}), 400
+        if not core.server_dir:
+            return jsonify({"error": "Server directory not configured"}), 400
+        if not core.is_installed:
+            return jsonify({"error": "CS2 is not installed — use Config → Install to download it first"}), 400
+        d        = request.get_json() or {}
+        map_name = d.get("map", "de_dust2").strip()
+        mode     = d.get("mode", "Competitive")
+        workshop = bool(d.get("workshop", False))
+        if mode not in GAME_MODES:
+            return jsonify({"error": "Invalid game mode"}), 400
+        if workshop:
+            if not _DIGITS_RE.match(map_name):
+                return jsonify({"error": "Invalid workshop map ID — digits only"}), 400
+        elif not _MAP_NAME_RE.match(map_name):
+            return jsonify({"error": "Invalid map name"}), 400
+        core.start_server(map_name, mode, is_workshop=workshop)
+        return jsonify({"ok": True})
+
+    @app.route("/api/server/stop", methods=["POST"])
+    @require_auth
+    def server_stop():
         if not core.running:
             return jsonify({"error": "Server is not running"}), 400
-        d = request.get_json() or {}
-        m = d.get("map", "").strip()
-        if not m:
+        core.stop_server()
+        return jsonify({"ok": True})
+
+    @app.route("/api/server/map", methods=["POST"])
+    @require_auth
+    def server_map():
+        if not core.running:
+            return jsonify({"error": "Server is not running"}), 400
+        d        = request.get_json() or {}
+        map_name = d.get("map", "").strip()
+        mode     = d.get("mode", core.current_mode)
+        workshop = bool(d.get("workshop", False))
+        if not map_name:
             return jsonify({"error": "No map specified"}), 400
-        core.change_map(m, d.get("mode", "Competitive"),
-                        bool(d.get("workshop")), caller=request.remote_addr)
+        if mode not in GAME_MODES:
+            return jsonify({"error": "Invalid game mode"}), 400
+        if workshop:
+            if not _DIGITS_RE.match(map_name):
+                return jsonify({"error": "Invalid workshop map ID — digits only"}), 400
+        elif not _MAP_NAME_RE.match(map_name):
+            return jsonify({"error": "Invalid map name"}), 400
+        core.change_map(map_name, mode, workshop, caller=request.remote_addr or "web")
+        return jsonify({"ok": True})
+
+    @app.route("/api/server/broadcast", methods=["POST"])
+    @require_auth
+    def server_broadcast():
+        if not core.running:
+            return jsonify({"error": "Server is not running"}), 400
+        msg = (request.get_json() or {}).get("message", "").strip()
+        if not msg:
+            return jsonify({"error": "Empty message"}), 400
+        msg = msg.replace("\r", " ").replace("\n", " ")   # block RCON line injection
+        core.server_say(msg)
+        return jsonify({"ok": True})
+
+    @app.route("/api/server/ff", methods=["POST"])
+    @require_auth
+    def server_ff():
+        if not core.running:
+            return jsonify({"error": "Server is not running"}), 400
+        enabled = bool((request.get_json() or {}).get("enabled", False))
+        core.set_friendly_fire(enabled)
+        return jsonify({"ok": True})
+
+    @app.route("/api/server/round/restart", methods=["POST"])
+    @require_auth
+    def server_restart_round():
+        if not core.running:
+            return jsonify({"error": "Server is not running"}), 400
+        core.restart_round()
+        return jsonify({"ok": True})
+
+    @app.route("/api/server/round/warmup", methods=["POST"])
+    @require_auth
+    def server_end_warmup():
+        if not core.running:
+            return jsonify({"error": "Server is not running"}), 400
+        core.end_warmup()
+        return jsonify({"ok": True})
+
+    @app.route("/api/server/match/pause", methods=["POST"])
+    @require_auth
+    def server_pause():
+        if not core.running:
+            return jsonify({"error": "Server is not running"}), 400
+        core.pause_match()
+        return jsonify({"ok": True})
+
+    @app.route("/api/server/match/unpause", methods=["POST"])
+    @require_auth
+    def server_unpause():
+        if not core.running:
+            return jsonify({"error": "Server is not running"}), 400
+        core.unpause_match()
+        return jsonify({"ok": True})
+
+    # ── Bots ───────────────────────────────────────────────────────────────────
+
+    @app.route("/api/bots/add", methods=["POST"])
+    @require_auth
+    def bots_add():
+        if not core.running:
+            return jsonify({"error": "Server is not running"}), 400
+        count = int((request.get_json() or {}).get("count", 1))
+        core.add_bots(max(1, min(count, 20)))
+        return jsonify({"ok": True})
+
+    @app.route("/api/bots/kick", methods=["POST"])
+    @require_auth
+    def bots_kick():
+        if not core.running:
+            return jsonify({"error": "Server is not running"}), 400
+        core.kick_bots()
+        return jsonify({"ok": True})
+
+    # ── Players ────────────────────────────────────────────────────────────────
+
+    @app.route("/api/players")
+    @require_auth
+    def api_players():
+        result_holder: list = []
+        done = threading.Event()
+
+        def on_players(pl: list) -> None:
+            result_holder.extend(pl)
+            done.set()
+
+        core.get_players(on_players)
+        done.wait(timeout=8)
+        return jsonify(result_holder)
+
+    @app.route("/api/players/kick", methods=["POST"])
+    @require_auth
+    def players_kick():
+        if not core.running:
+            return jsonify({"error": "Server is not running"}), 400
+        d      = request.get_json() or {}
+        userid = str(d.get("userid", "")).strip()
+        name   = str(d.get("name",   "")).strip()
+        if not _DIGITS_RE.match(userid):
+            return jsonify({"error": "Invalid userid"}), 400
+        core.kick_player(userid, name)
+        return jsonify({"ok": True})
+
+    @app.route("/api/players/ban", methods=["POST"])
+    @require_auth
+    def players_ban():
+        d        = request.get_json() or {}
+        steamid  = str(d.get("steamid",  "")).strip()
+        name     = str(d.get("name",     "")).strip()
+        duration = int(d.get("duration", 0))
+        if not _STEAMID_RE.match(steamid):
+            return jsonify({"error": "Invalid steamid"}), 400
+        core.ban_player(steamid, name, duration)
+        return jsonify({"ok": True})
+
+    @app.route("/api/bans")
+    @require_auth
+    def bans_list():
+        result_holder: list = []
+        done = threading.Event()
+
+        def on_bans(lines: list) -> None:
+            result_holder.extend(lines)
+            done.set()
+
+        core.get_ban_list(on_bans)
+        done.wait(timeout=8)
+        return jsonify(result_holder)
+
+    @app.route("/api/bans/remove", methods=["POST"])
+    @require_auth
+    def bans_remove():
+        steamid = (request.get_json() or {}).get("steamid", "").strip()
+        if not _STEAMID_RE.match(steamid):
+            return jsonify({"error": "Invalid steamid"}), 400
+        core.unban_player(steamid)
+        return jsonify({"ok": True})
+
+    # ── Config ─────────────────────────────────────────────────────────────────
+
+    @app.route("/api/config")
+    @require_auth
+    def config_get():
+        session  = _current_session()
+        is_local = bool(session and session.get("is_local"))
+        return jsonify({
+            "server_dir":            core.server_dir,
+            "hostname":              core.hostname,
+            "sv_password":           core.sv_password   if is_local else "***",
+            "gslt_token":            core.gslt_token    if is_local else "***",
+            "tickrate_128":          core.tickrate_128,
+            "auto_start":            core.auto_start,
+            "auto_restart_on_crash": core.auto_restart_on_crash,
+            "bot_difficulty":        core.bot_difficulty,
+            "max_players_override":  core.max_players_override,
+            "admin_pin":             core.admin_pin     if is_local else "***",
+            "rcon_password":         core.rcon_password  if is_local else "***",
+            "steam_username":        core.steam_username if is_local else "***",
+            "steam_session_active":  core.steam_session_active,
+            "is_local":              is_local,
+        })
+
+    @app.route("/api/config", methods=["POST"])
+    @require_auth
+    def config_set():
+        d        = request.get_json() or {}
+        session  = _current_session()
+        is_local = bool(session and session.get("is_local"))
+
+        # Fields any authenticated client may change.
+        # sv_password is masked as "***" for remote sessions in config_get, so a
+        # remote save that echoes the mask back must not overwrite the real value.
+        if "hostname"              in d: core.hostname              = str(d["hostname"])
+        if "sv_password" in d and d["sv_password"] != "***":
+            core.sv_password = str(d["sv_password"])
+        if "tickrate_128"          in d: core.tickrate_128          = bool(d["tickrate_128"])
+        if "auto_start"            in d: core.auto_start            = bool(d["auto_start"])
+        if "auto_restart_on_crash" in d: core.auto_restart_on_crash = bool(d["auto_restart_on_crash"])
+        if "bot_difficulty"        in d: core.bot_difficulty        = str(d["bot_difficulty"])
+        if "max_players_override"  in d: core.max_players_override  = str(d["max_players_override"])
+
+        # Local-only fields (security-sensitive). The admin PIN protects the whole
+        # panel, so only the trusted local window may change it.
+        if is_local:
+            if "admin_pin" in d:
+                new_pin = str(d["admin_pin"]).strip()
+                if new_pin.isdigit() and len(new_pin) >= 4:
+                    core.admin_pin    = new_pin
+                    _config.ADMIN_PIN = new_pin
+            if "gslt_token" in d:
+                core.gslt_token = str(d["gslt_token"])
+            if "rcon_password" in d:
+                new_pw = str(d["rcon_password"]).strip()
+                if new_pw:
+                    core.rcon_password    = new_pw
+                    core.rcon.password    = new_pw
+                    _config.RCON_PASSWORD = new_pw
+            if "server_dir" in d:
+                core.update_server_dir(str(d["server_dir"]))
+            if "steam_username" in d: core.steam_username = str(d["steam_username"])
+            if "steam_password" in d: core.steam_password = str(d["steam_password"])
+
+        core.save_config()
+        return jsonify({"ok": True})
+
+    # ── Presets ────────────────────────────────────────────────────────────────
+
+    @app.route("/api/presets")
+    @require_auth
+    def presets_list():
+        return jsonify(list(core.presets.keys()))
+
+    @app.route("/api/presets/save", methods=["POST"])
+    @require_auth
+    def presets_save():
+        name = (request.get_json() or {}).get("name", "").strip()
+        if not name:
+            return jsonify({"error": "Preset name required"}), 400
+        core.presets[name] = {"map": core.current_map, "mode": core.current_mode}
+        core.save_config()
+        return jsonify({"ok": True})
+
+    @app.route("/api/presets/load", methods=["POST"])
+    @require_auth
+    def presets_load():
+        name = (request.get_json() or {}).get("name", "").strip()
+        p    = core.presets.get(name)
+        if not p:
+            return jsonify({"error": "Preset not found"}), 404
+        return jsonify(p)
+
+    @app.route("/api/presets/<name>", methods=["DELETE"])
+    @require_auth
+    def presets_delete(name: str):
+        if name not in core.presets:
+            return jsonify({"error": "Not found"}), 404
+        del core.presets[name]
+        core.save_config()
+        return jsonify({"ok": True})
+
+    # ── RCON console ───────────────────────────────────────────────────────────
+
+    @app.route("/api/rcon", methods=["POST"])
+    @require_auth
+    @require_local
+    def rcon_exec():
+        if not core.running:
+            return jsonify({"error": "Server is not running"}), 400
+        cmd = (request.get_json() or {}).get("command", "").strip()
+        if not cmd:
+            return jsonify({"error": "No command"}), 400
+        result: list = []
+        done  = threading.Event()
+
+        def cb(resp: str, err: str | None) -> None:
+            result.append({"response": resp, "error": err})
+            done.set()
+
+        core.rcon_execute(cmd, callback=cb)
+        done.wait(timeout=10)
+        if result:
+            return jsonify(result[0])
+        return jsonify({"response": "", "error": "timeout"})
+
+    # ── Workshop ───────────────────────────────────────────────────────────────
+
+    @app.route("/api/workshop/maps")
+    @require_auth
+    def workshop_maps_list():
+        import threading as _threading
+        ids     = load_workshop()
+        unknown = [wid for wid in ids if wid not in core._map_name_cache]
+        if unknown:
+            # Wait for names before returning so callers always get real titles.
+            # Subsequent calls are instant (cache hit); only the first call per
+            # session (or after new maps are downloaded) pays the ~1-2 s latency.
+            done = _threading.Event()
+            core.fetch_workshop_names(unknown, on_done=done.set)
+            done.wait(timeout=12)
+        return jsonify([
+            {
+                "id":          wid,
+                "name":        core._map_name_cache.get(wid, ""),
+                "tags":        core._map_tag_cache.get(wid, []),
+                "preview_url": core._preview_url_cache.get(wid, ""),
+            }
+            for wid in ids
+        ])
+
+    @app.route("/api/workshop/download", methods=["POST"])
+    @require_auth
+    @require_local
+    def workshop_download():
+        wid = (request.get_json() or {}).get("id", "").strip()
+        if not wid.isdigit():
+            return jsonify({"error": "Invalid workshop ID — digits only"}), 400
+        if not core.steam_username or not core.steam_password:
+            return jsonify({
+                "error": "Steam credentials required",
+                "needs_steam": True,
+            }), 400
+        core.depotdl_download(
+            wid,
+            on_done=lambda ok: core.log(
+                f"Workshop download {'complete' if ok else 'FAILED'}: {wid}"
+            ),
+        )
+        return jsonify({"ok": True})
+
+    @app.route("/api/workshop/cancel", methods=["POST"])
+    @require_auth
+    @require_local
+    def workshop_cancel():
+        core.cancel_download()
+        return jsonify({"ok": True})
+
+    @app.route("/api/workshop/update", methods=["POST"])
+    @require_auth
+    @require_local
+    def workshop_update():
+        core.check_workshop_updates()
         return jsonify({"ok": True})
 
     @app.route("/api/request_workshop", methods=["POST"])
     @require_auth
     def request_workshop():
+        """Remote-safe: queues a download request for local approval."""
         wid = (request.get_json() or {}).get("workshop_id", "").strip()
         if not wid.isdigit():
             return jsonify({"error": "Invalid workshop ID — digits only"}), 400
-        core.request_workshop_download(wid, requester=request.remote_addr)
+        core.request_workshop_download(wid, requester=request.remote_addr or "remote")
         return jsonify({"ok": True})
+
+    # ── Server installation (local only) ───────────────────────────────────────
+
+    @app.route("/api/server/install", methods=["POST"])
+    @require_auth
+    @require_local
+    def server_install():
+        core.install_server()
+        return jsonify({"ok": True})
+
+    @app.route("/api/server/update_cs2", methods=["POST"])
+    @require_auth
+    @require_local
+    def server_update():
+        core.run_update()
+        return jsonify({"ok": True})
+
+    # ── Steam account (local only) ─────────────────────────────────────────────
+
+    @app.route("/api/steam/login", methods=["POST"])
+    @require_auth
+    @require_local
+    def steam_login():
+        core.steam_login_interactive()
+        return jsonify({"ok": True})
+
+    # ── Directory picker (local only) ──────────────────────────────────────────
+
+    @app.route("/api/system/pick_directory")
+    @require_auth
+    @require_local
+    def system_pick_directory():
+        import subprocess
+        script = (
+            "Add-Type -AssemblyName System.Windows.Forms; "
+            "$d = New-Object System.Windows.Forms.FolderBrowserDialog; "
+            "$d.Description = 'Select CS2 Server Directory'; "
+            "if ($d.ShowDialog() -eq 'OK') { $d.SelectedPath } else { '' }"
+        )
+        try:
+            r = subprocess.run(
+                ["powershell", "-NonInteractive", "-Command", script],
+                capture_output=True, text=True, timeout=60,
+            )
+            path = r.stdout.strip()
+        except Exception as exc:
+            return jsonify({"error": str(exc)}), 500
+        return jsonify({"path": path})
+
+    # ── First-run setup ────────────────────────────────────────────────────────
+
+    @app.route("/api/setup/status")
+    @require_auth
+    def setup_status():
+        """Return whether first-run setup is still needed."""
+        return jsonify({
+            "needs_setup":     core.needs_setup,
+            "server_dir_set":  bool(core.server_dir),
+            "pin_is_default":  core.admin_pin == "1234",
+        })
+
+    @app.route("/api/setup/complete", methods=["POST"])
+    @require_auth
+    @require_local
+    def setup_complete():
+        """Persist first-run choices and clear the setup flag."""
+        import os as _os
+        d          = request.get_json() or {}
+        session_   = _current_session()
+        is_local_  = bool(session_ and session_.get("is_local"))
+
+        # ── Server directory (required) ────────────────────────────────────
+        server_dir = d.get("server_dir", "").strip()
+        if not server_dir:
+            return jsonify({"error": "Server directory is required"}), 400
+        if not _os.path.isdir(server_dir):
+            return jsonify({"error": "Directory does not exist"}), 400
+        core.update_server_dir(server_dir)
+
+        # ── Admin PIN (required — must differ from default) ────────────────
+        new_pin = str(d.get("admin_pin", "")).strip()
+        if not new_pin.isdigit() or len(new_pin) < 4:
+            return jsonify({"error": "PIN must be 4 or more digits"}), 400
+        core.admin_pin    = new_pin
+        _config.ADMIN_PIN = new_pin
+
+        # ── GSLT token (optional) ──────────────────────────────────────────
+        gslt = d.get("gslt_token", "").strip()
+        if gslt:
+            core.gslt_token = gslt
+
+        core.save_config()
+        core.log("First-run setup complete")
+        return jsonify({"ok": True})
+
+    # ── Game data (no auth — static lists) ────────────────────────────────────
+
+    @app.route("/api/data/modes")
+    def data_modes():
+        return jsonify(GAME_MODES)
+
+    @app.route("/api/data/maps")
+    def data_maps():
+        return jsonify(OFFICIAL_MAPS)
+
+    @app.route("/api/data/mode_maps")
+    def data_mode_maps():
+        return jsonify({k: (v or []) for k, v in MODE_MAPS.items()})
+
+    @app.route("/api/data/mode_workshop_tags")
+    def data_mode_workshop_tags():
+        return jsonify(_config.MODE_WORKSHOP_TAGS)
+
+    # ── Map thumbnails ─────────────────────────────────────────────────────────
+    # Thumbnails are bundled as static files in static/images/map_thumbs/.
+    # The endpoint also checks the dedicated server's panorama directory first
+    # so that locally-installed high-res textures are preferred when available.
+
+    @app.route("/api/maps/thumb/<map_name>")
+    def map_thumb(map_name: str):
+        """Serve a map thumbnail.
+
+        Priority:
+          1. Dedicated server panorama directory (local PNG, highest quality)
+          2. Bundled static thumbnail (shipped with the app, always present)
+        """
+        import os as _os
+        import re
+        import sys as _sys
+
+        if not re.match(r"^[a-z0-9_]+$", map_name):
+            abort(404)
+
+        # 1. Dedicated server install — prefer local panorama PNGs when present
+        # CS2_ADDONS_DIR = .../game/csgo/addons  →  go up 3 levels to reach the
+        # CS2 install root (.../Counter-Strike Global Offensive), then re-append
+        # the panorama subpath which starts with "game/csgo/panorama/...".
+        if core.server_dir:
+            cs2_root  = _os.path.dirname(_os.path.dirname(_os.path.dirname(_config.CS2_ADDONS_DIR)))
+            candidate = _os.path.join(cs2_root, _config.CS2_PANORAMA_THUMBS_SUBPATH, f"{map_name}.png")
+            if _os.path.isfile(candidate):
+                return send_file(candidate, mimetype="image/png")
+
+        # 2. Bundled static thumbnails (static/images/map_thumbs/<map>.(png|jpg))
+        if getattr(_sys, "frozen", False):
+            # PyInstaller unpacks data files relative to sys._MEIPASS
+            static_base = _os.path.join(_sys._MEIPASS, "cs2servergui", "static")
+        else:
+            static_base = _os.path.join(_os.path.dirname(__file__), "static")
+
+        thumbs_dir = _os.path.join(static_base, "images", "map_thumbs")
+        for ext, mime in (("png", "image/png"), ("jpg", "image/jpeg")):
+            p = _os.path.join(thumbs_dir, f"{map_name}.{ext}")
+            if _os.path.isfile(p):
+                return send_file(p, mimetype=mime)
+
+        abort(404)
+
+    # ── Log SSE ────────────────────────────────────────────────────────────────
 
     @app.route("/api/log/history")
     @require_auth
@@ -360,6 +846,7 @@ def create_flask(core: AppCore) -> Flask:
     @require_auth
     def log_stream():
         q = core.sse_subscribe()
+
         def gen():
             try:
                 while True:
@@ -369,8 +856,11 @@ def create_flask(core: AppCore) -> Flask:
                         yield ": keepalive\n\n"
             finally:
                 core.sse_unsubscribe(q)
-        return Response(gen(), mimetype="text/event-stream",
-                        headers={"Cache-Control": "no-cache",
-                                 "X-Accel-Buffering": "no"})
+
+        return Response(
+            gen(),
+            mimetype="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     return app

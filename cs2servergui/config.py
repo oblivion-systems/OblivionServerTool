@@ -141,7 +141,7 @@ MODE_SETTINGS: dict[str, dict[str, str]] = {
     "Arms Race":   {"game_type": "1", "game_mode": "0", "maxplayers": "16"},
     "Demolition":  {"game_type": "1", "game_mode": "1", "maxplayers": "10"},
     "Deathmatch":  {"game_type": "1", "game_mode": "2", "maxplayers": "20"},
-    "Retakes":     {"game_type": "0", "game_mode": "0", "maxplayers": "10"},
+    "Retakes":     {"game_type": "0", "game_mode": "1", "maxplayers": "10"},
     # Jailbreak: hostage-style ruleset (game_type 0 / game_mode 2) gives the
     # CT-warden / T-prisoner scoring that the Jailbreak plugin expects.
     "Jailbreak":   {"game_type": "0", "game_mode": "2", "maxplayers": "32"},
