@@ -24,12 +24,11 @@
 ---
 
 ## Pending / In-Flight (working memory)
-*A running record of work done across recent sessions but **not yet committed**, things
-**built but not verified in-game**, and loose ends we deliberately deferred. Clear items
-out of here as they're committed/confirmed. Full prose in [CHANGELOG.md](CHANGELOG.md) →
-Unreleased.*
+*Everything below **shipped in v0.9.1** (committed, pushed, released 2026-05-29). What
+remains is **in-game verification** of the items that couldn't be tested here, plus a few
+deferred loose ends. Full prose in [CHANGELOG.md](CHANGELOG.md) → v0.9.1.*
 
-### Built & confirmed working (uncommitted)
+### Shipped in v0.9.1 — confirmed in-game
 - [x] **Jailbreak crash fixed** — dropped CS2Fixes (`zombie`) from the Jailbreak mode; native
   AV from CS2Fixes + CSS Jailbreak conflict. *Confirmed in-game.*
 - [x] **Warcraft Barbarian models fixed** — new bundled `ModelPrecacher` CSS plugin precaches
@@ -37,7 +36,7 @@ Unreleased.*
   approach proven insufficient and reverted. *Confirmed in-game.*
 - [x] **Warcraft `!buy` fix** — removed the `buy` shop-trigger alias that shadowed native `buy`.
 
-### Built but NOT yet verified in-game
+### Shipped in v0.9.1 — NOT yet verified in-game (play-test these)
 - [~] **Warcraft menu** — shipped a CS2MenuManager `config.toml` (WasdMenu, purple, 4:3-safe
   position). **Finding:** the `!class`/`!skills`/`!shop` menus are rendered by the plugin's own
   compiled menu (not CS2MenuManager), so most of this config has limited effect on them. The
@@ -63,7 +62,7 @@ Unreleased.*
   `bots_enabled` setting (Config → Bots) that excludes K4-Arenas-Bots when off. Still to wire
   the same toggle into **Retakes** (`bot_quota` in cs2-retakes/retakes.cfg) and **Deathmatch**
   bot-fill so it's truly global, not arena-only.
-- [ ] **Commit the batch** — everything above is uncommitted; user is holding until tested.
+- [x] **Commit + release the batch** — shipped as v0.9.1 (committed, pushed, GitHub release).
 - [ ] **`-condebug` log growth** — `csgo/console.log` now grows across sessions; consider
   trimming/rotating, or make it a toggle.
 - [ ] **3 broken 0-byte workshop folders** — `233903603` (Awp India), `3326291211`
