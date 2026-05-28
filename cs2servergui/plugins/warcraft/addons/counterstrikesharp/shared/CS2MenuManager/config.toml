@@ -1,0 +1,134 @@
+# CS2MenuManager configuration — themed for the Oblivion Server Tool.
+# Forces the center-screen HTML menu (auto-paginated, resolution-independent,
+# the most readable type) and colours it to match the app: Purple accents,
+# White options on the dark game backdrop.  Colours use CS2MenuManager's named
+# palette (not hex), so Purple/White/Grey is as close to the app theme as the
+# in-game menu allows.
+
+[DefaultMenuType]
+# Options: ConsoleMenu, ChatMenu, WasdMenu, CenterHtmlMenu
+# ChatMenu was tried but it prints every menu line (incl. long !skills/!shop
+# descriptions) as chat messages; rapid menu opens flooded the client's network
+# recv queue (100-message overflow) and timed players out.  WasdMenu renders
+# on-screen on its own channel — no flood, no flicker.  Trade-off: WasdMenu is
+# resolution-positioned, so 4:3 / non-16:9 players can see horizontal cutoff
+# (true fix = the CS2MenuManager_MenuManager companion plugin + a database for
+# per-player resolution).
+DefaultMenuType = "WasdMenu"
+
+[ForceConfigSettings]
+# true → this file wins even when a plugin (WarcraftPlugin) tries to set its own
+# menu type/colours, so the theme + CenterHtmlMenu choice always applies.
+ForceConfigSettings = true
+
+[Buttons]
+ScrollUp = "W"
+ScrollDown = "S"
+Select = "E"
+Prev = "Shift"
+Exit = "Tab"
+
+[Sound]
+Select = ""
+Exit = ""
+ScrollUp = ""
+ScrollDown = ""
+
+[MySQL]
+Host = ""
+Name = ""
+User = ""
+Pass = ""
+Port = 3306
+
+[ChatMenu]
+TitleColor = "Purple"
+EnabledColor = "White"
+DisabledColor = "Grey"
+PrevPageColor = "Purple"
+NextPageColor = "Purple"
+ExitColor = "Red"
+
+[CenterHtmlMenu]
+# Active menu type — themed to the app.
+TitleColor = "Purple"
+EnabledColor = "White"
+DisabledColor = "Grey"
+PrevPageColor = "Purple"
+NextPageColor = "Purple"
+ExitColor = "Red"
+InlinePageOptions = true
+MaxTitleLength = 0
+MaxOptionLength = 0
+
+[WasdMenu]
+TitleColor = "Purple"
+ScrollUpDownKeyColor = "Cyan"
+SelectKeyColor = "Purple"
+PrevKeyColor = "Orange"
+ExitKeyColor = "Red"
+SelectedOptionColor = "Purple"
+OptionColor = "White"
+DisabledOptionColor = "Grey"
+ArrowColor = "Purple"
+FreezePlayer = false
+
+# Every entry uses the 4:3-safe X offset (-6.8) on purpose.  Without per-player
+# resolution selection (which needs MySQL), the server can't know a client's
+# resolution, so we anchor the menu where it fits the NARROWEST aspect (4:3 /
+# 4:3-stretched): that position also fits fine on 16:9 (just a touch more toward
+# centre) instead of running off-screen.  The reverse — a 16:9 offset on 4:3 —
+# is what caused the cutoff.  PositionY nudged up (1.0) to recover the bottom of
+# tall pages — WasdMenu shows 5 items/page (hardcoded) and items with descriptions
+# overflow when vertically centred, clipping the last item's description.
+[Resolutions.1920x1080]
+PositionX = -6.8
+PositionY = 1.0
+
+[Resolutions.1680x1050]
+PositionX = -6.8
+PositionY = 1.0
+
+[Resolutions.1600x900]
+PositionX = -6.8
+PositionY = 1.0
+
+[Resolutions.1440x1080]
+PositionX = -6.8
+PositionY = 1.0
+
+[Resolutions.1280x1080]
+PositionX = -6.8
+PositionY = 1.0
+
+[Resolutions.1280x720]
+PositionX = -6.8
+PositionY = 1.0
+
+[Resolutions.1280x1024]
+PositionX = -6.8
+PositionY = 1.0
+
+[Resolutions.1024x768]
+PositionX = -6.8
+PositionY = 1.0
+
+[Resolutions.800x600]
+PositionX = -6.8
+PositionY = 1.0
+
+[Lang]
+[Lang.en]
+Prev = "Prev"
+Next = "Next"
+Exit = "Exit"
+Disabled = "Disabled"
+ScrollKey = "{0}/{1} - Scroll"
+SelectKey = "{0} - Select"
+PrevKey = "{0} - Prev"
+ExitKey = "{0} - Exit"
+SelectResolution = "Select Resolution"
+WarnDisabledItem = "{Grey}You {Red}can't {Grey}enter this option."
+OptionListEmpty = "{Grey}No available options in this menu"
+CancelledVote = "{darkred}{0} {Grey}cancelled vote."
+Console = "Console"

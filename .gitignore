@@ -41,3 +41,7 @@ OblivionServerTool/
 
 # Plugin release ZIPs downloaded by the install helper
 .plugin-downloads/
+
+# .NET build artifacts for bundled plugin source (keep the .cs/.csproj, not bin/obj)
+_plugins_src/**/bin/
+_plugins_src/**/obj/
