@@ -325,6 +325,42 @@ function applyState(s) {
 
   // Update Connect popover with latest state
   if (window.ConnectPopover) ConnectPopover.update(s);
+
+  // Live workshop download progress (per-MB bar)
+  _renderDlProgress(s.dl_progress);
+}
+
+/** Drive the workshop download bar from polled /api/state progress. */
+function _renderDlProgress(p) {
+  if (!p) return;                       // no active download — log-driven UI handles done/failed
+  const wrap = el('ws-progress');       // null when the workshop tab isn't mounted — bail safely
+  if (!wrap) return;
+  const bar       = wrap.querySelector('.workshop-progress-bar');
+  const txt       = el('ws-status-text');
+  const dlBtn     = el('ws-dl-btn');
+  const cancelBtn = el('ws-cancel-btn');
+
+  _dlStatus.active = true;
+  wrap.classList.remove('done');
+  wrap.classList.add('active');
+  if (dlBtn)     dlBtn.classList.add('hidden');
+  if (cancelBtn) cancelBtn.classList.remove('hidden');
+
+  const mb = b => (b / 1048576).toFixed(0);
+  if (txt) {
+    if (p.phase === 'verifying')   txt.textContent = 'Verifying download…';
+    else if (p.total > 0)          txt.textContent = `${mb(p.downloaded)} / ${mb(p.total)} MB (${p.pct}%)`;
+    else                           txt.textContent = `${mb(p.downloaded)} MB downloaded…`;
+  }
+  if (bar) {
+    if (p.total > 0) {
+      bar.classList.add('determinate');
+      bar.style.width = Math.min(100, p.phase === 'verifying' ? 100 : p.pct) + '%';
+    } else {
+      bar.classList.remove('determinate');
+      bar.style.width = '';
+    }
+  }
 }
 
 async function pollState() {
@@ -344,9 +380,8 @@ let _dlStatus     = { active: false, text: '' };   // live workshop download sta
 let _stateInterval = null;                          // stored so doQuickRestart can pause it
 
 function _updateDlStatusUI() {
-  if (currentPage !== 'workshop') return;
   const txt       = el('ws-status-text');
-  const bar       = el('ws-progress');
+  const bar       = el('ws-progress');   // wrapper — null when workshop tab isn't mounted
   const dlBtn     = el('ws-dl-btn');
   const cancelBtn = el('ws-cancel-btn');
   if (!txt || !bar) return;
@@ -360,8 +395,11 @@ function _updateDlStatusUI() {
     bar.classList.add('done');
     if (dlBtn)     dlBtn.classList.remove('hidden');
     if (cancelBtn) cancelBtn.classList.add('hidden');
+    // Reset the bar so a fresh download doesn't start from the last fill width
+    const fill = bar.querySelector('.workshop-progress-bar');
+    if (fill) { fill.classList.remove('determinate'); fill.style.width = ''; }
     // Refresh the maps grid so the new map appears immediately
-    const grid = el('ws-maps-grid');
+    const grid = el('workshop-maps-grid');
     if (grid && state.server.mode) loadWorkshopMapsGrid(grid, state.server.mode);
   }
 }
@@ -385,10 +423,11 @@ function appendLog(line) {
   const t = line.trim();
   if (t.includes('WORKSHOP DOWNLOAD') || t.includes('workshop ID →')) {
     _dlStatus = { active: true, text: 'Starting download…' };
-  } else if (t.startsWith('[dd]') || t.includes('  [dd]')) {
+  } else if ((t.startsWith('[dd]') || t.includes('  [dd]')) && !state.server.dl_progress) {
+    // Only used before the first state poll lands; per-MB progress takes over after.
     const msg = t.replace(/.*\[dd\]\s*/, '').trim();
     if (msg) _dlStatus = { active: true, text: msg };
-  } else if (t.includes('… downloading')) {
+  } else if (t.includes('… downloading') && !state.server.dl_progress) {
     _dlStatus = { active: true, text: t.replace(/^\s+/, '') };
   } else if (t.includes('DOWNLOAD COMPLETE')) {
     _dlStatus = { active: false, text: '✓ Download complete' };
@@ -1064,9 +1103,26 @@ function _renderPlayersBody() {
   }
 
   if (!list.length) {
-    body.innerHTML = `<div class="empty-row">${
-      _playersCache.length ? 'No matches' : 'No players online — invite some with the Connect button'
-    }</div>`;
+    const running = state.server.running;
+    if (!_playersCache.length && running) {
+      body.innerHTML = `
+        <div class="empty-state-v2">
+          <div class="es-glyph">${icon('<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>')}</div>
+          <div class="es-title">Server's running — no players yet</div>
+          <div class="es-desc">Share the connect link from the header to invite people in.</div>
+          <button class="btn btn-accent es-action" onclick="document.getElementById('hdr-connect-btn')?.click()">Open Connect →</button>
+        </div>`;
+    } else if (!running) {
+      body.innerHTML = `
+        <div class="empty-state-v2">
+          <div class="es-glyph">${icon('<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>')}</div>
+          <div class="es-title">Server is offline</div>
+          <div class="es-desc">Start the server from the Status page to see live players here.</div>
+          <button class="btn btn-accent es-action" onclick="navigate('status')">Go to Status →</button>
+        </div>`;
+    } else {
+      body.innerHTML = `<div class="empty-row">No matches for "${_playersSearch}"</div>`;
+    }
     return;
   }
 
@@ -1124,7 +1180,11 @@ async function loadBans() {
   try {
     const bans = await api.bans();
     if (!bans.length) {
-      list.innerHTML = '<div class="empty-state text-sm">No bans</div>';
+      _renderEmptyState(list, {
+        glyph: '<circle cx="12" cy="12" r="10"/><polyline points="22 4 12 14.01 9 11.01"/>',
+        title: 'No bans yet',
+        desc:  'Banned SteamIDs will show up here. Ban directly from the player list above.',
+      });
       return;
     }
     list.innerHTML = '';
@@ -1219,6 +1279,7 @@ pages['maps'] = function() {
         </div>
         <div class="flex gap-8 mb-16">
           <button class="btn btn-ghost btn-sm" id="ws-update-btn">↺ Update All Maps</button>
+          <button class="btn btn-ghost btn-sm" id="ws-cmdfilter-scan-btn" title="Check each downloaded map's Steam description for -disable_workshop_command_filtering and flag the ones that need it">⚑ Scan command-filter needs</button>
         </div>
       ` : `
         <div class="card mb-16">
@@ -1419,6 +1480,20 @@ function _wireWorkshopDownloader(isLocal) {
       try { await api.workshopUpdate(); toast('Checking for map updates…'); }
       catch (e) { toast(e.message, 'var(--bad)'); }
     });
+
+    el('ws-cmdfilter-scan-btn')?.addEventListener('click', async () => {
+      const btn = el('ws-cmdfilter-scan-btn');
+      const orig = btn.textContent;
+      btn.disabled = true; btn.textContent = '⚑ Scanning…';
+      try {
+        const r = await api.workshopCmdfilterScan();
+        const n = (r.flagged || []).length;
+        toast(n ? `${n} map(s) need command-filter disabled` : 'No maps need the command-filter flag');
+        const grid = el('workshop-maps-grid');
+        if (grid && state.server.mode) loadWorkshopMapsGrid(grid, state.server.mode);
+      } catch (e) { toast(e.message, 'var(--bad)'); }
+      finally { btn.disabled = false; btn.textContent = orig; }
+    });
   } else {
     el('ws-req-btn')?.addEventListener('click', async () => {
       const id = el('ws-id-input').value.trim();
@@ -1428,6 +1503,21 @@ function _wireWorkshopDownloader(isLocal) {
         toast('Download request sent — awaiting approval');
       } catch (e) { toast(e.message, 'var(--bad)'); }
     });
+  }
+}
+
+/** Render a v2 empty state inside any container. */
+function _renderEmptyState(target, opts) {
+  const { glyph, title, desc, btnLabel, btnAction } = opts;
+  target.innerHTML = `
+    <div class="empty-state-v2">
+      <div class="es-glyph">${icon(glyph)}</div>
+      <div class="es-title">${title}</div>
+      <div class="es-desc">${desc}</div>
+      ${btnLabel ? `<button class="btn btn-accent es-action" id="es-act-btn">${btnLabel}</button>` : ''}
+    </div>`;
+  if (btnLabel && btnAction) {
+    target.querySelector('#es-act-btn').addEventListener('click', btnAction);
   }
 }
 
@@ -1441,7 +1531,13 @@ async function loadPresetCards() {
     if (countEl) countEl.textContent = names.length;
 
     if (!names.length) {
-      grid.innerHTML = '<div class="empty-state text-sm">No presets saved yet — set up a map &amp; mode, then save it as a preset above.</div>';
+      _renderEmptyState(grid, {
+        glyph: '<polyline points="20 6 9 17 4 12"/>',
+        title: 'No presets saved yet',
+        desc:  'Set up your favourite map + mode, then save it here for one-tap launches later.',
+        btnLabel: 'Save current setup →',
+        btnAction: () => document.getElementById('preset-name')?.focus(),
+      });
       return;
     }
 
@@ -1535,15 +1631,30 @@ async function loadPresetCards() {
   }
 }
 
+/** Map a cmdfilter status {auto, override, effective} → chip label + class.
+ *  "off" = -disable_workshop_command_filtering will be applied (filter disabled);
+ *  a trailing dot means a manual override is set (vs auto-detected). */
+function _cf(status) {
+  const s      = status || { auto: false, override: null, effective: false };
+  const forced = s.override !== null && s.override !== undefined;
+  const label  = (s.effective ? 'cmd-filter off' : 'cmd-filter on') + (forced ? ' ●' : '');
+  return { cls: s.effective ? 'cf-on' : 'cf-off', label };
+}
+
 async function loadWorkshopMapsGrid(grid, mode) {
   try {
     const maps = await api.workshopMaps();
     state.workshopMaps = maps;
     if (!maps.length) {
-      grid.innerHTML = '<div class="empty-state text-sm">No workshop maps downloaded yet</div>';
+      _renderEmptyState(grid, {
+        glyph: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>',
+        title: 'No workshop maps yet',
+        desc:  'Paste a Steam Workshop map ID above and hit Download. Maps end up here.',
+      });
       return;
     }
     grid.innerHTML = '';
+    const isLocal = state.server.is_local;
     maps.forEach(m => {
       const card = h('div', 'map-card' + (m.id === state.server.map ? ' active' : ''));
       card.dataset.name = `${(m.name || '')} ${m.id}`.toLowerCase();
@@ -1555,10 +1666,27 @@ async function loadWorkshopMapsGrid(grid, mode) {
         <div class="map-info">
           <div class="map-name">${esc(m.name || m.id)}</div>
           <div class="map-id">${esc(m.id)}</div>
+          ${isLocal ? `<button class="cmdfilter-chip ${_cf(m.cmdfilter).cls}" title="Command filtering for this map — click to change. Maps with custom server-command logic need this OFF.">${_cf(m.cmdfilter).label}</button>` : ''}
         </div>`;
       card.addEventListener('click', async () => {
         try { await api.map(m.id, mode, true); toast(`Loading workshop map…`); }
         catch (e) { toast(e.message, 'var(--bad)'); }
+      });
+      // Per-map command-filter override: cycle auto → ON → OFF → auto
+      const chip = card.querySelector('.cmdfilter-chip');
+      if (chip) chip.addEventListener('click', async e => {
+        e.stopPropagation();
+        const cur  = m.cmdfilter || { auto: false, override: null };
+        const next = cur.override === null || cur.override === undefined ? true
+                   : cur.override === true ? false
+                   : null;   // false → back to auto
+        try {
+          const r = await api.workshopCmdfilterOverride(m.id, next);
+          m.cmdfilter = r.status;
+          const v = _cf(m.cmdfilter);
+          chip.className = `cmdfilter-chip ${v.cls}`;
+          chip.textContent = v.label;
+        } catch (err) { toast(err.message, 'var(--bad)'); }
       });
       grid.appendChild(card);
     });
@@ -2285,7 +2413,8 @@ async function init() {
     if (s.lan_ip) copyText(`connect ${s.lan_ip}:${s.rcon_port}`, 'Connect string');
   };
   el('sb-pub').onclick = () => {
-    if (state.server.public_ip) copyText(state.server.public_ip, 'Public IP');
+    const s = state.server;
+    if (s.public_ip) copyText(`connect ${s.public_ip}:${s.rcon_port}`, 'Connect string');
   };
 
   // CS2 update badge — clicking triggers a steamcmd update
@@ -2666,6 +2795,30 @@ window.Palette = {
   }
 };
 
+/* ── Keyboard cheat sheet (?) ─────────────────────────────────────────────── */
+window.CheatSheet = {
+  init() {
+    const trigger = el('hdr-help-btn');
+    if (trigger) trigger.addEventListener('click', () => this.show());
+
+    document.addEventListener('keydown', e => {
+      if (e.key === '?' && !e.target.matches('input,textarea,select')) {
+        if (document.querySelector('.modal-overlay,.setup-overlay,.palette-overlay:not(.hidden)')) return;
+        e.preventDefault();
+        this.show();
+      }
+      if (e.key === 'Escape' && !el('cheatsheet-overlay').classList.contains('hidden')) {
+        e.preventDefault(); this.hide();
+      }
+    });
+
+    const dim = el('cheatsheet-dim');
+    if (dim) dim.addEventListener('click', () => this.hide());
+  },
+  show() { el('cheatsheet-overlay')?.classList.remove('hidden'); },
+  hide() { el('cheatsheet-overlay')?.classList.add('hidden'); }
+};
+
 /* ── Wire shell modules after init has set up DOM + state ─────────────────── */
 document.addEventListener('DOMContentLoaded', () => {
   // run after init() finishes its first state poll (modest delay)
@@ -2673,5 +2826,6 @@ document.addEventListener('DOMContentLoaded', () => {
     LogDrawer.init();
     ConnectPopover.init();
     Palette.init();
+    CheatSheet.init();
   }, 200);
 });
