@@ -252,11 +252,13 @@ _PLUGIN_COPY_RULES: dict[str, list[tuple]] = {
     "jailbreak": [
         ("addons", "addons"),
     ],
-    # warcraft/characters/ deploys loose .vmdl_c model files so that
-    # PrecacheModel() can find them on dedicated servers.
+    # WarcraftPlugin sets stock CS2 player models (e.g. tm_phoenix_heavy,
+    # ctm_heavy) that already live in pak01.vpk — it ships no model files and
+    # needs none.  We deliberately do NOT deploy any loose characters/ models:
+    # a loose .vmdl_c overrides the real VPK model, and a malformed stub crashes
+    # the engine on SetModel (the cause of the post-warmup !class crash).
     "warcraft": [
         ("addons", "addons"),
-        ("characters", "characters"),
     ],
     # zombie_ze: MultiAddonManager MetaMod plugin + cfg overrides.
     # Mirrors csgo/ layout exactly (addons/ and cfg/).  Deployed AFTER zombie so
@@ -300,10 +302,12 @@ _PLUGIN_CLEANUP_ITEMS: dict[str, list[str]] = {
     "warcraft": [
         os.path.join("addons", "counterstrikesharp", "plugins", "WarcraftPlugin"),
         os.path.join("addons", "counterstrikesharp", "configs", "plugins", "WarcraftPlugin"),
-        # Loose model directories deployed from VPK for dedicated-server precaching.
-        # tm_phoenix_heavy/ is entirely ours (doesn't exist on a stock dedicated server),
-        # so clean up the whole directory.  ctm_st6/ exists natively so only remove our
-        # specific variant file — leave the rest of the directory untouched.
+        # Legacy broken model stubs: earlier builds shipped loose .vmdl_c files
+        # here that OVERRODE the real stock CS2 models in pak01.vpk and crashed
+        # the engine on SetModel.  We no longer deploy them; keep these cleanup
+        # entries so any install that still has the bad stubs gets them removed
+        # on the next mode switch.  Both paths only ever contained our stubs, so
+        # removing them never touches real game files.
         os.path.join("characters", "models", "tm_phoenix_heavy"),
         os.path.join("characters", "models", "ctm_st6", "ctm_st6_variantn.vmdl_c"),
     ],
