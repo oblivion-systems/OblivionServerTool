@@ -2,6 +2,48 @@
 
 ---
 
+## Unreleased
+
+### 🔌 Retakes Rebuilt on MatchZy
+
+The Retakes mode no longer depends on the abandoned **CS2Retake** plugin. It now runs on
+**MatchZy's built-in retakes mode** (`matchzy_retakes_mode 1`), the same well-maintained
+plugin already used for Practice.
+
+- **Removed CS2Retake entirely** — all DLLs, per-map spawn JSONs, `System.Data.SQLite` /
+  `SQLite.Interop.dll` native libraries, and `CommandAllocator` configs deleted.
+- **New `retakes.cfg`** — deployed via the Practice (MatchZy) bundle's `cfg/` copy rule;
+  sets `matchzy_retakes_mode 1` and disables auto team-balance / team limits. Exec'd at
+  launch via `+exec retakes` and re-applied on live mode switches via RCON.
+- **Removed the SQLite.Interop.dll deployment hack** — CS2Retake required a fragile
+  multi-location native-DLL copy plus a `PreLoadSQLite_BaseDirectory` env var to avoid a
+  CLR crash. MatchZy uses SQLitePCLRaw and needs none of it.
+- **Fixed Retakes ruleset** — `MODE_SETTINGS["Retakes"]` corrected from casual
+  (`game_mode 0`) to competitive (`game_mode 1`), which MatchZy requires for correct buy
+  menus, round times, and retakes logic.
+
+### 🧹 Plugin Bundle Restructure
+
+Every plugin bundle now mirrors the CS2 `csgo/` directory layout (`addons/`, `cfg/`,
+`characters/`, …), matching how the zombie and practice bundles were already organised.
+
+- Arenas, Deathmatch, Jailbreak, and Warcraft bundles reorganised into the standard
+  `addons/counterstrikesharp/...` layout.
+- All `_PLUGIN_COPY_RULES` collapsed to the uniform `("addons", "addons")` pattern — no
+  more per-plugin bespoke copy paths or `extracted/` staging folders.
+- Pruned all non-Windows SQLite runtimes from the Warcraft bundle (Windows-only tool).
+- Removed the orphaned `_plugins_src/` directory.
+
+### 📚 Documentation
+
+- Added [BIBLE.md](BIBLE.md), [ROADMAP.md](ROADMAP.md), [TODO.md](TODO.md), and
+  [INGEST.md](INGEST.md) — project vision, phased plan, working checklist, and a complete
+  structural index of the source tree.
+- Updated the README plugin table to reflect the MatchZy-based Retakes mode and the full
+  set of plugins deployed per mode.
+
+---
+
 ## v0.9.0 — 2026-05-26
 
 This is the largest update yet. The UI has been comprehensively redesigned with theming support, a new Appearance & Settings section, fully configurable keybinds, and a raft of quality-of-life improvements to workshop management, map browsing, and day-to-day server operation.

@@ -37,10 +37,11 @@ Oblivion automatically deploys the correct CounterStrikeSharp / MetaMod plugins 
 
 | Mode | Plugins deployed |
 |---|---|
-| Retakes | CS2Retake + RetakesAllocator |
+| Retakes | MatchZy (built-in retakes mode) |
 | Practice | MatchZy |
-| Jailbreak | CS2Fixes (MetaMod) |
-| Deathmatch | CS2Fixes (MetaMod) |
+| 1v1 / 3v3 / 4v4 | K4-Arenas + K4-Arenas-Bots |
+| Deathmatch | CS2Fixes (MetaMod) + CS2-Deathmatch |
+| Jailbreak | CS2Fixes (MetaMod) + Jailbreak |
 | Warcraft | CS2-Warcraft-Plugin |
 | Zombie Escape | ZombieMod (CS2Fixes fork) + MultiAddonManager + ZombieReborn addon |
 
