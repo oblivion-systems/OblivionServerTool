@@ -55,6 +55,10 @@ Unreleased.*
   awaiting a play-test pass.
 
 ### Loose ends / deferred
+- [ ] **When making the repo public:** the in-app self-updater is **dormant while private** —
+  it fetches the public GitHub releases API (`APP_API_URL`) and links to the releases page,
+  both of which 404 for users without repo access. On going public, verify the "⬆ App update"
+  badge fires and the release download opens. (Repo is private for now, by choice.)
 - [ ] **"Use bots" toggle — extend beyond Arenas.** Built: arena ceiling 16 + global
   `bots_enabled` setting (Config → Bots) that excludes K4-Arenas-Bots when off. Still to wire
   the same toggle into **Retakes** (`bot_quota` in cs2-retakes/retakes.cfg) and **Deathmatch**
