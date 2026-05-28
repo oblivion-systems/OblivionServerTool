@@ -1792,8 +1792,18 @@ pages['config'] = async function() {
         </div>
         ` : ''}
 
-        <div class="config-label">Bot Difficulty</div>
+        <div class="config-label">Bots</div>
         <div class="card mb-16">
+          <div class="toggle-row">
+            <div class="toggle-info">
+              <strong>Use bots</strong>
+              <small>Fill empty Arena slots with bots. Off = humans-only ladder.</small>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="cfg-bots-enabled" ${cfg.bots_enabled?'checked':''}>
+              <span class="toggle-track"></span><span class="toggle-thumb"></span>
+            </label>
+          </div>
           <div class="field">
             <label>Default bot difficulty</label>
             <select class="select" id="cfg-bot-diff">
@@ -1883,8 +1893,11 @@ pages['config'] = async function() {
 
   el('cfg-bot-save').addEventListener('click', async () => {
     try {
-      await api.setConfig({ bot_difficulty: el('cfg-bot-diff').value });
-      toast('Bot difficulty saved');
+      await api.setConfig({
+        bot_difficulty: el('cfg-bot-diff').value,
+        bots_enabled:   el('cfg-bots-enabled').checked,
+      });
+      toast('Bot settings saved');
     } catch (e) { toast(e.message, 'var(--red)'); }
   });
 

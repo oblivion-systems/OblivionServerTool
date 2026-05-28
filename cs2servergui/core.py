@@ -452,6 +452,9 @@ class AppCore:
         self._cmdfilter_auto:     dict[str, bool]          = {}
         self._cmdfilter_override: dict[str, bool]          = {}
         self._ff_enabled:         bool                     = False
+        # Host's per-session choice: fill empty slots with bots (Arena bot-fill,
+        # etc.). Default off → humans-only. See deploy_plugins (K4-Arenas-Bots).
+        self.bots_enabled:        bool                     = False
         self._active_dl_proc:     subprocess.Popen | None  = None
         # Live workshop-download progress, surfaced via /api/state for the UI.
         # Empty dict = no download in flight.  While downloading:
@@ -589,6 +592,7 @@ class AppCore:
         self.auto_start            = bool(cfg.get("auto_start", False))
         self.auto_restart_on_crash = bool(cfg.get("auto_restart_on_crash", False))
         self.bot_difficulty        = cfg.get("bot_difficulty", "Normal")
+        self.bots_enabled          = bool(cfg.get("bots_enabled", False))
         self.max_players_override  = cfg.get("max_players_override", "")
         self.presets               = cfg.get("presets", {})
 
@@ -626,6 +630,7 @@ class AppCore:
                 "auto_start":            self.auto_start,
                 "auto_restart_on_crash": self.auto_restart_on_crash,
                 "bot_difficulty":        self.bot_difficulty,
+                "bots_enabled":          self.bots_enabled,
                 "max_players_override":  self.max_players_override,
                 "presets":               self.presets,
                 "cmdfilter_auto":        self._cmdfilter_auto,
@@ -1596,7 +1601,12 @@ class AppCore:
     def _verify_plugin_files(self, name: str) -> list[str]:
         """Return relative paths of expected output files that are missing."""
         csgo = self._csgo_dir()
-        return [rel for rel in _PLUGIN_VERIFY_FILES.get(name, [])
+        expected = _PLUGIN_VERIFY_FILES.get(name, [])
+        # K4-Arenas-Bots is only deployed when the host enables bots; don't flag it
+        # as missing when bots are off (it's intentionally excluded then).
+        if name == "arenas" and not self.bots_enabled:
+            expected = [r for r in expected if "K4-Arenas-Bots" not in r]
+        return [rel for rel in expected
                 if not os.path.exists(os.path.join(csgo, rel))]
 
     def _verify_deployment(self, new_plugins: list[str]) -> bool:
@@ -1777,6 +1787,12 @@ class AppCore:
                              "folder must be alongside the exe (or bundled via PyInstaller)")
                 any_failed = True
                 continue
+            # Bots toggle: when the host has bots disabled, skip the K4-Arenas-Bots
+            # plugin folder so the Arena ladder runs humans-only.
+            excluded_dirs: set[str] = set()
+            if name == "arenas" and not self.bots_enabled:
+                excluded_dirs.add("K4-Arenas-Bots")
+                self.log("[plugins]   arenas: bots OFF — excluding K4-Arenas-Bots")
             for rule in _PLUGIN_COPY_RULES.get(name, []):
                 src_sub, dst_sub = rule[0], rule[1]
                 # Optional third element: frozenset of immediate subdir names to exclude.
@@ -1793,6 +1809,9 @@ class AppCore:
                     # Prune excluded subdirectories (only at the top level of src).
                     if exclude_subdirs and os.path.normpath(root) == os.path.normpath(src):
                         dirs[:] = [d for d in dirs if d not in exclude_subdirs]
+                    # Prune excluded plugin folders anywhere in the tree (bots toggle).
+                    if excluded_dirs:
+                        dirs[:] = [d for d in dirs if d not in excluded_dirs]
                     rel     = os.path.relpath(root, src)
                     tgt_dir = os.path.join(dst, rel) if rel != "." else dst
                     os.makedirs(tgt_dir, exist_ok=True)
@@ -1819,6 +1838,12 @@ class AppCore:
             else:
                 self.log(f"[plugins]   ✗ {name} [{kind}]: NO files copied — check source folder")
                 any_failed = True
+
+        # Bots OFF: scrub any K4-Arenas-Bots left on disk by a previous bots-on
+        # deploy (the copy above skips it, but doesn't delete an existing copy).
+        if "arenas" in new_plugins and not self.bots_enabled:
+            shutil.rmtree(os.path.join(csgo_dir, "addons", "counterstrikesharp",
+                                       "plugins", "K4-Arenas-Bots"), ignore_errors=True)
 
         total = sum(per_plugin_count.values())
         if any_failed:

@@ -42,7 +42,7 @@ DEPOTDL_RELEASE_URL = (
 # ── App self-update ────────────────────────────────────────────────────────────
 # Bump APP_VERSION before each release tag, then push and create a GitHub
 # release tagged "v<APP_VERSION>" — all connected clients will see the update.
-APP_VERSION      = "0.9.0"
+APP_VERSION      = "0.9.1"
 APP_REPO         = "jacquesvniekerk-eng/OblivionServerTool"
 APP_RELEASES_URL = f"https://github.com/{APP_REPO}/releases/latest"
 APP_API_URL      = f"https://api.github.com/repos/{APP_REPO}/releases/latest"
@@ -135,9 +135,12 @@ MODE_SETTINGS: dict[str, dict[str, str]] = {
     "Competitive": {"game_type": "0", "game_mode": "1", "maxplayers": "10"},
     "Casual":      {"game_type": "0", "game_mode": "0", "maxplayers": "12"},
     "Wingman":     {"game_type": "0", "game_mode": "2", "maxplayers": "4"},
-    "3v3":         {"game_type": "0", "game_mode": "1", "maxplayers": "6"},
-    "4v4":         {"game_type": "0", "game_mode": "1", "maxplayers": "8"},
-    "1v1":         {"game_type": "0", "game_mode": "1", "maxplayers": "2"},
+    # Arena modes (K4-Arenas): maxplayers is a generous CEILING, not a target —
+    # the plugin only builds arenas for players actually present, so one high cap
+    # fits any turnout (4 → 2 arenas, 12 → 6) without per-session tuning.
+    "3v3":         {"game_type": "0", "game_mode": "1", "maxplayers": "16"},
+    "4v4":         {"game_type": "0", "game_mode": "1", "maxplayers": "16"},
+    "1v1":         {"game_type": "0", "game_mode": "1", "maxplayers": "16"},
     "Arms Race":   {"game_type": "1", "game_mode": "0", "maxplayers": "16"},
     "Demolition":  {"game_type": "1", "game_mode": "1", "maxplayers": "10"},
     "Deathmatch":  {"game_type": "1", "game_mode": "2", "maxplayers": "20"},

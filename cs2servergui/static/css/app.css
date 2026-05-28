@@ -90,7 +90,7 @@ body {
   font-family: var(--font-sans); font-size: 14px;
   font-feature-settings: 'ss01', 'cv11';
   background-image:
-    radial-gradient(ellipse 1200px 900px at 10% -5%,   var(--glow-bg)   0%, transparent 55%),
+    radial-gradient(ellipse 1000px 760px at 0% -8%,    oklch(0.62 0.22 305 / 0.10) 0%, transparent 50%),
     radial-gradient(ellipse 1000px 700px at 100% 105%, var(--glow-bg)   0%, transparent 55%),
     radial-gradient(ellipse 900px 700px at 50% 50%,    var(--glow-bg-2) 0%, transparent 65%);
   background-attachment: fixed;

@@ -504,6 +504,7 @@ def create_flask(core: AppCore) -> Flask:
             "auto_start":            core.auto_start,
             "auto_restart_on_crash": core.auto_restart_on_crash,
             "bot_difficulty":        core.bot_difficulty,
+            "bots_enabled":          core.bots_enabled,
             "max_players_override":  core.max_players_override,
             "admin_pin":             core.admin_pin     if is_local else "***",
             "rcon_password":         core.rcon_password  if is_local else "***",
@@ -529,6 +530,7 @@ def create_flask(core: AppCore) -> Flask:
         if "auto_start"            in d: core.auto_start            = bool(d["auto_start"])
         if "auto_restart_on_crash" in d: core.auto_restart_on_crash = bool(d["auto_restart_on_crash"])
         if "bot_difficulty"        in d: core.bot_difficulty        = str(d["bot_difficulty"])
+        if "bots_enabled"          in d: core.bots_enabled          = bool(d["bots_enabled"])
         if "max_players_override"  in d: core.max_players_override  = str(d["max_players_override"])
 
         # Local-only fields (security-sensitive). The admin PIN protects the whole
