@@ -758,12 +758,20 @@ class AppCore:
         threading.Thread(target=self._poll_rcon_ready, daemon=True).start()
 
     def stop_server(self) -> None:
-        # Flip lifecycle state to "stopped" BEFORE terminating the process.
-        # The crash monitor and the RCON-ready poller both key off running/proc;
-        # if we terminate first and clear the flags afterwards, the monitor sees
-        # a live `running` flag with a dead process and fires a spurious
-        # "crashed" auto-restart, and the poller can race to re-mark a
-        # just-stopped server "ready".
+        # Flip lifecycle state to "stopped" synchronously, then do the actual
+        # (potentially slow) process termination on a background thread.
+        #
+        # Why state-first: the crash monitor and RCON-ready poller key off
+        # running/proc; clearing them up-front stops a spurious "crashed"
+        # auto-restart and the poller re-marking a just-stopped server "ready".
+        #
+        # Why terminate off-thread: killing cs2.exe and waiting for it to exit
+        # can take several seconds — especially when a CS2 game client is running
+        # on the same machine (heavy CPU/GPU load).  Doing that inside the Flask
+        # request thread holds the HTTP response open long enough that the
+        # WebView2/browser fetch() can drop the connection ("Failed to fetch").
+        # Returning immediately keeps the UI responsive; the kill finishes in the
+        # background and on_state_change has already updated the UI.
         with self._lifecycle_lock:
             proc               = self.proc
             was_running        = self.running
@@ -772,46 +780,50 @@ class AppCore:
             self.boot_state    = "offline"
             self.player_count  = 0
             self._uptime_start = None
-
-        if proc:
-            proc.terminate()
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self.log("Server did not exit cleanly — killing process")
-                proc.kill()
-        elif was_running:
-            # Reattached session — no Popen handle.
-            # Ask the server to quit via RCON; fall back to targeted kill if needed.
-            self.log("Stopping reattached server…")
-            try:
-                self.rcon.execute("quit")
-                time.sleep(1)
-            except Exception:
-                pass
-            # Confirm it's gone; if a dedicated cs2.exe is still running, kill it.
-            # IMPORTANT: use WMIC to filter on CommandLine containing "-dedicated" so
-            # we never accidentally kill the user's CS2 game client (same binary name).
-            try:
-                res = subprocess.run(
-                    ["wmic", "process", "where", "name='cs2.exe'",
-                     "get", "ProcessId,CommandLine", "/format:csv"],
-                    capture_output=True, text=True, timeout=5,
-                )
-                for line in res.stdout.splitlines():
-                    if "-dedicated" in line.lower():
-                        parts = line.strip().split(",")
-                        pid = parts[-1].strip()
-                        if pid.isdigit():
-                            subprocess.run(
-                                ["taskkill", "/F", "/PID", pid],
-                                capture_output=True, timeout=5,
-                            )
-            except Exception:
-                pass
-        self.log("Server stopped")
         if self.on_state_change:
             self.on_state_change()
+
+        def _terminate() -> None:
+            if proc:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    self.log("Server did not exit cleanly — killing process")
+                    proc.kill()
+            elif was_running:
+                # Reattached session — no Popen handle.
+                # Ask the server to quit via RCON; fall back to targeted kill if needed.
+                self.log("Stopping reattached server…")
+                try:
+                    self.rcon.execute("quit")
+                    time.sleep(1)
+                except Exception:
+                    pass
+                # Confirm it's gone; if a dedicated cs2.exe is still running, kill it.
+                # IMPORTANT: filter on CommandLine containing "-dedicated" so we never
+                # accidentally kill the user's CS2 game client (same binary name) when
+                # both run on the same machine.
+                try:
+                    res = subprocess.run(
+                        ["wmic", "process", "where", "name='cs2.exe'",
+                         "get", "ProcessId,CommandLine", "/format:csv"],
+                        capture_output=True, text=True, timeout=5,
+                    )
+                    for line in res.stdout.splitlines():
+                        if "-dedicated" in line.lower():
+                            parts = line.strip().split(",")
+                            pid = parts[-1].strip()
+                            if pid.isdigit():
+                                subprocess.run(
+                                    ["taskkill", "/F", "/PID", pid],
+                                    capture_output=True, timeout=5,
+                                )
+                except Exception:
+                    pass
+            self.log("Server stopped")
+
+        threading.Thread(target=_terminate, daemon=True).start()
 
     def probe_existing_server(self) -> None:
         """Detect a CS2 server that was already running when the GUI launched.
