@@ -234,10 +234,12 @@ each with a one-sentence summary. No code, no behavioural changes — reference 
 
 | Symbol | Summary |
 |--------|---------|
-| `AppCore.start_server(map_name, mode, gslt, is_workshop)` | Assembles the CS2 launch command line, sets state to `"booting"`, spawns the process, and starts the boot-state poller. |
+| `AppCore.start_server(map_name, mode, gslt, is_workshop)` | Assembles the CS2 launch command line (adds `-condebug`, and `-disable_workshop_command_filtering` for flagged workshop maps), deploys plugins, spawns the process, starts the boot-state poller. |
 | `AppCore._boot_poller(proc)` | Daemon thread that probes RCON every 2 s after launch; transitions `boot_state` to `"ready"` and fires `on_state_change`. |
-| `AppCore.stop_server()` | Sends `quit` via RCON, waits 5 s, then terminates the process if still running. |
-| `AppCore.change_map(map_name, is_workshop)` | Changes map on a running server via RCON (`changelevel` or `host_workshop_map`); re-execs `retakes.cfg` if mode is Retakes. |
+| `AppCore.stop_server()` | Non-blocking: flips state under the lifecycle lock, then terminates on a daemon thread. |
+| `AppCore.change_map(map_name, mode, is_workshop, caller)` | Changes map via RCON (`changelevel` / `host_workshop_map`); restarts via `_restart_into` when the mode change swaps plugins. |
+| `AppCore.depotdl_download(wid)` | Staged workshop download: `<id>.partial` → per-MB `_dl_progress` → verify (vpk + size) → promote to the live workshop dir. |
+| `AppCore.cmdfilter_effective / scan_cmdfilter / set_cmdfilter_override` | Per-map `-disable_workshop_command_filtering` detection (from Steam description), scan, and manual override. |
 
 #### gameinfo.gi patching & infrastructure checks
 

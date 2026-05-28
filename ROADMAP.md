@@ -12,14 +12,18 @@
 Core features are stable and the UI has been comprehensively redesigned (theming,
 keybinds, settings, workshop UX). Recent foundational work:
 
-- **Retakes migrated to MatchZy** — the abandoned CS2Retake plugin was ripped out and
-  replaced with MatchZy's built-in `matchzy_retakes_mode 1`.
+- **Retakes rebuilt on B3none cs2-retakes + RetakesAllocator** — the abandoned CS2Retake
+  plugin was ripped out; an interim "MatchZy retakes" plan was dropped (MatchZy has no
+  retakes feature).
 - **Plugin bundles normalised** — every bundle now mirrors the `csgo/` layout, reducing
   all copy rules to a uniform pattern.
 - **Codebase indexed** — full structural map captured in [INGEST.md](INGEST.md).
+- **Live-fire fixes** — Jailbreak native-crash fix, Warcraft Barbarian model precacher,
+  workshop download progress+verify, and command-filter automation (see
+  [CHANGELOG.md](CHANGELOG.md) → Unreleased and [TODO.md](TODO.md) → Pending / In-Flight).
 
-Known gap: documentation (README plugin table) is now stale and several modes have not
-been verified end-to-end on a live server.
+Known gap: a large batch of fixes is **uncommitted and partly unverified in-game**, and
+several modes have not been verified end-to-end on a live server.
 
 ---
 
@@ -49,13 +53,13 @@ The road to 1.0 is five phases. They are roughly sequential but Phase 1 and 2 ca
 ### Phase 1 — Stabilise the Foundation
 **Goal:** the code and the docs tell the same true story.
 
-- Reconcile docs with this session's changes: README plugin table still claims Retakes
-  uses "CS2Retake + RetakesAllocator" — it's MatchZy now.
+- Keep docs in sync with the code: README/CHANGELOG/TODO now describe **B3none** Retakes
+  (done), the Jailbreak fix, the Warcraft `ModelPrecacher`, and the workshop changes.
 - Audit the remaining `_PLUGIN_*` tables in `core.py` for leftover references to removed
   plugins or paths.
 - Confirm `MODE_SETTINGS` rulesets are correct per mode (Retakes already fixed to
-  competitive `game_mode 1` this session).
-- Write a CHANGELOG entry for the retakes migration + bundle restructure.
+  competitive `game_mode 1`).
+- Commit the in-flight batch once play-tested (see TODO → Pending / In-Flight).
 
 **Exit criteria:** README, CHANGELOG, and code agree; no dead plugin references remain.
 
@@ -126,6 +130,13 @@ Candidate ideas to revisit only after 1.0 ships. None are commitments.
 - Server metrics / lightweight dashboard (player count over time, uptime history).
 - Multi-server management from one panel.
 - Optional secure tunnel for true off-LAN remote admin (carefully — see BIBLE.md §5.7).
+- **Custom Warcraft menu (recompile).** The in-game `!class`/`!skills`/`!shop` menus are
+  rendered by the plugin's **own** menu code, which **enlarges the highlighted item's font** —
+  opening a gap before its description and clipping tall pages. This is **compiled in**, not
+  reachable via `en.json` or CS2MenuManager config (those menus largely don't route through
+  CS2MenuManager). The only fix is a recompile; the smallest version is making the highlighted
+  item the same font size as the rest (the installed plugin is NightFuryPrime's fork v4.1.1).
+  Deferred by choice — accepted as-is for now. Full detail + checklist in TODO → Backlog.
 
 ---
 

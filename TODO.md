@@ -23,11 +23,56 @@
 
 ---
 
+## Pending / In-Flight (working memory)
+*A running record of work done across recent sessions but **not yet committed**, things
+**built but not verified in-game**, and loose ends we deliberately deferred. Clear items
+out of here as they're committed/confirmed. Full prose in [CHANGELOG.md](CHANGELOG.md) →
+Unreleased.*
+
+### Built & confirmed working (uncommitted)
+- [x] **Jailbreak crash fixed** — dropped CS2Fixes (`zombie`) from the Jailbreak mode; native
+  AV from CS2Fixes + CSS Jailbreak conflict. *Confirmed in-game.*
+- [x] **Warcraft Barbarian models fixed** — new bundled `ModelPrecacher` CSS plugin precaches
+  `tm_phoenix_heavy` / `ctm_heavy` (source in `_plugins_src/ModelPrecacher/`). Loose-file
+  approach proven insufficient and reverted. *Confirmed in-game.*
+- [x] **Warcraft `!buy` fix** — removed the `buy` shop-trigger alias that shadowed native `buy`.
+
+### Built but NOT yet verified in-game
+- [~] **Warcraft menu** — shipped a CS2MenuManager `config.toml` (WasdMenu, purple, 4:3-safe
+  position). **Finding:** the `!class`/`!skills`/`!shop` menus are rendered by the plugin's own
+  compiled menu (not CS2MenuManager), so most of this config has limited effect on them. The
+  remaining vertical clip (highlighted item's font expands → gap before description) is
+  **compiled-in and can't be fixed by config** — deferred to Backlog (recompile). The
+  `config.toml` is harmless; left in place for any menu that does route through CS2MenuManager.
+- [~] **Workshop download tracker + verify** — staged `<id>.partial` → verify (vpk + ≥99% size)
+  → promote; per-MB `dl_progress`; determinate bar. Needs a real download to exercise end-to-end.
+- [~] **Workshop command-filter automation** — auto-detect from Steam description + per-map
+  override chip + Scan button + launch flag. Needs the user to click **Scan** (or rebuild) to
+  populate flags. Scan already found **2** maps that need it: `3699317461` (VERSUS),
+  `3728657716` (Lake Flying Scoutsman).
+- [~] **Retakes = B3none** (spawn comma-fix, bot fill, scramble=3), **Zombie ZM fix**,
+  **mode-switch hardening**, **cheat sheet + empty states**, **theme darkening** — all landed,
+  awaiting a play-test pass.
+
+### Loose ends / deferred
+- [ ] **Commit the batch** — everything above is uncommitted; user is holding until tested.
+- [ ] **`-condebug` log growth** — `csgo/console.log` now grows across sessions; consider
+  trimming/rotating, or make it a toggle.
+- [ ] **3 broken 0-byte workshop folders** — `233903603` (Awp India), `3326291211`
+  (zm_dust2_rebuild), `3604289538` (AWP India). Re-pull (now self-heals via staged download) or delete.
+- [ ] **WebView2 accelerator keys** & **palette footer hint for remote** — see Phase 5.1 below.
+- [ ] **Jailbreak workshop tag filter** — offered to loosen it (jb maps are tagged Classic/Map,
+  not jailbreak/jb) by adding `classic`; not yet done.
+- [ ] **`.plugin-downloads/vrf/`** — Source2Viewer-CLI kept for future VPK extraction (gitignored).
+
+---
+
 ## Phase 0 — Groundwork ✅
 *Completed this session. Recorded here for traceability.*
 
-- [x] Remove all traces of CS2Retake plugin (DLLs, spawn JSONs, SQLite, configs)
-- [x] Replace Retakes with MatchZy `matchzy_retakes_mode 1` via `retakes.cfg`
+- [x] Remove all traces of the old CS2Retake plugin (DLLs, spawn JSONs, SQLite, configs)
+- [x] Retakes runs on **B3none cs2-retakes + RetakesAllocator** — note: an interim plan to use
+  "MatchZy retakes mode" was dropped (MatchZy has no retakes feature)
 - [x] Fix `MODE_SETTINGS["Retakes"]` ruleset to competitive (`game_mode 1`)
 - [x] Normalise all plugin bundles to mirror the `csgo/` layout
 - [x] Simplify `_PLUGIN_COPY_RULES` to the uniform `("addons","addons")` pattern
@@ -42,7 +87,7 @@
 **Exit:** README, CHANGELOG, and code agree; no dead plugin references remain.
 
 ### 1.1 Documentation reconciliation
-- [x] Update README plugin table — Retakes is **MatchZy**, not "CS2Retake + RetakesAllocator"
+- [x] Update README plugin table — Retakes is **B3none cs2-retakes + RetakesAllocator**
 - [x] Verify every other row of the README plugin table against `_MODE_PLUGIN_NAMES` — note: added missing Arenas (1v1/3v3/4v4) row; corrected Deathmatch & Jailbreak to show CS2Fixes + CSS plugin
 - [x] Add CHANGELOG entry: retakes→MatchZy migration + bundle restructure
 - [ ] Confirm README feature list matches actual `web.py` routes (no phantom features)
@@ -83,10 +128,10 @@ Vanilla modes (no managed plugins; verify `gameinfo.gi` is *unpatched*):
 
 Plugin-backed modes (verify deploy, verify markers, verify defining behaviour):
 - [ ] Deathmatch — CS2Fixes (MetaMod); spawns work on the 4 supported maps
-- [ ] Retakes — MatchZy; `matchzy_retakes_mode 1` active, retake rounds play correctly
-- [ ] Jailbreak — CS2Fixes (MetaMod); warden/prisoner ruleset
+- [ ] Retakes — B3none RetakesPlugin + RetakesAllocator; retake rounds form (bot fill), scramble after 3 T wins
+- [ ] Jailbreak — CSS Jailbreak plugin **only** (CS2Fixes removed — caused native crash); warden/prisoner ruleset
 - [ ] Practice — MatchZy; practice/match flow
-- [ ] Warcraft — WarcraftPlugin; classes, XP, items, SQLite (`e_sqlite3.dll`) loads
+- [ ] Warcraft — WarcraftPlugin + ModelPrecacher; classes/XP/items, Barbarian models render, menus readable on 4:3 & 16:9
 - [ ] Zombie Escape — ZombieMod + MultiAddonManager + ZombieReborn; `zm_enable 1` wins over zombie base
 
 ### 2.3 Plugin lifecycle correctness
@@ -95,7 +140,8 @@ Plugin-backed modes (verify deploy, verify markers, verify defining behaviour):
 - [ ] CSS modes hot-reload via `css_plugins reload` (no restart)
 - [ ] MetaMod modes correctly report "restart required"
 - [ ] Mode-switch cleanup removes the *previous* mode's files (manifest-driven)
-- [ ] `+exec retakes` at launch and RCON `exec retakes` on live switch both apply
+- [ ] Plugin-swapping mode switches restart cleanly via `_restart_into` (stop → wait-for-exit → start)
+- [ ] B3none retakes `cfg/cs2-retakes/retakes.cfg` is exec'd by RetakesPlugin (bot fill applies)
 
 ---
 
@@ -197,3 +243,23 @@ Plugin-backed modes (verify deploy, verify markers, verify defining behaviour):
 - [ ] Multi-server management
 - [ ] Re-evaluate adding back modes whose upstream plugins regain active maintenance
 - [ ] Optional secure off-LAN remote tunnel (carefully)
+- [ ] **Custom Warcraft menu — recompile the plugin** *(config can't fix this; deferred by choice)*
+  - **Root cause (confirmed 2026-05-28):** the `!class`/`!skills`/`!shop` menus are rendered by
+    the plugin's **own** menu code (the installed DLL contains both CS2MenuManager *and* a custom
+    menu — `OptionDisplay`/`SubOptionDisplay`/`FontSizes`/`OpenMainMenu`). The custom menu
+    **enlarges the highlighted item's font**, which opens a gap before its description and makes
+    the page taller → the last item's description clips. This is **compiled in** — not reachable
+    via `en.json` (no item font-size markup) or CS2MenuManager `config.toml` (color/position only,
+    and these menus largely don't even route through CS2MenuManager). So our config tuning had
+    limited effect on these specific menus.
+  - **Smallest fix (preferred):** fork the plugin and make the highlighted item use the **same
+    font size** as the rest (and/or tighten name↔description spacing). Tiny change, no library swap.
+  - Installed plugin is **NightFuryPrime's fork v4.1.1** (added CS2MenuManager on Wngui's base) —
+    build from *that* fork's source to match the DLL.
+  - [ ] Confirm NightFuryPrime/CS2-Warcraft-Plugin source is public + builds against CSS 1.0.368
+  - [ ] Change the highlighted-item font size to match unselected; verify 5 items + descriptions fit
+  - [ ] (Optional, bigger) swap the menu to [CS2ScreenMenuAPI](https://github.com/T3Marius/CS2ScreenMenuAPI)
+        for `Size`/`Spacing`/`Background` control — de-risk flicker vs the XP HUD first
+  - [ ] Bundle the forked DLL + record the patch so upstream updates can be re-applied
+  - Note: the CS2MenuManager `config.toml` we shipped (WasdMenu, purple, 4:3-safe position) is
+    harmless and may still affect any menu that *does* route through CS2MenuManager — leave it.
