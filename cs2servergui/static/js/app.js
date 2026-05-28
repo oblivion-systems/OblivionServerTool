@@ -13,6 +13,14 @@ function h(tag, cls, content = '') {
   if (content) e.innerHTML = content;
   return e;
 }
+// Escape untrusted text before it enters innerHTML or a double-quoted attribute.
+// Player names, ban entries, workshop titles, preset names, etc. are attacker-
+// controlled (a player picks their own in-game name).
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ));
+}
 function icon(d) {
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
@@ -314,6 +322,9 @@ function applyState(s) {
 
   // Re-render status page if it's active
   if (currentPage === 'status') renderStatusState();
+
+  // Update Connect popover with latest state
+  if (window.ConnectPopover) ConnectPopover.update(s);
 }
 
 async function pollState() {
@@ -387,13 +398,21 @@ function appendLog(line) {
     _dlStatus = { active: false, text: '' };
   }
   _updateDlStatusUI();
+  if (window.LogDrawer) LogDrawer.append(line);
 }
 
+let _sseRetries = 0;
+const _SSE_MAX_RETRIES = 12;   // ~1 min of retries before giving up
 function startSSE() {
   if (logEs) logEs.close();
   logEs = new EventSource('/api/log/stream');
-  logEs.onmessage = e => appendLog(e.data);
-  logEs.onerror   = () => { logEs.close(); setTimeout(startSSE, 5000); };
+  logEs.onmessage = e => { _sseRetries = 0; appendLog(e.data); };   // reset backoff on data
+  logEs.onerror   = () => {
+    logEs.close();
+    // Cap reconnects so an expired session doesn't spin forever; a 401 on any
+    // API call will already have reloaded the page to the login screen.
+    if (_sseRetries++ < _SSE_MAX_RETRIES) setTimeout(startSSE, 5000);
+  };
 }
 
 async function loadLogHistory() {
@@ -403,277 +422,215 @@ async function loadLogHistory() {
   } catch (_) {}
 }
 
-/* ══════════════════════════════════════════════════════════════ STATUS PAGE */
+/* ══════════════════════════════════════════════════════════════ STATUS PAGE v2 */
 
 function renderStatusState() {
   const s = state.server;
-  const circle = el('status-circle');
-  const ring   = el('status-ring');
-  const lbl    = el('status-label');
-  const upt    = el('status-uptime');
-  if (!circle) return;
-
   const cls = s.boot_state === 'ready'   ? 'online'
             : s.boot_state === 'booting' ? 'booting'
             : 'offline';
-  circle.className = `status-circle ${cls}`;
-  if (ring) ring.className = `status-glow-ring ${cls}`;
-  lbl.className    = `status-label ${cls}`;
-  lbl.textContent  = cls === 'online' ? 'Online'
-                   : cls === 'booting' ? 'Booting…'
-                   : 'Offline';
-  upt.textContent  = s.boot_state === 'ready' ? fmtUptime(state._localUptime) : '';
+  const isOnline = cls === 'online';
+
+  // ── Server panel ─────────────────────────────────────────────────────────
+  const panel = el('server-panel');
+  if (!panel) return;
+  panel.className = `server-panel ${cls}`;
+
+  const stateText = el('sp-state');
+  if (stateText) stateText.textContent =
+      cls === 'online'  ? 'Running'
+    : cls === 'booting' ? 'Booting…'
+    :                     'Offline';
+
+  const setMeta = (id, val, accent = false) => {
+    const e = el(id);
+    if (!e) return;
+    e.textContent = val;
+    e.classList.toggle('accent', accent && isOnline);
+    e.classList.toggle('dim', !isOnline);
+  };
+  setMeta('sp-uptime',  isOnline ? fmtUptime(state._localUptime) : '—', true);
+  setMeta('sp-players', isOnline ? `${s.player_count || 0} / ${s.max_players || 10}` : '—');
+  setMeta('sp-tick',    isOnline ? '64' : '—');
 
   // Install-needed banner
-  const existingBanner = el('install-banner');
+  const existing = el('install-banner');
   const showBanner = s.server_dir && !s.is_installed && !s.running;
-  if (showBanner && !existingBanner) {
+  if (showBanner && !existing) {
     const banner = h('div', 'install-banner', `
       ${icon('<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>')}
       CS2 is not installed in the configured directory.
       <a href="#config" class="install-banner-link">Go to Config → Install</a>`);
     banner.id = 'install-banner';
-    const hero = document.querySelector('.status-hero');
-    if (hero) hero.parentNode.insertBefore(banner, hero);
-  } else if (!showBanner && existingBanner) {
-    existingBanner.remove();
+    panel.parentNode.insertBefore(banner, panel);
+  } else if (!showBanner && existing) {
+    existing.remove();
   }
 
-  // Start / Stop / Restart buttons
-  const startBtn   = el('status-start-btn');
-  const stopBtn    = el('status-stop-btn');
-  const restartBtn = el('status-restart-btn');
+  // Start / Stop / Restart enabled states
+  const startBtn   = el('sp-start-btn');
+  const stopBtn    = el('sp-stop-btn');
+  const restartBtn = el('sp-restart-btn');
   if (startBtn) {
-    const cantStart = s.running || !s.is_installed;
-    startBtn.disabled   = cantStart;
-    startBtn.title      = !s.is_installed ? 'CS2 not installed — go to Config → Install' : '';
-    stopBtn.disabled    = !s.running;
-    if (restartBtn) restartBtn.disabled = !s.running;
+    startBtn.disabled = s.running || !s.is_installed;
+    startBtn.title    = !s.is_installed ? 'CS2 not installed — go to Config → Install' : '';
+    startBtn.style.display = s.running ? 'none' : '';
+  }
+  if (stopBtn) {
+    stopBtn.disabled = !s.running;
+    stopBtn.style.display = s.running ? '' : 'none';
+  }
+  if (restartBtn) {
+    restartBtn.disabled = !s.running;
+    restartBtn.style.display = s.running ? '' : 'none';
   }
 
-  // Action tiles enabled only when running
-  document.querySelectorAll('.action-tile').forEach(t => {
-    t.style.opacity = s.running ? '1' : '.4';
-    t.style.pointerEvents = s.running ? '' : 'none';
-  });
-
-  // FF tile
-  const ffTile = el('ff-tile');
-  if (ffTile) {
-    ffTile.classList.toggle('accent', s.ff_enabled);
-    ffTile.title = s.ff_enabled ? 'Friendly Fire ON — click to disable' : 'Friendly Fire OFF — click to enable';
-  }
-
-  // Map ghost + live info
-  const ghostImg  = el('status-map-ghost-img');
-  const liveInfo  = el('live-map-info');
-  const liveMapEl = el('live-map-name');
-  const livePcEl  = el('live-player-count');
-  if (ghostImg && liveInfo) {
-    const isReady = s.boot_state === 'ready';
-    const mapKey  = isReady && s.map ? s.map : '';
-    // Only swap the image when the map actually changes (avoids reload flicker)
-    if ((ghostImg.dataset.mapKey || '') !== mapKey) {
-      ghostImg.dataset.mapKey = mapKey;
-      ghostImg.classList.remove('loaded');
-      if (mapKey) {
-        ghostImg.onload  = () => ghostImg.classList.add('loaded');
-        ghostImg.onerror = () => { /* leave faded-out */ };
-        ghostImg.src = `/api/maps/thumb/${mapKey}`;
-      } else {
-        ghostImg.src = '';
+  // ── Match panel ──────────────────────────────────────────────────────────
+  const matchPanel = el('match-panel');
+  if (matchPanel) {
+    if (!isOnline) {
+      matchPanel.className = 'match-panel empty';
+      matchPanel.innerHTML = 'Server is offline — start the server to see live match data.';
+    } else {
+      // Rebuild if previously in empty state
+      if (matchPanel.classList.contains('empty')) {
+        matchPanel.className = 'match-panel';
+        matchPanel.innerHTML = _matchPanelTemplate();
+        _wireMatchControls();
       }
+
+      const mapKey = s.map || '';
+      const thumbImg = el('mp-thumb-img');
+      const thumbEmpty = el('mp-thumb-empty');
+      if (thumbImg && (thumbImg.dataset.mapKey || '') !== mapKey) {
+        thumbImg.dataset.mapKey = mapKey;
+        if (mapKey) {
+          thumbImg.style.display = '';
+          thumbEmpty.style.display = 'none';
+          thumbImg.src = `/api/maps/thumb/${mapKey}`;
+          thumbImg.onerror = () => {
+            thumbImg.style.display = 'none';
+            thumbEmpty.style.display = 'flex';
+          };
+        } else {
+          thumbImg.style.display = 'none';
+          thumbEmpty.style.display = 'flex';
+        }
+      }
+
+      const tag = el('mp-tag');
+      if (tag) tag.textContent = mapKey.startsWith('cs_') ? 'CS' : 'DE';
+
+      const mapName = el('mp-map-name');
+      if (mapName) mapName.textContent = mapKey || '—';
+
+      const mapMode = el('mp-map-mode');
+      if (mapMode) mapMode.textContent =
+        `${s.mode || 'competitive'} · ${s.player_count || 0} / ${s.max_players || 10}`;
+
+      const round = el('mp-round');
+      if (round) round.textContent =
+        (s.round_total !== undefined && s.round_total !== null)
+          ? `Round ${String(s.round_current || s.round_total || 0).padStart(2, '0')}`
+          : '';
+
+      const playersMeta = el('mp-players-meta');
+      if (playersMeta) playersMeta.textContent = `${s.player_count || 0} of ${s.max_players || 10} players`;
+
+      const tScore  = el('mp-t-score');
+      const ctScore = el('mp-ct-score');
+      if (tScore)  tScore.textContent  = String((s.t_score  ?? 0)).padStart(2, '0');
+      if (ctScore) ctScore.textContent = String((s.ct_score ?? 0)).padStart(2, '0');
     }
-    // Text overlay
-    if (liveMapEl)  liveMapEl.textContent  = mapKey;
-    if (livePcEl) {
-      const pc = s.player_count || 0;
-      livePcEl.textContent = isReady ? `${pc} player${pc !== 1 ? 's' : ''}` : '';
-    }
-    liveInfo.classList.toggle('visible', isReady);
   }
+
+  // ── Settings strip ───────────────────────────────────────────────────────
+  const ffToggle = el('ss-ff-toggle');
+  const ffState  = el('ss-ff-state');
+  if (ffToggle) {
+    ffToggle.classList.toggle('on', !!s.ff_enabled);
+    ffToggle.title = s.ff_enabled ? 'Friendly Fire ON — click to disable' : 'Friendly Fire OFF — click to enable';
+  }
+  if (ffState) {
+    ffState.textContent = s.ff_enabled ? 'On' : 'Off';
+    ffState.classList.toggle('on', !!s.ff_enabled);
+  }
+  const ssMode = el('ss-mode-name');
+  if (ssMode) ssMode.textContent = s.mode || 'competitive';
+
+  // ── Match controls disabled when offline ─────────────────────────────────
+  document.querySelectorAll('.match-panel .mc').forEach(mc => {
+    mc.disabled = !isOnline;
+  });
 }
 
-function buildStatusPage() {
-  const s = state.server;
-  const root = el('content');
-
-  // ── Server control + map/mode ──────────────────────────────────────────
-  const hero = h('div', 'status-hero');
-
-  // Left: status indicator
-  const indCard = h('div', 'status-indicator-card');
-  indCard.innerHTML = `
-    <div class="map-ghost" id="status-map-ghost">
-      <img id="status-map-ghost-img" src="" alt="" draggable="false">
+function _matchPanelTemplate() {
+  return `
+    <div class="mp-thumb-side">
+      <span class="mp-bracket"></span>
+      <span class="mp-tag" id="mp-tag">DE</span>
+      <img id="mp-thumb-img" src="" alt="" draggable="false">
+      <div class="mp-thumb-empty" id="mp-thumb-empty">no map loaded</div>
+      <div class="mp-map-mode" id="mp-map-mode">—</div>
+      <div class="mp-map-name" id="mp-map-name">—</div>
     </div>
-    <div class="status-glow-ring offline" id="status-ring">
-      <div class="status-circle offline" id="status-circle">
-        ${icon('<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>')}
+    <div class="mp-body">
+      <div class="mp-head">
+        <span class="mp-live-tag"><span class="mp-live-dot"></span>Live</span>
+        <span class="mp-round" id="mp-round"></span>
+        <span class="mp-players-meta" id="mp-players-meta"></span>
+      </div>
+      <div class="mp-score-line">
+        <div class="mp-side t">
+          <span class="lbl">T side</span>
+          <span class="num" id="mp-t-score">00</span>
+        </div>
+        <span class="vs">— VS —</span>
+        <div class="mp-side ct">
+          <span class="lbl">CT side</span>
+          <span class="num" id="mp-ct-score">00</span>
+        </div>
+      </div>
+      <div class="mp-controls">
+        <button class="mc" id="mc-warmup">
+          ${icon('<polygon points="5 3 19 12 5 21 5 3"/>')}
+          End warmup<span class="mc-kbd">F6</span>
+        </button>
+        <button class="mc" id="mc-restart">
+          ${icon('<polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.25"/>')}
+          Restart round<span class="mc-kbd">⌃R</span>
+        </button>
+        <button class="mc" id="mc-pause">
+          ${icon('<rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>')}
+          Pause<span class="mc-kbd">F7</span>
+        </button>
+        <button class="mc" id="mc-broadcast">
+          ${icon('<path d="M3 11l18-5v12L3 13v-2z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/>')}
+          Broadcast<span class="mc-kbd">B</span>
+        </button>
       </div>
     </div>
-    <div class="status-label offline" id="status-label">Offline</div>
-    <div class="status-uptime" id="status-uptime"></div>
-    <div class="status-controls">
-      <button class="btn btn-green flex-1" id="status-start-btn">
-        ${icon('<polygon points="5 3 19 12 5 21 5 3"/>')} Start
-      </button>
-      <button class="btn btn-blue btn-icon" id="status-restart-btn" title="Quick Restart — same map &amp; mode">
-        ${icon('<polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.25"/>')}
-      </button>
-      <button class="btn btn-neutral flex-1" id="status-stop-btn">
-        ${icon('<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>')} Stop
-      </button>
-    </div>
-    <div class="live-map-info" id="live-map-info">
-      <span class="live-map-name" id="live-map-name"></span>
-      <span class="live-player-count" id="live-player-count"></span>
-    </div>`;
-  hero.appendChild(indCard);
+  `;
+}
 
-  // Right: map + mode selectors
-  const mapCard = h('div', 'map-mode-card');
-  const modeOpts = state.modes.map(m =>
-    `<option value="${m}" ${m === s.mode ? 'selected' : ''}>${m}</option>`
-  ).join('');
-
-  mapCard.innerHTML = `
-    <div class="card-title">Map & Mode</div>
-    <div class="field">
-      <label>Game Mode</label>
-      <select class="select" id="mode-select">${modeOpts}</select>
-    </div>
-    <div class="field">
-      <label>Official Map</label>
-      <select class="select" id="map-select"></select>
-    </div>
-    <div class="field">
-      <label>Workshop Map</label>
-      <select class="select" id="ws-map-select"></select>
-    </div>
-    <div style="display:flex;gap:8px;margin-top:4px">
-      <button class="btn btn-accent flex-1" id="map-change-btn">
-        ${icon('<shuffle/><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/>')}
-        Change Map
-      </button>
-    </div>`;
-  hero.appendChild(mapCard);
-  root.appendChild(hero);
-
-  // ── Quick actions ──────────────────────────────────────────────────────
-  const actGrid = h('div', 'actions-grid');
-  const actions = [
-    { id: 'act-broadcast', cls: 'accent', svg: '<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.63 3.42 2 2 0 0 1 3.6 1h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>', label: 'Broadcast' },
-    { id: 'ff-tile',       cls: '',       svg: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>', label: 'Friendly Fire' },
-    { id: 'act-restart',   cls: 'blue',   svg: '<polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.25"/>', label: 'Restart Round' },
-    { id: 'act-warmup',    cls: 'green',  svg: '<polygon points="5 3 19 12 5 21 5 3"/>', label: 'End Warmup' },
-    { id: 'act-pause',     cls: 'yellow', svg: '<rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>', label: 'Pause' },
-    { id: 'act-unpause',   cls: '',       svg: '<polygon points="5 3 19 12 5 21 5 3"/>', label: 'Unpause' },
-  ];
-  actions.forEach(a => {
-    const tile = h('div', `action-tile ${a.cls}`, `${icon(a.svg)}<span>${a.label}</span>`);
-    tile.id = a.id;
-    actGrid.appendChild(tile);
-  });
-  root.appendChild(actGrid);
-
-  // ── Bot row ────────────────────────────────────────────────────────────
-  const botRow = h('div', 'bots-row');
-  botRow.innerHTML = `
-    <span class="bots-label">Bots</span>
-    <button class="btn btn-ghost btn-sm" id="bot-add1">+1 Bot</button>
-    <button class="btn btn-ghost btn-sm" id="bot-add5">+5 Bots</button>
-    <button class="btn btn-red btn-sm"   id="bot-kick">Kick All</button>
-    <div style="margin-left:auto">
-      <select class="select" id="bot-diff" style="font-size:.78rem;padding:5px 28px 5px 8px">
-        ${['Easy','Normal','Hard','Expert'].map(d =>
-          `<option ${d === (s.bot_difficulty||'Normal') ? 'selected' : ''}>${d}</option>`
-        ).join('')}
-      </select>
-    </div>`;
-  root.appendChild(botRow);
-
-  // ── Log panel ──────────────────────────────────────────────────────────
-  const logPanel = h('div', 'log-panel');
-  logPanel.innerHTML = `
-    <div class="log-header">
-      <span class="log-title">Live Log</span>
-      <button class="btn btn-ghost btn-sm" id="log-copy-btn">Copy Log</button>
-    </div>
-    <div class="log-body" id="log-body"></div>`;
-  root.appendChild(logPanel);
-
-  // Populate log
-  const lb = el('log-body');
-  logLines.forEach(line => {
-    const d = document.createElement('div');
-    d.className = 'log-line'; d.textContent = line;
-    lb.appendChild(d);
-  });
-  lb.scrollTop = lb.scrollHeight;
-
-  // Copy log to clipboard
-  el('log-copy-btn').addEventListener('click', () => {
-    navigator.clipboard.writeText(logLines.join('\n')).then(() => {
-      const btn = el('log-copy-btn');
-      btn.textContent = 'Copied!';
-      setTimeout(() => { btn.textContent = 'Copy Log'; }, 2000);
-    });
-  });
-
-  // Populate map selectors
-  populateModeOfficialMaps(el('mode-select').value);
-  populateModeWorkshopMaps(el('mode-select').value);
-
-  // Apply current state
-  renderStatusState();
-
-  // ── Wire up events ─────────────────────────────────────────────────────
-  el('mode-select').addEventListener('change', e => {
-    populateModeOfficialMaps(e.target.value);
-    populateModeWorkshopMaps(e.target.value);
-  });
-
-  el('status-start-btn').addEventListener('click', async () => {
-    const wsId   = el('ws-map-select').value.trim();
-    const mapSel = el('map-select').value;
-    const mode   = el('mode-select').value;
-    const map    = wsId || mapSel;
-    const ws     = !!wsId;
-    try {
-      await api.start(map, mode, ws);
-      toast('Server starting…', 'var(--green)');
-    } catch (e) { toast(e.message, 'var(--red)'); }
-  });
-
-  el('status-restart-btn').addEventListener('click', doQuickRestart);
-
-  el('status-stop-btn').addEventListener('click', async () => {
-    const doStop = async () => {
-      try { await api.stop(); toast('Server stopping…'); }
-      catch (e) { toast(e.message, 'var(--red)'); }
-    };
-    if (appSettings.confirmStop) {
-      modal('Stop Server', '<p style="color:var(--sub);font-size:.9rem">Are you sure you want to stop the server?</p>',
-        doStop, 'Stop');
-    } else {
-      doStop();
-    }
-  });
-
-  el('map-change-btn').addEventListener('click', async () => {
-    const wsId = el('ws-map-select').value.trim();
-    const map  = wsId || el('map-select').value;
-    const mode = el('mode-select').value;
-    const ws   = !!wsId;
-    try {
-      await api.map(map, mode, ws);
-      toast(`Changing to ${map}…`);
-    } catch (e) { toast(e.message, 'var(--red)'); }
-  });
-
-  el('act-broadcast').addEventListener('click', () => {
-    const ov = modal(
+function _wireMatchControls() {
+  const wrap = (fn, okMsg) => async () => {
+    try { await fn(); if (okMsg) toast(okMsg); }
+    catch (e) { toast(e.message, 'var(--bad)'); }
+  };
+  const wbtn = (id, handler) => {
+    const b = el(id);
+    if (b) b.addEventListener('click', handler);
+  };
+  wbtn('mc-warmup',  wrap(() => api.endWarmup(),   'Warmup ended'));
+  wbtn('mc-restart', wrap(() => api.restartRound(),'Round restarted'));
+  wbtn('mc-pause',   wrap(async () => {
+    // toggle pause / unpause based on state we have
+    if (state.server.paused) { await api.unpause(); toast('Match unpaused'); }
+    else                     { await api.pause();   toast('Match paused');   }
+  }));
+  wbtn('mc-broadcast', () => {
+    modal(
       'Broadcast Message',
       '<div class="field"><label>Message to all players</label>'
       + '<input class="input" id="broadcast-msg" placeholder="Server message…"></div>',
@@ -681,54 +638,203 @@ function buildStatusPage() {
         const msg = document.getElementById('broadcast-msg').value.trim();
         if (!msg) return;
         try { await api.broadcast(msg); toast('Message sent'); }
-        catch (e) { toast(e.message, 'var(--red)'); }
+        catch (e) { toast(e.message, 'var(--bad)'); }
       },
       'Send'
     );
     setTimeout(() => document.getElementById('broadcast-msg')?.focus(), 50);
   });
+}
 
-  el('ff-tile').addEventListener('click', async () => {
+function buildStatusPage() {
+  const s = state.server;
+  const root = el('content');
+
+  // ── Server panel (process state) ─────────────────────────────────────────
+  const sp = h('div', 'server-panel offline');
+  sp.id = 'server-panel';
+  sp.innerHTML = `
+    <div class="sp-pulse-wrap">
+      <span class="sp-pulse"></span>
+      <span class="sp-state" id="sp-state">Offline</span>
+    </div>
+    <div class="sp-meta">
+      <div class="sp-m"><div class="k">Uptime</div><div class="v" id="sp-uptime">—</div></div>
+      <div class="sp-m"><div class="k">Players</div><div class="v" id="sp-players">—</div></div>
+      <div class="sp-m"><div class="k">Tick</div><div class="v" id="sp-tick">—</div></div>
+    </div>
+    <div class="sp-controls">
+      <button class="btn btn-green" id="sp-start-btn">
+        ${icon('<polygon points="5 3 19 12 5 21 5 3"/>')} Start
+      </button>
+      <button class="btn" id="sp-restart-btn" title="Quick restart — same map &amp; mode">
+        ${icon('<polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.25"/>')} Restart
+      </button>
+      <button class="btn btn-red" id="sp-stop-btn">
+        ${icon('<rect x="5" y="5" width="14" height="14"/>')} Stop
+      </button>
+    </div>
+  `;
+  root.appendChild(sp);
+
+  // ── Match panel (in-game state) ──────────────────────────────────────────
+  const mp = h('div', 'match-panel empty');
+  mp.id = 'match-panel';
+  mp.innerHTML = 'Server is offline — start the server to see live match data.';
+  root.appendChild(mp);
+
+  // ── Settings strip (FF, bots, mode) ──────────────────────────────────────
+  const strip = h('div', 'settings-strip');
+  strip.innerHTML = `
+    <div class="ss">
+      <span class="ss-lbl">Friendly Fire<span class="desc">mp_friendlyfire</span></span>
+      <span class="mini-toggle" id="ss-ff-toggle" title="Click to toggle"></span>
+      <span class="mini-toggle-state" id="ss-ff-state">Off</span>
+    </div>
+    <div class="ss">
+      <span class="ss-lbl">Bots<span class="desc">add or kick bots</span></span>
+      <div class="bot-count">
+        <button class="a" id="ss-bot-add1" title="+1 bot">+1</button>
+        <button class="a" id="ss-bot-add5" title="+5 bots">+5</button>
+        <button class="a danger" id="ss-bot-kick" title="Kick all bots">×</button>
+      </div>
+      <select class="select bot-diff-select" id="ss-bot-diff">
+        ${['Easy','Normal','Hard','Expert'].map(d =>
+          `<option ${d === (s.bot_difficulty||'Normal') ? 'selected' : ''}>${d}</option>`
+        ).join('')}
+      </select>
+    </div>
+    <div class="ss">
+      <span class="ss-lbl">Mode<span class="desc">game mode</span></span>
+      <span class="ss-mode-name" id="ss-mode-name">${s.mode || 'competitive'}</span>
+      <button class="btn btn-sm" id="ss-change-btn" style="margin-left: auto;">
+        ${icon('<polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/>')}
+        Change…
+      </button>
+    </div>
+  `;
+  root.appendChild(strip);
+
+  // ── Map / mode picker card (collapsed below the strip) ───────────────────
+  const mapCard = h('div', 'map-mode-card');
+  mapCard.id = 'map-mode-card';
+  mapCard.style.marginBottom = '14px';
+  mapCard.innerHTML = `
+    <div class="card-title">Map &amp; Mode</div>
+    <div class="grid-2">
+      <div class="field">
+        <label>Game Mode</label>
+        <select class="select" id="mode-select"></select>
+        <div id="mode-hint" class="mode-hint hidden"></div>
+      </div>
+      <div class="field">
+        <label>Official Map</label>
+        <select class="select" id="map-select"></select>
+      </div>
+    </div>
+    <div class="field">
+      <label>Workshop Map (optional)</label>
+      <select class="select" id="ws-map-select"></select>
+    </div>
+    <button class="btn btn-accent btn-full" id="map-change-btn" style="margin-top:4px">
+      ${icon('<polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/>')}
+      Change Map
+    </button>
+  `;
+  root.appendChild(mapCard);
+
+  // Populate mode select
+  const modeSel = el('mode-select');
+  state.modes.forEach(m => {
+    const o = document.createElement('option');
+    o.value = m; o.textContent = m;
+    if (m === s.mode) o.selected = true;
+    modeSel.appendChild(o);
+  });
+
+  // Populate maps
+  populateModeOfficialMaps(modeSel.value);
+  populateModeWorkshopMaps(modeSel.value);
+  updateModeHint(modeSel.value);
+
+  // Apply current state
+  if (s.boot_state === 'ready') {
+    el('match-panel').className = 'match-panel';
+    el('match-panel').innerHTML = _matchPanelTemplate();
+    _wireMatchControls();
+  }
+  renderStatusState();
+
+  // ── Wire server controls ─────────────────────────────────────────────────
+  el('sp-start-btn').addEventListener('click', async () => {
+    const wsId   = el('ws-map-select').value.trim();
+    const mapSel = el('map-select').value;
+    const mode   = el('mode-select').value;
+    const map    = wsId || mapSel;
+    const ws     = !!wsId;
+    try { await api.start(map, mode, ws); toast('Server starting…', 'var(--ok)'); }
+    catch (e) { toast(e.message, 'var(--bad)'); }
+  });
+  el('sp-restart-btn').addEventListener('click', doQuickRestart);
+  el('sp-stop-btn').addEventListener('click', async () => {
+    const doStop = async () => {
+      try { await api.stop(); toast('Server stopping…'); }
+      catch (e) { toast(e.message, 'var(--bad)'); }
+    };
+    if (appSettings.confirmStop) {
+      modal('Stop Server', '<p style="color:var(--text-3);font-size:.9rem">Are you sure you want to stop the server?</p>',
+        doStop, 'Stop');
+    } else { doStop(); }
+  });
+
+  // ── Wire mode picker / map change ────────────────────────────────────────
+  modeSel.addEventListener('change', e => {
+    populateModeOfficialMaps(e.target.value);
+    populateModeWorkshopMaps(e.target.value);
+    updateModeHint(e.target.value);
+  });
+  el('map-change-btn').addEventListener('click', async () => {
+    const wsId = el('ws-map-select').value.trim();
+    const map  = wsId || el('map-select').value;
+    const mode = el('mode-select').value;
+    const ws   = !!wsId;
+    try { await api.map(map, mode, ws); toast(`Changing to ${map}…`); }
+    catch (e) { toast(e.message, 'var(--bad)'); }
+  });
+  el('ss-change-btn').addEventListener('click', () => {
+    el('map-mode-card').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    el('mode-select').focus();
+  });
+
+  // ── Wire settings strip ──────────────────────────────────────────────────
+  el('ss-ff-toggle').addEventListener('click', async () => {
     const now = state.server.ff_enabled;
-    try {
-      await api.ff(!now);
-      toast(`Friendly Fire ${!now ? 'enabled' : 'disabled'}`);
-    } catch (e) { toast(e.message, 'var(--red)'); }
+    try { await api.ff(!now); toast(`Friendly Fire ${!now ? 'enabled' : 'disabled'}`); }
+    catch (e) { toast(e.message, 'var(--bad)'); }
   });
+  el('ss-bot-diff').addEventListener('change', async e => {
+    try { await api.setConfig({ bot_difficulty: e.target.value }); } catch (_) {}
+  });
+  el('ss-bot-add1').addEventListener('click', async () => {
+    try { await api.addBots(1); toast('+1 bot added'); } catch (e) { toast(e.message, 'var(--bad)'); }
+  });
+  el('ss-bot-add5').addEventListener('click', async () => {
+    try { await api.addBots(5); toast('+5 bots added'); } catch (e) { toast(e.message, 'var(--bad)'); }
+  });
+  el('ss-bot-kick').addEventListener('click', async () => {
+    try { await api.kickBots(); toast('All bots kicked'); } catch (e) { toast(e.message, 'var(--bad)'); }
+  });
+}
 
-  el('act-restart').addEventListener('click', async () => {
-    try { await api.restartRound(); toast('Round restarted'); }
-    catch (e) { toast(e.message, 'var(--red)'); }
-  });
-  el('act-warmup').addEventListener('click', async () => {
-    try { await api.endWarmup(); toast('Warmup ended'); }
-    catch (e) { toast(e.message, 'var(--red)'); }
-  });
-  el('act-pause').addEventListener('click', async () => {
-    try { await api.pause(); toast('Match paused'); }
-    catch (e) { toast(e.message, 'var(--red)'); }
-  });
-  el('act-unpause').addEventListener('click', async () => {
-    try { await api.unpause(); toast('Match unpaused'); }
-    catch (e) { toast(e.message, 'var(--red)'); }
-  });
-
-  el('bot-diff').addEventListener('change', async e => {
-    try { await api.setConfig({ bot_difficulty: e.target.value }); }
-    catch (_) {}
-  });
-  el('bot-add1').addEventListener('click', async () => {
-    try { await api.addBots(1); toast('+1 bot added'); }
-    catch (e) { toast(e.message, 'var(--red)'); }
-  });
-  el('bot-add5').addEventListener('click', async () => {
-    try { await api.addBots(5); toast('+5 bots added'); }
-    catch (e) { toast(e.message, 'var(--red)'); }
-  });
-  el('bot-kick').addEventListener('click', async () => {
-    try { await api.kickBots(); toast('All bots kicked'); }
-    catch (e) { toast(e.message, 'var(--red)'); }
-  });
+const MODE_HINTS = {
+  'Retakes': 'Players type <kbd>!r</kbd> in chat to ready up — game starts when everyone is ready.',
+};
+function updateModeHint(mode) {
+  const hint = el('mode-hint');
+  if (!hint) return;
+  const text = MODE_HINTS[mode];
+  if (text) { hint.innerHTML = text; hint.classList.remove('hidden'); }
+  else       { hint.innerHTML = '';   hint.classList.add('hidden');    }
 }
 
 function populateModeOfficialMaps(mode) {
@@ -782,49 +888,109 @@ function populateModeWorkshopMaps(mode) {
 
 pages['status'] = buildStatusPage;
 
-/* ══════════════════════════════════════════════════════════════ PLAYERS PAGE */
+/* ══════════════════════════════════════════════════════════════ PLAYERS PAGE v2
+   Scoreboard layout: score bar (T/CT), filter tabs, real table with ping bars,
+   compact ban-by-id row + tighter ban list. */
+
+let _playersFilter = 'all';     // all | t | ct | bots | humans
+let _playersSearch = '';
 
 pages['players'] = function() {
   const root = el('content');
+  const s = state.server;
+  const hasScore = (s.t_score != null && s.ct_score != null);
+
   root.innerHTML = `
-    <div class="section-hdr mb-16">
-      <span class="section-title">Players</span>
-      <div style="display:flex;gap:8px">
-        <button class="btn btn-ghost btn-sm" id="refresh-btn">↺ Refresh</button>
-        <span class="player-count" id="player-count"></span>
+    <div class="players-score-bar ${hasScore ? '' : 'hidden'}" id="players-score-bar">
+      <div class="score-side t">
+        <span class="side-tag">T side</span>
+        <span class="side-score" id="ps-t-score">${(s.t_score ?? 0).toString().padStart(2,'0')}</span>
+        <span class="side-grow"></span>
+        <span class="side-count" id="ps-t-count">— <span class="of">/ ${s.max_players || 10}</span></span>
+      </div>
+      <div class="score-side ct">
+        <span class="side-tag">CT side</span>
+        <span class="side-score" id="ps-ct-score">${(s.ct_score ?? 0).toString().padStart(2,'0')}</span>
+        <span class="side-grow"></span>
+        <span class="side-count" id="ps-ct-count">— <span class="of">/ ${s.max_players || 10}</span></span>
       </div>
     </div>
-    <div class="players-grid" id="players-grid">
-      <div class="empty-state">Loading players…</div>
+
+    <div class="players-toolbar-v2">
+      <div class="players-filter-tabs" id="players-filter-tabs">
+        <span class="pf-tab" data-f="all">All <span class="ct" id="pf-c-all">0</span></span>
+        <span class="pf-tab" data-f="humans">Humans <span class="ct" id="pf-c-humans">0</span></span>
+        <span class="pf-tab" data-f="bots">Bots <span class="ct" id="pf-c-bots">0</span></span>
+      </div>
+      <div class="players-search-wrap">
+        <svg class="ps-icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input class="input" id="players-search" placeholder="filter by name or steamid…" autocomplete="off">
+      </div>
+      <span class="players-toolbar-spacer"></span>
+      <button class="btn btn-ghost btn-sm" id="refresh-btn">
+        ${icon('<polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.25"/>')}
+        Refresh
+      </button>
     </div>
 
-    <div class="card mt-16">
-      <div class="card-title">Ban Player by SteamID</div>
-      <div class="ban-input-row">
+    <div class="ptable" id="players-ptable">
+      <div class="prow head">
+        <div></div>
+        <div>Player</div>
+        <div>SteamID</div>
+        <div>Ping</div>
+        <div style="justify-content: flex-end; padding-right: 14px;">Actions</div>
+      </div>
+      <div id="players-body"></div>
+    </div>
+
+    <div class="card mb-16">
+      <div class="card-title">Ban by SteamID</div>
+      <div class="ban-by-id">
         <div class="field">
           <label>SteamID / Steam64</label>
           <input class="input" id="ban-steamid" placeholder="STEAM_0:0:… or 7656119…">
         </div>
-        <div class="field" style="width:120px">
-          <label>Duration (min, 0=perm)</label>
+        <div class="field">
+          <label>Duration · min · 0 = perm</label>
           <input class="input" id="ban-duration" type="number" min="0" value="0">
         </div>
-        <button class="btn btn-red" id="ban-submit">Ban</button>
+        <button class="btn btn-red" id="ban-submit">
+          ${icon('<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>')}
+          Ban
+        </button>
       </div>
     </div>
 
-    <div class="card mt-16">
-      <div class="card-title">Ban List</div>
-      <div style="display:flex;gap:8px;margin-bottom:12px">
-        <button class="btn btn-ghost btn-sm" id="bans-refresh">↺ Refresh Bans</button>
+    <div class="card">
+      <div class="section-hdr">
+        <span class="card-title" style="margin-bottom: 0;">Ban List</span>
+        <button class="btn btn-ghost btn-sm" id="bans-refresh">
+          ${icon('<polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.25"/>')}
+          Refresh
+        </button>
       </div>
-      <div class="ban-list" id="ban-list">
+      <div class="ban-table" id="ban-list">
         <div class="empty-state text-sm">Loading…</div>
       </div>
     </div>`;
 
-  loadPlayers();
-  loadBans();
+  // Restore persisted filter
+  document.querySelectorAll('.pf-tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.f === _playersFilter);
+    t.addEventListener('click', () => {
+      _playersFilter = t.dataset.f;
+      document.querySelectorAll('.pf-tab').forEach(x => x.classList.toggle('active', x.dataset.f === _playersFilter));
+      _renderPlayersBody();
+    });
+  });
+
+  const searchEl = el('players-search');
+  searchEl.value = _playersSearch;
+  searchEl.addEventListener('input', e => {
+    _playersSearch = e.target.value;
+    _renderPlayersBody();
+  });
 
   el('refresh-btn').addEventListener('click', loadPlayers);
   el('bans-refresh').addEventListener('click', loadBans);
@@ -832,53 +998,124 @@ pages['players'] = function() {
   el('ban-submit').addEventListener('click', async () => {
     const sid = el('ban-steamid').value.trim();
     const dur = parseInt(el('ban-duration').value) || 0;
-    if (!sid) { toast('Enter a SteamID', 'var(--red)'); return; }
+    if (!sid) { toast('Enter a SteamID', 'var(--bad)'); return; }
     try {
       await api.ban(sid, '', dur);
       toast('Player banned');
       el('ban-steamid').value = '';
       loadBans();
-    } catch (e) { toast(e.message, 'var(--red)'); }
+    } catch (e) { toast(e.message, 'var(--bad)'); }
   });
+
+  loadPlayers();
+  loadBans();
 };
 
+// Cache last-known players so search/filter re-renders don't refetch
+let _playersCache = [];
+
 async function loadPlayers() {
-  const grid = el('players-grid');
-  if (!grid) return;
   try {
-    const pl = await api.players();
-    el('player-count').textContent = `${pl.length} player${pl.length !== 1 ? 's' : ''}`;
-    if (!pl.length) {
-      grid.innerHTML = '<div class="empty-state">No players online</div>';
-      return;
-    }
-    grid.innerHTML = '';
-    pl.forEach(p => {
-      const row = h('div', 'player-row');
-      row.innerHTML = `
-        <span class="player-name">${p.name || 'Unknown'}</span>
-        <span class="player-ping">${p.ping != null ? p.ping + ' ms' : '—'}</span>
-        <div class="player-actions">
-          <button class="btn btn-ghost btn-sm kick-btn" data-uid="${p.userid}" data-name="${p.name}">Kick</button>
-          <button class="btn btn-red btn-sm ban-btn"  data-sid="${p.steamid}" data-name="${p.name}">Ban</button>
-        </div>`;
-      grid.appendChild(row);
-    });
-    grid.querySelectorAll('.kick-btn').forEach(b => {
-      b.addEventListener('click', async () => {
-        try { await api.kick(b.dataset.uid, b.dataset.name); toast('Player kicked'); loadPlayers(); }
-        catch (e) { toast(e.message, 'var(--red)'); }
-      });
-    });
-    grid.querySelectorAll('.ban-btn').forEach(b => {
-      b.addEventListener('click', async () => {
-        try { await api.ban(b.dataset.sid, b.dataset.name, 0); toast('Player banned'); loadPlayers(); loadBans(); }
-        catch (e) { toast(e.message, 'var(--red)'); }
-      });
-    });
+    _playersCache = await api.players();
   } catch (e) {
-    grid.innerHTML = `<div class="empty-state text-red">${e.message}</div>`;
+    const body = el('players-body');
+    if (body) body.innerHTML = `<div class="empty-row" style="color:var(--bad)">${e.message}</div>`;
+    return;
   }
+  _renderPlayersBody();
+}
+
+function _renderPlayersBody() {
+  const body = el('players-body');
+  if (!body) return;
+
+  // Classify each player
+  const tagged = _playersCache.map(p => {
+    const isBot = !p.steamid || /^BOT/i.test(String(p.steamid)) || /^bot/i.test(p.name || '');
+    return { ...p, _isBot: isBot };
+  });
+
+  // Filter
+  const q = _playersSearch.toLowerCase().trim();
+  const list = tagged.filter(p => {
+    if (_playersFilter === 'bots'   && !p._isBot) return false;
+    if (_playersFilter === 'humans' &&  p._isBot) return false;
+    if (q && !(`${p.name || ''} ${p.steamid || ''}`).toLowerCase().includes(q)) return false;
+    return true;
+  });
+
+  // Counts
+  const cAll    = tagged.length;
+  const cBots   = tagged.filter(p =>  p._isBot).length;
+  const cHumans = cAll - cBots;
+  const setCount = (id, n) => { const e = el(id); if (e) e.textContent = n; };
+  setCount('pf-c-all', cAll);
+  setCount('pf-c-bots', cBots);
+  setCount('pf-c-humans', cHumans);
+
+  // Score bar counts (we don't have team data — show humans+bots split on T side as best-effort)
+  const sb = el('players-score-bar');
+  if (sb && !sb.classList.contains('hidden')) {
+    const cnt = state.server.player_count || cAll;
+    const tCnt = Math.floor(cnt / 2);
+    const ctCnt = cnt - tCnt;
+    const tc = el('ps-t-count');  if (tc) tc.innerHTML = `${tCnt} <span class="of">/ ${(state.server.max_players || 10) / 2}</span>`;
+    const cc = el('ps-ct-count'); if (cc) cc.innerHTML = `${ctCnt} <span class="of">/ ${(state.server.max_players || 10) / 2}</span>`;
+  }
+
+  if (!list.length) {
+    body.innerHTML = `<div class="empty-row">${
+      _playersCache.length ? 'No matches' : 'No players online — invite some with the Connect button'
+    }</div>`;
+    return;
+  }
+
+  body.innerHTML = '';
+  list.forEach(p => {
+    const row = h('div', `prow ${p._isBot ? 'bot' : ''}`);
+    const ping = p.ping != null ? Number(p.ping) : null;
+    const pingCls = ping == null ? ''
+                  : ping > 100   ? 'bad'
+                  : ping > 60    ? 'warn'
+                  :                '';
+    const bars = ping == null
+      ? '<span></span><span></span><span></span><span></span>'
+      : ping > 100 ? '<span class="bad"></span><span></span><span></span><span></span>'
+      : ping > 60  ? '<span class="on"></span><span class="warn"></span><span></span><span></span>'
+      : ping > 35  ? '<span class="on"></span><span class="on"></span><span class="on"></span><span></span>'
+      :              '<span class="on"></span><span class="on"></span><span class="on"></span><span class="on"></span>';
+
+    const safeName = esc(p.name || 'Unknown');
+    const sidStr   = esc(p._isBot ? 'BOT' : (p.steamid || '—'));
+    const badge    = p._isBot ? '<span class="role-badge bot">Bot</span>' : '';
+
+    row.innerHTML = `
+      <div class="pside-mark"><span class="m"></span></div>
+      <div class="pname"><span class="pname-text">${safeName}</span>${badge}</div>
+      <div class="psid">${sidStr}</div>
+      <div class="pping">
+        <span class="pp-val ${pingCls}">${ping != null ? ping : '—'}</span>
+        <span class="pp-bars">${bars}</span>
+      </div>
+      <div class="pactions">
+        <button class="btn btn-ghost kick-btn" data-uid="${esc(p.userid)}" data-name="${safeName}">Kick</button>
+        ${p._isBot ? '' : `<button class="btn btn-red ban-btn" data-sid="${esc(p.steamid)}" data-name="${safeName}">Ban</button>`}
+      </div>`;
+    body.appendChild(row);
+  });
+
+  body.querySelectorAll('.kick-btn').forEach(b => {
+    b.addEventListener('click', async () => {
+      try { await api.kick(b.dataset.uid, b.dataset.name); toast(`Kicked ${b.dataset.name}`); loadPlayers(); }
+      catch (e) { toast(e.message, 'var(--bad)'); }
+    });
+  });
+  body.querySelectorAll('.ban-btn').forEach(b => {
+    b.addEventListener('click', async () => {
+      try { await api.ban(b.dataset.sid, b.dataset.name, 0); toast(`Banned ${b.dataset.name}`); loadPlayers(); loadBans(); }
+      catch (e) { toast(e.message, 'var(--bad)'); }
+    });
+  });
 }
 
 async function loadBans() {
@@ -894,16 +1131,16 @@ async function loadBans() {
     bans.forEach(line => {
       const sidM = line.match(/(STEAM_\S+|\[U:[^\]]+\]|765\d{14,})/i);
       const sid  = sidM ? sidM[1] : line;
-      const row  = h('div', 'ban-row');
+      const row  = h('div', 'ban-row-v2');
       row.innerHTML = `
-        <span class="ban-steamid">${line}</span>
-        <button class="btn btn-ghost btn-sm unban-btn" data-sid="${sid}">Unban</button>`;
+        <span class="b-sid">${esc(line)}</span>
+        <div class="b-actions"><button class="btn btn-ghost btn-sm unban-btn" data-sid="${esc(sid)}">Unban</button></div>`;
       list.appendChild(row);
     });
     list.querySelectorAll('.unban-btn').forEach(b => {
       b.addEventListener('click', async () => {
         try { await api.unban(b.dataset.sid); toast('Player unbanned'); loadBans(); }
-        catch (e) { toast(e.message, 'var(--red)'); }
+        catch (e) { toast(e.message, 'var(--bad)'); }
       });
     });
   } catch (e) {
@@ -913,72 +1150,142 @@ async function loadBans() {
 
 /* ══════════════════════════════════════════════════════════════ MAPS PAGE */
 
+/* ══════════════════════════════════════════════════════════════ MAPS PAGE v2
+   Three tabs: Official · Workshop · Presets.
+   Folds in what used to be pages.workshop, and moves Presets out of Config. */
+
+let _mapsTab = 'official';   // remembered between page rebuilds
+
 pages['maps'] = function() {
-  const root = el('content');
+  const root  = el('content');
+  const isLocal = state.server.is_local;
+
+  // Count maps for tab labels
+  const officialCount = (state.modeMaps[state.server.mode] || state.maps).length;
+  const workshopCount = state.workshopMaps?.length || 0;
+
   root.innerHTML = `
-    <div class="maps-mode-bar mb-16">
-      <span class="section-title">Maps</span>
-      <div class="maps-search-wrap">
-        <svg class="maps-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-        </svg>
-        <input class="input maps-search-input" id="maps-search"
-               placeholder="Search maps…" autocomplete="off" spellcheck="false">
+    <div class="maps-tabs">
+      <div class="maps-tabs-strip" id="maps-tabs-strip">
+        <span class="maps-tab" data-tab="official">Official <span class="c">${officialCount}</span></span>
+        <span class="maps-tab" data-tab="workshop">Workshop <span class="c" id="ws-count">${workshopCount}</span></span>
+        <span class="maps-tab" data-tab="presets">Presets <span class="c" id="presets-count">—</span></span>
       </div>
+      <div class="maps-search-tab-wrap">
+        <svg class="maps-search-icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input class="input" id="maps-search" placeholder="Filter…" autocomplete="off" spellcheck="false">
+      </div>
+      <span class="maps-tab-spacer"></span>
       <select class="select" id="maps-mode-filter" style="width:160px">
-        ${state.modes.map(m => `<option value="${m}" ${m===state.server.mode?'selected':''}>${m}</option>`).join('')}
+        ${state.modes.map(m =>
+          `<option value="${m}" ${m === state.server.mode ? 'selected' : ''}>${m}</option>`
+        ).join('')}
       </select>
     </div>
-    <div class="section-title mb-16" id="official-section-title">Official Maps</div>
-    <div class="maps-grid" id="official-maps-grid"></div>
-    <div class="maps-section-sep" id="workshop-section-sep"><span>Workshop Maps</span></div>
-    <div class="maps-grid" id="workshop-maps-grid">
-      <div class="empty-state text-sm">Loading…</div>
-    </div>`;
 
-  // ── Filter: show/hide cards that match the query ─────────────────────────
+    <!-- Official tab -->
+    <div class="maps-pane" id="pane-official">
+      <div class="maps-grid" id="official-maps-grid"></div>
+    </div>
+
+    <!-- Workshop tab -->
+    <div class="maps-pane" id="pane-workshop">
+      ${isLocal ? `
+        <div class="card workshop-dl-card mb-16">
+          <div class="card-title">Download Map</div>
+          <div class="workshop-dl-row">
+            <div class="field">
+              <label>Steam Workshop Map ID</label>
+              <div class="input-paste-wrap">
+                <input class="input" id="ws-id-input" placeholder="e.g. 3070720081"
+                       oninput="this.value=this.value.replace(/\\D/g,'')">
+                <button class="input-paste-btn" id="ws-paste-btn" title="Paste from clipboard">
+                  <svg viewBox="0 0 24 24" width="14" height="14"><rect x="9" y="2" width="6" height="4" rx="1"/><path d="M9 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2h-2"/></svg>
+                </button>
+              </div>
+            </div>
+            <button class="btn btn-accent" id="ws-dl-btn">Download</button>
+            <button class="btn btn-red hidden" id="ws-cancel-btn">Cancel</button>
+          </div>
+          <div class="workshop-progress" id="ws-progress">
+            <div class="ws-progress-status">
+              <span class="ws-progress-dot"></span>
+              <span class="ws-progress-text" id="ws-status-text">Downloading…</span>
+            </div>
+            <div class="workshop-progress-track">
+              <div class="workshop-progress-bar"></div>
+            </div>
+          </div>
+        </div>
+        <div class="flex gap-8 mb-16">
+          <button class="btn btn-ghost btn-sm" id="ws-update-btn">↺ Update All Maps</button>
+        </div>
+      ` : `
+        <div class="card mb-16">
+          <div class="card-title">Request Workshop Download</div>
+          <div class="workshop-dl-row">
+            <div class="field">
+              <label>Steam Workshop Map ID</label>
+              <div class="input-paste-wrap">
+                <input class="input" id="ws-id-input" placeholder="e.g. 3070720081"
+                       oninput="this.value=this.value.replace(/\\D/g,'')">
+                <button class="input-paste-btn" id="ws-paste-btn" title="Paste from clipboard">
+                  <svg viewBox="0 0 24 24" width="14" height="14"><rect x="9" y="2" width="6" height="4" rx="1"/><path d="M9 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2h-2"/></svg>
+                </button>
+              </div>
+            </div>
+            <button class="btn btn-accent" id="ws-req-btn">Request Download</button>
+          </div>
+          <div class="text-sub text-sm mt-8">
+            The server operator will receive an approval request on the desktop app.
+          </div>
+        </div>
+      `}
+      <div class="workshop-maps-grid" id="workshop-maps-grid">
+        <div class="empty-state text-sm">Loading…</div>
+      </div>
+    </div>
+
+    <!-- Presets tab -->
+    <div class="maps-pane" id="pane-presets">
+      <div class="preset-save-row">
+        <div class="field">
+          <label>Save current setup as a preset</label>
+          <input class="input" id="preset-name" placeholder="e.g. 5v5 Mirage">
+        </div>
+        <button class="btn btn-accent" id="preset-save-btn">
+          ${icon('<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>')}
+          Save current
+        </button>
+        <span class="preset-save-hint">Captures map, mode, friendly fire, and bot difficulty. Load a preset to apply all of them in one tap.</span>
+      </div>
+      <div class="preset-grid" id="preset-grid">
+        <div class="empty-state text-sm">Loading presets…</div>
+      </div>
+    </div>
+  `;
+
+  // ── Activate the persisted tab ───────────────────────────────────────────
+  _activateMapsTab(_mapsTab);
+
+  // ── Tab switching ────────────────────────────────────────────────────────
+  document.querySelectorAll('.maps-tab').forEach(t => {
+    t.addEventListener('click', () => _activateMapsTab(t.dataset.tab));
+  });
+
+  // ── Search filter (applies to currently active tab) ──────────────────────
   const applyFilter = (query) => {
     const q = query.toLowerCase().trim();
-    let nOff = 0, nWs = 0;
-
-    el('official-maps-grid').querySelectorAll('.map-card').forEach(c => {
+    const activePane = el(`pane-${_mapsTab}`);
+    if (!activePane) return;
+    activePane.querySelectorAll('.map-card, .preset-card').forEach(c => {
       const show = !q || (c.dataset.name || '').includes(q);
       c.style.display = show ? '' : 'none';
-      if (show) nOff++;
     });
-    const wsCards = el('workshop-maps-grid').querySelectorAll('.map-card');
-    wsCards.forEach(c => {
-      const show = !q || (c.dataset.name || '').includes(q);
-      c.style.display = show ? '' : 'none';
-      if (show) nWs++;
-    });
-
-    // Show/hide section headings based on results
-    // Don't hide the workshop separator while the grid is still loading (no cards yet)
-    const offTitle = el('official-section-title');
-    const wsSep    = el('workshop-section-sep');
-    if (offTitle) offTitle.style.display = (nOff || !q) ? '' : 'none';
-    if (wsSep)    wsSep.style.display    = (nWs || !q || wsCards.length === 0) ? '' : 'none';
-
-    // Empty-state messages within each grid
-    const offGrid = el('official-maps-grid');
-    if (offGrid) {
-      let emp = offGrid.querySelector('.search-empty');
-      if (!nOff && q) {
-        if (!emp) { emp = h('div', 'empty-state text-sm search-empty', 'No maps match'); offGrid.appendChild(emp); }
-      } else { emp?.remove(); }
-    }
-    const wsGrid = el('workshop-maps-grid');
-    if (wsGrid) {
-      let emp = wsGrid.querySelector('.search-empty');
-      if (!nWs && q && wsGrid.querySelector('.map-card')) {
-        if (!emp) { emp = h('div', 'empty-state text-sm search-empty', 'No maps match'); wsGrid.appendChild(emp); }
-      } else { emp?.remove(); }
-    }
   };
+  el('maps-search').addEventListener('input', e => applyFilter(e.target.value));
 
-  // ── Official maps render ─────────────────────────────────────────────────
+  // ── Official grid ────────────────────────────────────────────────────────
   const renderOfficial = (mode) => {
     const grid  = el('official-maps-grid');
     const valid = state.modeMaps[mode] || state.maps;
@@ -986,143 +1293,76 @@ pages['maps'] = function() {
     valid.forEach(mapId => {
       const card = h('div', 'map-card' + (mapId === state.server.map ? ' active' : ''));
       card.dataset.name = mapId.toLowerCase();
-      const thumbHtml = `<img class="map-thumb" src="/api/maps/thumb/${mapId}" loading="lazy"
-               onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"
-             ><div class="map-thumb-placeholder" style="display:none">
-               ${icon('<polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/><line x1="9" y1="3" x2="9" y2="18"/><line x1="15" y1="6" x2="15" y2="21"/>')}
-             </div>`;
-      card.innerHTML = `${thumbHtml}<div class="map-info"><div class="map-name">${mapId}</div></div>`;
+      card.innerHTML = `
+        <img class="map-thumb" src="/api/maps/thumb/${mapId}" loading="lazy"
+             onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+        <div class="map-thumb-placeholder" style="display:none">
+          ${icon('<polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/><line x1="9" y1="3" x2="9" y2="18"/><line x1="15" y1="6" x2="15" y2="21"/>')}
+        </div>
+        <div class="map-info"><div class="map-name">${mapId}</div></div>
+      `;
       card.addEventListener('click', async () => {
         try { await api.map(mapId, mode, false); toast(`Changing to ${mapId}…`); }
-        catch (e) { toast(e.message, 'var(--red)'); }
+        catch (e) { toast(e.message, 'var(--bad)'); }
       });
       grid.appendChild(card);
     });
   };
-
   renderOfficial(el('maps-mode-filter').value);
 
   el('maps-mode-filter').addEventListener('change', e => {
     renderOfficial(e.target.value);
-    applyFilter(el('maps-search')?.value || '');   // filter official cards immediately
-    loadWorkshopMapsGrid(el('workshop-maps-grid'), e.target.value)
-      .then(() => applyFilter(el('maps-search')?.value || ''));
+    applyFilter(el('maps-search').value);
+    loadWorkshopMapsGrid(el('workshop-maps-grid'), e.target.value).then(() => {
+      el('ws-count').textContent = state.workshopMaps.length;
+      applyFilter(el('maps-search').value);
+    });
   });
 
-  el('maps-search').addEventListener('input', e => applyFilter(e.target.value));
+  // ── Workshop grid + downloader ───────────────────────────────────────────
+  loadWorkshopMapsGrid(el('workshop-maps-grid'), el('maps-mode-filter').value).then(() => {
+    el('ws-count').textContent = state.workshopMaps.length;
+  });
+  _wireWorkshopDownloader(isLocal);
 
-  loadWorkshopMapsGrid(el('workshop-maps-grid'), el('maps-mode-filter').value)
-    .then(() => applyFilter(el('maps-search')?.value || ''));
+  // ── Presets grid + save ──────────────────────────────────────────────────
+  loadPresetCards();
+  el('preset-save-btn').addEventListener('click', async () => {
+    const name = el('preset-name').value.trim();
+    if (!name) { toast('Enter a preset name', 'var(--bad)'); return; }
+    try {
+      await api.savePreset(name);
+      toast(`Preset "${name}" saved`);
+      el('preset-name').value = '';
+      loadPresetCards();
+    } catch (e) { toast(e.message, 'var(--bad)'); }
+  });
 };
 
-async function loadWorkshopMapsGrid(grid, mode) {
-  try {
-    const maps = await api.workshopMaps();
-    state.workshopMaps = maps;
-    if (!maps.length) {
-      grid.innerHTML = '<div class="empty-state text-sm">No workshop maps downloaded yet</div>';
-      return;
-    }
-    grid.innerHTML = '';
-    maps.forEach(m => {
-      const card = h('div', 'map-card' + (m.id === state.server.map ? ' active' : ''));
-      card.dataset.name = `${(m.name || '')} ${m.id}`.toLowerCase();
-      const thumbHtml = m.preview_url
-        ? `<img class="map-thumb" src="${m.preview_url}" loading="lazy" onerror="this.style.display='none'">`
-        : `<div class="map-thumb-placeholder">${icon('<polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/>')}</div>`;
-      card.innerHTML = `
-        ${thumbHtml}
-        <div class="map-info">
-          <div class="map-name">${m.name || m.id}</div>
-          <div class="map-id">${m.id}</div>
-        </div>`;
-      card.addEventListener('click', async () => {
-        try {
-          await api.map(m.id, mode, true);
-          toast(`Loading workshop map…`);
-        } catch (e) { toast(e.message, 'var(--red)'); }
-      });
-      grid.appendChild(card);
-    });
-  } catch (e) {
-    grid.innerHTML = `<div class="empty-state text-sm text-red">${e.message}</div>`;
-  }
+/** Switch the active tab. Updates DOM + persisted state + clears search. */
+function _activateMapsTab(tab) {
+  _mapsTab = tab;
+  document.querySelectorAll('.maps-tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.tab === tab);
+  });
+  document.querySelectorAll('.maps-pane').forEach(p => {
+    p.classList.toggle('active', p.id === `pane-${tab}`);
+  });
+  // Reset search when switching tabs — different content domains
+  const search = el('maps-search');
+  if (search) search.value = '';
 }
 
-/* ══════════════════════════════════════════════════════════════ WORKSHOP PAGE */
-
-pages['workshop'] = function() {
-  const root = el('content');
-  const isLocal = state.server.is_local;
-
-  root.innerHTML = `
-    <div class="section-title mb-16">Workshop Maps</div>
-
-    ${isLocal ? `
-    <div class="card workshop-dl-card mb-16">
-      <div class="card-title">Download Map</div>
-      <div class="workshop-dl-row">
-        <div class="field">
-          <label>Steam Workshop Map ID</label>
-          <div class="input-paste-wrap">
-            <input class="input" id="ws-id-input" placeholder="e.g. 3070720081"
-                   oninput="this.value=this.value.replace(/\\D/g,'')">
-            <button class="input-paste-btn" id="ws-paste-btn" title="Paste from clipboard">
-              <svg viewBox="0 0 24 24" width="14" height="14"><rect x="9" y="2" width="6" height="4" rx="1"/><path d="M9 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2h-2"/></svg>
-            </button>
-          </div>
-        </div>
-        <button class="btn btn-accent" id="ws-dl-btn">Download</button>
-        <button class="btn btn-red hidden" id="ws-cancel-btn">Cancel</button>
-      </div>
-      <div class="workshop-progress" id="ws-progress">
-        <div class="ws-progress-status">
-          <span class="ws-progress-dot"></span>
-          <span class="ws-progress-text" id="ws-status-text">Downloading…</span>
-        </div>
-        <div class="workshop-progress-track">
-          <div class="workshop-progress-bar"></div>
-        </div>
-      </div>
-    </div>
-    <div class="flex gap-8 mb-16">
-      <button class="btn btn-ghost btn-sm" id="ws-update-btn">↺ Update All Maps</button>
-    </div>
-    ` : `
-    <div class="card mb-16">
-      <div class="card-title">Request Workshop Download</div>
-      <div class="workshop-dl-row">
-        <div class="field">
-          <label>Steam Workshop Map ID</label>
-          <div class="input-paste-wrap">
-            <input class="input" id="ws-id-input" placeholder="e.g. 3070720081"
-                   oninput="this.value=this.value.replace(/\\D/g,'')">
-            <button class="input-paste-btn" id="ws-paste-btn" title="Paste from clipboard">
-              <svg viewBox="0 0 24 24" width="14" height="14"><rect x="9" y="2" width="6" height="4" rx="1"/><path d="M9 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2h-2"/></svg>
-            </button>
-          </div>
-        </div>
-        <button class="btn btn-accent" id="ws-req-btn">Request Download</button>
-      </div>
-      <div class="text-sub text-sm mt-8">
-        The server operator will receive an approval request on the desktop app.
-      </div>
-    </div>
-    `}
-
-    <div class="section-title mb-16">Downloaded Maps</div>
-    <div class="workshop-maps-grid" id="ws-maps-grid">
-      <div class="empty-state text-sm">Loading…</div>
-    </div>`;
-
-  // Paste button — shared between local and remote layouts
+/** Wire the workshop download form. Behaviour depends on local vs remote. */
+function _wireWorkshopDownloader(isLocal) {
+  // Paste button — shared between layouts
   el('ws-paste-btn')?.addEventListener('click', async () => {
     try {
       const text = await navigator.clipboard.readText();
       const digits = text.replace(/\D/g, '');
       if (digits) { el('ws-id-input').value = digits; el('ws-id-input').focus(); }
-      else toast('Nothing numeric on the clipboard', 'var(--orange)');
-    } catch { toast('Clipboard access denied', 'var(--red)'); }
+      else toast('Nothing numeric on the clipboard', 'var(--warn)');
+    } catch { toast('Clipboard access denied', 'var(--bad)'); }
   });
 
   if (isLocal) {
@@ -1137,14 +1377,13 @@ pages['workshop'] = function() {
       progress.classList.add('active');
       if (_dlStatus.text) el('ws-status-text').textContent = _dlStatus.text;
     } else if (_dlStatus.text) {
-      // show last completed/failed message briefly
       progress.classList.add('done');
       el('ws-status-text').textContent = _dlStatus.text;
     }
 
     dlBtn.addEventListener('click', async () => {
       const id = el('ws-id-input').value.trim();
-      if (!id) { toast('Enter a Workshop Map ID', 'var(--red)'); return; }
+      if (!id) { toast('Enter a Workshop Map ID', 'var(--bad)'); return; }
       try {
         await api.workshopDownload(id);
         _dlStatus = { active: true, text: 'Starting download…' };
@@ -1155,12 +1394,11 @@ pages['workshop'] = function() {
         progress.classList.add('active');
         toast('Download started…');
       } catch (e) {
-        // If Steam credentials are missing, surface a clear action prompt
         if (e.needs_steam) {
-          toast('Steam credentials required — go to Config → Steam Account', 'var(--orange)');
+          toast('Steam credentials required — go to Config → Steam Account', 'var(--warn)');
           setTimeout(() => navigate('config'), 1200);
         } else {
-          toast(e.message, 'var(--red)');
+          toast(e.message, 'var(--bad)');
         }
       }
     });
@@ -1174,25 +1412,169 @@ pages['workshop'] = function() {
         progress.classList.remove('active');
         progress.classList.remove('done');
         toast('Download cancelled');
-      } catch (e) { toast(e.message, 'var(--red)'); }
+      } catch (e) { toast(e.message, 'var(--bad)'); }
     });
 
     el('ws-update-btn').addEventListener('click', async () => {
       try { await api.workshopUpdate(); toast('Checking for map updates…'); }
-      catch (e) { toast(e.message, 'var(--red)'); }
+      catch (e) { toast(e.message, 'var(--bad)'); }
     });
   } else {
     el('ws-req-btn')?.addEventListener('click', async () => {
       const id = el('ws-id-input').value.trim();
-      if (!id) { toast('Enter a Workshop Map ID', 'var(--red)'); return; }
+      if (!id) { toast('Enter a Workshop Map ID', 'var(--bad)'); return; }
       try {
         await api.requestWorkshop(id);
         toast('Download request sent — awaiting approval');
-      } catch (e) { toast(e.message, 'var(--red)'); }
+      } catch (e) { toast(e.message, 'var(--bad)'); }
     });
   }
+}
 
-  loadWorkshopMapsGrid(el('ws-maps-grid'), state.server.mode);
+/** Render the preset tab as a grid of thumbnail cards. */
+async function loadPresetCards() {
+  const grid = el('preset-grid');
+  if (!grid) return;
+  try {
+    const names = await api.presets();
+    const countEl = el('presets-count');
+    if (countEl) countEl.textContent = names.length;
+
+    if (!names.length) {
+      grid.innerHTML = '<div class="empty-state text-sm">No presets saved yet — set up a map &amp; mode, then save it as a preset above.</div>';
+      return;
+    }
+
+    grid.innerHTML = '';
+    // Fetch each preset's details in parallel so we can show the thumbnail + mode
+    const details = await Promise.all(names.map(n =>
+      api.loadPreset(n).catch(() => null)
+    ));
+
+    names.forEach((name, i) => {
+      const p = details[i] || { map: '', mode: '' };
+      const card = h('div', 'preset-card');
+      card.dataset.name = name.toLowerCase();
+      const isWorkshop = /^\d+$/.test(p.map);
+      const thumbUrl = !isWorkshop && p.map ? `/api/maps/thumb/${encodeURIComponent(p.map)}` : '';
+      const metaBits = [];
+      if (p.map)            metaBits.push(esc(p.map));
+      if (p.mode)           metaBits.push(esc(p.mode));
+      if (p.ff_enabled === true)  metaBits.push('FF on');
+      if (p.ff_enabled === false) metaBits.push('FF off');
+
+      card.innerHTML = `
+        <div class="pc-thumb">
+          <span class="pc-bracket"></span>
+          ${p.mode ? `<span class="pc-mode-tag">${esc(p.mode)}</span>` : ''}
+          ${thumbUrl
+            ? `<img src="${esc(thumbUrl)}" alt="" loading="lazy"
+                   onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+               <div class="pc-thumb-empty" style="display:none">${isWorkshop ? 'workshop' : 'no thumb'}</div>`
+            : `<div class="pc-thumb-empty">${isWorkshop ? 'workshop' : 'no map'}</div>`
+          }
+        </div>
+        <div class="pc-body">
+          <span class="pc-name">${esc(name)}</span>
+          <span class="pc-meta">${metaBits.join(' <span class="dot">·</span> ') || '—'}</span>
+          <div class="pc-actions">
+            <button class="btn btn-accent" data-act="load-start">Load &amp; start</button>
+            <button class="btn" data-act="load" title="Load into selectors only">
+              ${icon('<polyline points="20 6 9 17 4 12"/>')}
+            </button>
+            <button class="btn btn-red btn-icon" data-act="delete" title="Delete preset">×</button>
+          </div>
+        </div>
+      `;
+
+      // Load & start: apply the preset and start (or change map if running)
+      card.querySelector('[data-act="load-start"]').addEventListener('click', async e => {
+        e.stopPropagation();
+        try {
+          const preset = await api.loadPreset(name);
+          if (state.server.running) {
+            await api.map(preset.map, preset.mode, isWorkshop);
+            toast(`Loaded "${name}" — changing map…`);
+          } else {
+            await api.start(preset.map, preset.mode, isWorkshop);
+            toast(`Loaded "${name}" — starting server…`);
+          }
+        } catch (err) { toast(err.message, 'var(--bad)'); }
+      });
+
+      // Load only: apply settings into the Status page selectors
+      card.querySelector('[data-act="load"]').addEventListener('click', async e => {
+        e.stopPropagation();
+        try {
+          await api.loadPreset(name);
+          toast(`Preset "${name}" loaded — go to Status to apply`);
+        } catch (err) { toast(err.message, 'var(--bad)'); }
+      });
+
+      // Delete
+      card.querySelector('[data-act="delete"]').addEventListener('click', async e => {
+        e.stopPropagation();
+        modal(
+          'Delete preset?',
+          `<p style="color:var(--text-3);font-size:.9rem">This will permanently delete "<strong>${name}</strong>".</p>`,
+          async () => {
+            try {
+              await api.deletePreset(name);
+              toast(`Preset "${name}" deleted`);
+              loadPresetCards();
+            } catch (err) { toast(err.message, 'var(--bad)'); }
+          },
+          'Delete'
+        );
+      });
+
+      grid.appendChild(card);
+    });
+  } catch (e) {
+    grid.innerHTML = `<div class="empty-state text-sm text-red">${e.message}</div>`;
+  }
+}
+
+async function loadWorkshopMapsGrid(grid, mode) {
+  try {
+    const maps = await api.workshopMaps();
+    state.workshopMaps = maps;
+    if (!maps.length) {
+      grid.innerHTML = '<div class="empty-state text-sm">No workshop maps downloaded yet</div>';
+      return;
+    }
+    grid.innerHTML = '';
+    maps.forEach(m => {
+      const card = h('div', 'map-card' + (m.id === state.server.map ? ' active' : ''));
+      card.dataset.name = `${(m.name || '')} ${m.id}`.toLowerCase();
+      const thumbHtml = m.preview_url
+        ? `<img class="map-thumb" src="${esc(m.preview_url)}" loading="lazy" onerror="this.style.display='none'">`
+        : `<div class="map-thumb-placeholder">${icon('<polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/>')}</div>`;
+      card.innerHTML = `
+        ${thumbHtml}
+        <div class="map-info">
+          <div class="map-name">${esc(m.name || m.id)}</div>
+          <div class="map-id">${esc(m.id)}</div>
+        </div>`;
+      card.addEventListener('click', async () => {
+        try { await api.map(m.id, mode, true); toast(`Loading workshop map…`); }
+        catch (e) { toast(e.message, 'var(--bad)'); }
+      });
+      grid.appendChild(card);
+    });
+  } catch (e) {
+    grid.innerHTML = `<div class="empty-state text-sm text-red">${e.message}</div>`;
+  }
+}
+
+/* Legacy: #workshop hash routes here, switching to the Workshop tab. */
+pages['workshop'] = function() {
+  _mapsTab = 'workshop';
+  // Make Maps appear active in the sidebar
+  document.querySelectorAll('.nav-item').forEach(a => {
+    a.classList.toggle('active', a.dataset.page === 'maps');
+  });
+  pages['maps']();
 };
 
 /* ══════════════════════════════════════════════════════════════ CONFIG PAGE */
@@ -1216,22 +1598,22 @@ pages['config'] = async function() {
         <div class="card mb-16">
           <div class="flex-col gap-8">
             <div class="field"><label>Hostname</label>
-              <input class="input" id="cfg-hostname" value="${cfg.hostname || ''}"></div>
+              <input class="input" id="cfg-hostname" value="${esc(cfg.hostname || '')}"></div>
             <div class="field"><label>Server Password (sv_password)</label>
               <input class="input" id="cfg-svpassword" type="password"
-                     value="${cfg.sv_password || ''}"></div>
+                     value="${esc(cfg.sv_password || '')}"></div>
             ${isLocal ? `
             <div class="field">
               <label>Game Server Login Token <span class="field-label-note">(GSLT)</span></label>
               <input class="input" id="cfg-gslt" placeholder="Leave blank for LAN / private use"
-                     value="${cfg.gslt_token || ''}">
+                     value="${esc(cfg.gslt_token || '')}">
               <div class="field-hint">Makes your server visible in the public browser.
                 Get one free at <strong>steamcommunity.com/dev/managegameservers</strong>
                 (App&nbsp;ID&nbsp;730). Left blank during setup? Paste it here.</div>
             </div>
             <div class="field"><label>Max Players Override (blank = mode default)</label>
               <input class="input" id="cfg-maxplayers" placeholder="e.g. 16"
-                     value="${cfg.max_players_override || ''}"></div>
+                     value="${esc(cfg.max_players_override || '')}"></div>
             ` : ''}
             <div class="toggle-row">
               <div class="toggle-info">
@@ -1267,20 +1649,20 @@ pages['config'] = async function() {
           <button class="btn btn-accent btn-full mt-16" id="cfg-server-save">Save Server Settings</button>
         </div>
 
+        ${isLocal ? `
         <div class="config-label">Security</div>
         <div class="card mb-16">
           <div class="flex-col gap-8">
             <div class="field"><label>Admin PIN (4+ digits, web panel login)</label>
               <input class="input" id="cfg-pin" type="password"
-                     value="${cfg.admin_pin || ''}" maxlength="8"></div>
-            ${isLocal ? `
+                     value="${esc(cfg.admin_pin || '')}" maxlength="8"></div>
             <div class="field"><label>RCON Password (auto-generated, change if needed)</label>
               <input class="input" id="cfg-rcon-pw" type="password"
-                     value="${cfg.rcon_password || ''}"></div>
-            ` : ''}
+                     value="${esc(cfg.rcon_password || '')}"></div>
           </div>
           <button class="btn btn-accent btn-full mt-16" id="cfg-security-save">Save Security Settings</button>
         </div>
+        ` : ''}
 
         <div class="config-label">Bot Difficulty</div>
         <div class="card mb-16">
@@ -1297,24 +1679,13 @@ pages['config'] = async function() {
 
       <!-- Right column -->
       <div>
-        <div class="config-label">Presets</div>
-        <div class="card mb-16">
-          <div class="presets-row">
-            <div class="field flex-1">
-              <label>Preset name</label>
-              <input class="input" id="preset-name" placeholder="e.g. 5v5 Mirage">
-            </div>
-            <button class="btn btn-accent" id="preset-save-btn">Save Current</button>
-          </div>
-          <div class="preset-list" id="preset-list">Loading…</div>
-        </div>
 
         ${isLocal ? `
         <div class="config-label">Steam Account</div>
         <div class="card mb-16">
           <div class="flex-col gap-8">
             <div class="field"><label>Username</label>
-              <input class="input" id="cfg-steam-user" value="${cfg.steam_username||''}"></div>
+              <input class="input" id="cfg-steam-user" value="${esc(cfg.steam_username||'')}"></div>
             <div class="field"><label>Password</label>
               <input class="input" id="cfg-steam-pw" type="password" placeholder="Stored securely"></div>
             <div class="text-sub text-sm">
@@ -1333,7 +1704,7 @@ pages['config'] = async function() {
           <div class="field mb-16">
             <label>Server Directory</label>
             <div class="flex gap-8">
-              <input class="input flex-1" id="cfg-server-dir" value="${cfg.server_dir||''}">
+              <input class="input flex-1" id="cfg-server-dir" value="${esc(cfg.server_dir||'')}">
               <button class="btn btn-ghost btn-sm" id="cfg-browse-btn">Browse…</button>
             </div>
           </div>
@@ -1342,8 +1713,6 @@ pages['config'] = async function() {
             <button class="btn btn-accent flex-1" id="cfg-install-btn">Install / Reinstall</button>
           </div>
         </div>
-        ` : ''}
-
         <div class="config-label">RCON Console</div>
         <div class="card">
           <div class="rcon-output" id="rcon-output">Ready. Type a command below.</div>
@@ -1352,12 +1721,10 @@ pages['config'] = async function() {
             <button class="btn btn-accent" id="rcon-send">Send</button>
           </div>
         </div>
+        ` : ''}
       </div>
 
     </div>`;
-
-  // Load presets
-  loadPresets();
 
   // Wire up saves
   el('cfg-server-save').addEventListener('click', async () => {
@@ -1376,9 +1743,12 @@ pages['config'] = async function() {
     catch (e) { toast(e.message, 'var(--red)'); }
   });
 
-  el('cfg-security-save').addEventListener('click', async () => {
-    const data = { admin_pin: el('cfg-pin').value };
-    if (isLocal) data.rcon_password = el('cfg-rcon-pw').value;
+  const secSaveBtn = el('cfg-security-save');   // only rendered for local sessions
+  if (secSaveBtn) secSaveBtn.addEventListener('click', async () => {
+    const data = {
+      admin_pin:     el('cfg-pin').value,
+      rcon_password: el('cfg-rcon-pw').value,
+    };
     try { await api.setConfig(data); toast('Security settings saved'); }
     catch (e) { toast(e.message, 'var(--red)'); }
   });
@@ -1388,13 +1758,6 @@ pages['config'] = async function() {
       await api.setConfig({ bot_difficulty: el('cfg-bot-diff').value });
       toast('Bot difficulty saved');
     } catch (e) { toast(e.message, 'var(--red)'); }
-  });
-
-  el('preset-save-btn').addEventListener('click', async () => {
-    const name = el('preset-name').value.trim();
-    if (!name) { toast('Enter a preset name', 'var(--red)'); return; }
-    try { await api.savePreset(name); toast(`Preset "${name}" saved`); loadPresets(); }
-    catch (e) { toast(e.message, 'var(--red)'); }
   });
 
   if (isLocal) {
@@ -1439,58 +1802,28 @@ pages['config'] = async function() {
     });
   }
 
-  // RCON console
-  const rconSend = async () => {
-    const cmd = el('rcon-cmd').value.trim();
-    if (!cmd) return;
-    const out = el('rcon-output');
-    out.textContent += `\n> ${cmd}\n`;
-    try {
-      const r = await api.rcon(cmd);
-      out.textContent += r.response || '(no output)';
-    } catch (e) {
-      out.textContent += `Error: ${e.message}`;
-    }
-    out.textContent += '\n';
-    out.scrollTop = out.scrollHeight;
-    el('rcon-cmd').value = '';
-  };
-  el('rcon-send').addEventListener('click', rconSend);
-  el('rcon-cmd').addEventListener('keydown', e => { if (e.key === 'Enter') rconSend(); });
-};
-
-async function loadPresets() {
-  const list = el('preset-list');
-  if (!list) return;
-  try {
-    const names = await api.presets();
-    if (!names.length) { list.textContent = 'No presets saved yet'; return; }
-    list.innerHTML = '';
-    names.forEach(name => {
-      const chip = h('div', 'preset-chip');
-      chip.innerHTML = `<span>${name}</span><span class="preset-chip-del" title="Delete">×</span>`;
-      chip.querySelector('span').addEventListener('click', async () => {
-        try {
-          const p = await api.loadPreset(name);
-          toast(`Preset "${name}" loaded — use Change Map to apply`);
-          // update selectors if on status page
-          const modeS = el('mode-select');
-          const mapS  = el('map-select');
-          if (modeS) { modeS.value = p.mode; populateModeOfficialMaps(p.mode); populateModeWorkshopMaps(p.mode); }
-          if (mapS)  mapS.value = p.map;
-        } catch (e) { toast(e.message, 'var(--red)'); }
-      });
-      chip.querySelector('.preset-chip-del').addEventListener('click', async e => {
-        e.stopPropagation();
-        try { await api.deletePreset(name); toast(`Preset "${name}" deleted`); loadPresets(); }
-        catch (err) { toast(err.message, 'var(--red)'); }
-      });
-      list.appendChild(chip);
-    });
-  } catch (e) {
-    list.textContent = 'Could not load presets';
+  // RCON console (local sessions only)
+  const rconSendBtn = el('rcon-send');
+  if (rconSendBtn) {
+    const rconSend = async () => {
+      const cmd = el('rcon-cmd').value.trim();
+      if (!cmd) return;
+      const out = el('rcon-output');
+      out.textContent += `\n> ${cmd}\n`;
+      try {
+        const r = await api.rcon(cmd);
+        out.textContent += r.response || '(no output)';
+      } catch (e) {
+        out.textContent += `Error: ${e.message}`;
+      }
+      out.textContent += '\n';
+      out.scrollTop = out.scrollHeight;
+      el('rcon-cmd').value = '';
+    };
+    rconSendBtn.addEventListener('click', rconSend);
+    el('rcon-cmd').addEventListener('keydown', e => { if (e.key === 'Enter') rconSend(); });
   }
-}
+};
 
 /* ══════════════════════════════════════════════════════════════ SETUP WIZARD */
 
@@ -1510,8 +1843,15 @@ function showSetupWizard(status) {
   function render() {
     overlay.innerHTML = `
       <div class="setup-card">
+        <div class="setup-emblem-frame">
+          <span class="lb-bracket lb-tl"></span>
+          <span class="lb-bracket lb-tr"></span>
+          <span class="lb-bracket lb-bl"></span>
+          <span class="lb-bracket lb-br"></span>
+          <img src="/static/images/emblem.png" class="setup-emblem" alt="Oblivion">
+        </div>
         <div class="setup-brand">OBLIVION</div>
-        <div class="setup-sub">SERVER TOOL — FIRST-TIME SETUP</div>
+        <div class="setup-sub">SERVER · TOOL — FIRST-TIME SETUP</div>
 
         <div class="setup-steps">
           ${[1,2,3].map(n => `
@@ -1985,3 +2325,353 @@ async function init() {
 }
 
 document.addEventListener('DOMContentLoaded', init);
+
+/* ════════════════════════════════════════════════════════════════ SHELL MODULES
+   New v2 shell — log drawer, connect popover, ⌘K palette.
+   These are page-agnostic and live above the page handlers.            */
+
+/* ── Log drawer ───────────────────────────────────────────────────────────── */
+window.LogDrawer = {
+  expanded: false,
+  init() {
+    const bar = el('log-drawer-bar');
+    if (!bar) return;
+    bar.addEventListener('click', () => this.toggle());
+
+    // Backtick to toggle (skipped when typing)
+    document.addEventListener('keydown', e => {
+      if (e.key === '`' && !e.target.matches('input,textarea,select')) {
+        if (document.querySelector('.modal-overlay,.setup-overlay,.palette-overlay:not(.hidden)')) return;
+        e.preventDefault();
+        this.toggle();
+      }
+    });
+
+    this._renderLast();
+  },
+  toggle() {
+    this.expanded = !this.expanded;
+    el('log-drawer').classList.toggle('expanded', this.expanded);
+    el('log-drawer-body').classList.toggle('hidden', !this.expanded);
+    el('log-drawer-meta').classList.toggle('hidden', !this.expanded);
+    el('log-drawer-chev').textContent = this.expanded ? '▾' : '▸';
+    if (this.expanded) this._renderFull();
+  },
+  _renderLast() {
+    const last = el('log-drawer-last');
+    if (last && logLines.length) {
+      last.textContent = logLines[logLines.length - 1];
+    }
+  },
+  _renderFull() {
+    const body = el('log-drawer-body');
+    if (!body) return;
+    body.innerHTML = '';
+    logLines.forEach(l => {
+      const d = document.createElement('div');
+      d.className = 'ld-line';
+      d.textContent = l;
+      body.appendChild(d);
+    });
+    if (appSettings.autoScroll) body.scrollTop = body.scrollHeight;
+    const count = el('log-drawer-count');
+    if (count) count.textContent = logLines.length;
+  },
+  append(line) {
+    this._renderLast();
+    if (!this.expanded) return;
+    const body = el('log-drawer-body');
+    if (!body) return;
+    const d = document.createElement('div');
+    d.className = 'ld-line';
+    d.textContent = line;
+    body.appendChild(d);
+    const limit = appSettings.logLines || 400;
+    while (body.children.length > limit) body.removeChild(body.firstChild);
+    if (appSettings.autoScroll) body.scrollTop = body.scrollHeight;
+    const count = el('log-drawer-count');
+    if (count) count.textContent = logLines.length;
+  }
+};
+
+/* ── Connect popover ──────────────────────────────────────────────────────── */
+window.ConnectPopover = {
+  init() {
+    const btn = el('hdr-connect-btn');
+    if (!btn) return;
+
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      this.toggle();
+    });
+
+    document.addEventListener('click', e => {
+      const pop = el('connect-popover');
+      if (!pop || pop.classList.contains('hidden')) return;
+      if (!pop.contains(e.target) && !btn.contains(e.target)) this.hide();
+    });
+
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && !el('connect-popover').classList.contains('hidden')) {
+        this.hide();
+      }
+    });
+
+    document.querySelectorAll('.cp-copy').forEach(b => {
+      b.addEventListener('click', () => {
+        const target = b.dataset.target;
+        const val = (target === 'lan' ? el('cp-lan-val') : el('cp-pub-val')).textContent;
+        if (val && val !== '—') copyText(val.trim(), 'Connect string');
+      });
+    });
+  },
+  update(s) {
+    const btn = el('hdr-connect-btn');
+    if (!btn) return;
+    const running = s.boot_state === 'ready' || s.boot_state === 'booting';
+    btn.classList.toggle('hidden', !running);
+    if (!running) { this.hide(); return; }
+
+    const lan = s.lan_ip ? `connect ${s.lan_ip}:${s.rcon_port || 27015}` : '—';
+    const pub = s.public_ip ? `connect ${s.public_ip}` : '—';
+    el('cp-lan-val').textContent = lan;
+    el('cp-pub-val').textContent = pub;
+
+    const pubK = el('cp-pub-k');
+    if (s.public_ip) { pubK.textContent = 'Public · GSLT verified'; pubK.className = 'cp-k ok'; }
+    else             { pubK.textContent = 'Public · GSLT not set';  pubK.className = 'cp-k';   }
+
+    const warn = el('cp-warn');
+    if (!s.sv_password) {
+      warn.classList.remove('hidden');
+      el('cp-warn-l').textContent = 'No password set · anyone with the IP can join.';
+      el('cp-warn-a').onclick = () => { this.hide(); navigate('config'); };
+    } else {
+      warn.classList.add('hidden');
+    }
+  },
+  toggle() {
+    const pop = el('connect-popover');
+    pop.classList.contains('hidden') ? this.show() : this.hide();
+  },
+  show() {
+    const pop = el('connect-popover');
+    const btn = el('hdr-connect-btn');
+    pop.classList.remove('hidden');
+    const r = btn.getBoundingClientRect();
+    pop.style.left = Math.max(8, r.left) + 'px';
+    pop.style.right = 'auto';
+    pop.style.margin = '0';
+  },
+  hide() { el('connect-popover').classList.add('hidden'); }
+};
+
+/* ── ⌘K Command palette ───────────────────────────────────────────────────── */
+window.Palette = {
+  results: [],
+  selected: 0,
+  rconOnly: false,
+  init() {
+    const trigger = el('hdr-cmd-trigger');
+    if (trigger) trigger.addEventListener('click', () => this.show());
+
+    document.addEventListener('keydown', e => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault(); this.show();
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'p' && !e.target.matches('input,textarea,select')) {
+        e.preventDefault(); if (state.server.is_local) this.show(true);   // RCON is local-only
+      }
+      if (e.key === 'Escape' && !el('palette-overlay').classList.contains('hidden')) {
+        e.preventDefault(); this.hide();
+      }
+    });
+
+    const input = el('palette-input');
+    if (input) {
+      input.addEventListener('input', () => this.update(input.value));
+      input.addEventListener('keydown', e => {
+        if (e.key === 'ArrowDown')      { e.preventDefault(); this.move(1); }
+        else if (e.key === 'ArrowUp')   { e.preventDefault(); this.move(-1); }
+        else if (e.key === 'Enter')     { e.preventDefault(); this.execute(); }
+      });
+    }
+    const dim = el('palette-dim');
+    if (dim) dim.addEventListener('click', () => this.hide());
+  },
+  show(rconOnly = false) {
+    this.rconOnly = !!rconOnly && !!state.server.is_local;   // RCON is local-only
+    el('palette-overlay').classList.remove('hidden');
+    const input = el('palette-input');
+    input.value = '';
+    input.placeholder = this.rconOnly
+      ? 'rcon command…'
+      : 'type a command, name, map, or RCON …';
+    input.focus();
+    this.update('');
+  },
+  hide() {
+    el('palette-overlay').classList.add('hidden');
+    this.rconOnly = false;
+  },
+  _allCommands() {
+    const cmds = [];
+
+    // Navigation
+    [['Status','status'], ['Players','players'], ['Maps','maps'], ['Appearance','appearance'], ['Config','config']]
+      .forEach(([label, hash]) => {
+        cmds.push({ kind: 'goto', label: `Go to ${label}`, run: () => navigate(hash) });
+      });
+
+    // Match controls (only when running)
+    if (state.server.running) {
+      cmds.push({ kind: 'match', label: 'Restart round', run: async () => { await api.restartRound(); toast('Round restarted'); } });
+      cmds.push({ kind: 'match', label: 'End warmup',    run: async () => { await api.endWarmup();    toast('Warmup ended'); } });
+      cmds.push({ kind: 'match', label: 'Pause match',   run: async () => { await api.pause();        toast('Match paused'); } });
+      cmds.push({ kind: 'match', label: 'Unpause match', run: async () => { await api.unpause();      toast('Match unpaused'); } });
+      cmds.push({ kind: 'server', label: 'Stop server',    run: async () => { await api.stop();        toast('Server stopping…'); } });
+      cmds.push({ kind: 'server', label: 'Restart server', run: doQuickRestart });
+    }
+
+    // Bots
+    cmds.push({ kind: 'bot', label: 'Add 1 bot',     run: async () => { await api.addBots(1); toast('+1 bot');    } });
+    cmds.push({ kind: 'bot', label: 'Add 5 bots',    run: async () => { await api.addBots(5); toast('+5 bots');   } });
+    cmds.push({ kind: 'bot', label: 'Kick all bots', run: async () => { await api.kickBots(); toast('Bots kicked'); } });
+
+    // Maps — up to 30
+    (state.maps || []).slice(0, 30).forEach(m => {
+      cmds.push({
+        kind: 'map',
+        label: `Change map to ${m}`,
+        hint: state.server.mode || 'competitive',
+        run: async () => { await api.map(m, state.server.mode || 'competitive', false); toast(`Changing to ${m}…`); }
+      });
+    });
+
+    return cmds;
+  },
+  update(query) {
+    const q = query.toLowerCase().trim();
+
+    // RCON-only mode: every input is a raw RCON command
+    if (this.rconOnly) {
+      this.results = q
+        ? [{ kind: 'rcon', label: query, hint: 'raw RCON', run: () => this._sendRcon(query) }]
+        : [];
+      this.selected = 0;
+      this.render();
+      return;
+    }
+
+    let results = q
+      ? this._allCommands().filter(c => c.label.toLowerCase().includes(q))
+      : this._allCommands();
+
+    // RCON fallthrough: `rcon ...` or `/...` prefix (local sessions only)
+    if (state.server.is_local && (q.startsWith('rcon ') || q.startsWith('/'))) {
+      const raw = query.replace(/^(rcon\s+|\/)/i, '');
+      if (raw.trim()) {
+        results = [
+          { kind: 'rcon', label: raw, hint: 'raw RCON', run: () => this._sendRcon(raw) },
+          ...results
+        ];
+      }
+    }
+
+    this.results = results.slice(0, 60);
+    this.selected = 0;
+    this.render();
+  },
+  async _sendRcon(cmd) {
+    try {
+      const r = await api.rcon(cmd);
+      toast((r.response || '(no output)').slice(0, 100));
+    } catch (e) { toast(e.message, 'var(--bad)'); }
+  },
+  render() {
+    const c = el('palette-results');
+    c.innerHTML = '';
+
+    if (!this.results.length) {
+      const empty = document.createElement('div');
+      empty.className = 'palette-empty';
+      empty.textContent = this.rconOnly ? 'type a raw RCON command' : 'no matches';
+      c.appendChild(empty);
+      el('palette-count').textContent = '0 results';
+      return;
+    }
+
+    // Group by kind
+    const groups = {};
+    this.results.forEach((r, i) => {
+      (groups[r.kind] = groups[r.kind] || []).push({ ...r, idx: i });
+    });
+    const order  = ['rcon', 'goto', 'match', 'server', 'bot', 'map'];
+    const labels = { rcon: 'RCON', goto: 'Navigate', match: 'Match', server: 'Server', bot: 'Bots', map: 'Maps' };
+
+    order.forEach(k => {
+      if (!groups[k]) return;
+      const sec = document.createElement('div');
+      sec.className = 'palette-section';
+      const grp = document.createElement('div');
+      grp.className = 'palette-grp';
+      grp.textContent = labels[k] || k;
+      sec.appendChild(grp);
+      groups[k].forEach(r => {
+        const row = document.createElement('div');
+        row.className = 'palette-row' + (r.idx === this.selected ? ' active' : '');
+
+        const kind = document.createElement('span');
+        kind.className = 'palette-kind';
+        kind.textContent = k;
+        row.appendChild(kind);
+
+        const label = document.createElement('span');
+        label.className = 'palette-label';
+        label.textContent = r.label;
+        if (r.hint) {
+          const dim = document.createElement('span');
+          dim.className = 'dim';
+          dim.textContent = ' · ' + r.hint;
+          label.appendChild(dim);
+        }
+        row.appendChild(label);
+
+        if (r.idx === this.selected) {
+          const ent = document.createElement('span');
+          ent.className = 'palette-ent';
+          ent.textContent = '↵';
+          row.appendChild(ent);
+        }
+
+        row.addEventListener('click', () => { this.selected = r.idx; this.execute(); });
+        sec.appendChild(row);
+      });
+      c.appendChild(sec);
+    });
+
+    el('palette-count').textContent = this.results.length + (this.results.length === 1 ? ' result' : ' results');
+  },
+  move(d) {
+    if (!this.results.length) return;
+    this.selected = (this.selected + d + this.results.length) % this.results.length;
+    this.render();
+  },
+  execute() {
+    const r = this.results[this.selected];
+    if (!r) return;
+    this.hide();
+    try { Promise.resolve(r.run()).catch(e => toast(e.message, 'var(--bad)')); }
+    catch (e) { toast(e.message, 'var(--bad)'); }
+  }
+};
+
+/* ── Wire shell modules after init has set up DOM + state ─────────────────── */
+document.addEventListener('DOMContentLoaded', () => {
+  // run after init() finishes its first state poll (modest delay)
+  setTimeout(() => {
+    LogDrawer.init();
+    ConnectPopover.init();
+    Palette.init();
+  }, 200);
+});

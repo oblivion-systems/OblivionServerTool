@@ -14,6 +14,13 @@ const api = (() => {
     };
     if (body !== null) opts.body = JSON.stringify(body);
     const r = await fetch(path, opts);
+    // Session expired / not authenticated: reload so the server shows the PIN
+    // screen — except for the login call itself, whose 401 means "wrong PIN"
+    // and must surface as an error the login form can display.
+    if (r.status === 401 && !path.includes('/api/auth/login')) {
+      location.reload();
+      throw new Error('Session expired');
+    }
     const data = await r.json().catch(() => ({}));
     if (!r.ok) { const err = new Error(data.error || r.statusText); Object.assign(err, data); throw err; }
     return data;

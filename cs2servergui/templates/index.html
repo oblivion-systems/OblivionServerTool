@@ -14,12 +14,21 @@
 <!-- ═══════════════════════════════════════════════════════════════ LOGIN PAGE -->
 <div id="login-screen">
   <div class="login-card">
-    <div class="login-brand-row">
-      <img src="/static/images/emblem.png" class="login-emblem" alt="Oblivion">
-      <div class="login-brand-text">
-        <div class="login-brand-name">Oblivion</div>
-        <div class="login-sub">Server Tool</div>
+    <div class="login-stage">
+      <div class="login-emblem-frame">
+        <span class="lb-bracket lb-tl"></span>
+        <span class="lb-bracket lb-tr"></span>
+        <span class="lb-bracket lb-bl"></span>
+        <span class="lb-bracket lb-br"></span>
+        <img src="/static/images/emblem.png" class="login-emblem" alt="Oblivion">
       </div>
+      <div class="login-brand-name">OBLIVION</div>
+      <div class="login-sub">SERVER · TOOL</div>
+    </div>
+    <div class="login-divider">
+      <span class="ld-dash"></span>
+      <span class="ld-label">authenticate</span>
+      <span class="ld-dash"></span>
     </div>
     <div class="pin-dots" id="pin-dots">
       {% for i in range(pin_len) %}
@@ -50,8 +59,10 @@
 
   function dots() {
     for (let i = 0; i < PIN_LEN; i++) {
-      document.getElementById('pd' + i).className =
-        'pin-dot' + (i < pin.length ? ' filled' : '');
+      const cls = i < pin.length
+        ? 'pin-dot filled'
+        : (i === pin.length ? 'pin-dot active' : 'pin-dot');
+      document.getElementById('pd' + i).className = cls;
     }
   }
   function shake() {
@@ -118,11 +129,48 @@
       <div class="state-dot" id="hdr-dot"></div>
       <span id="hdr-state-label">Offline</span>
     </div>
+
+    <!-- Connect button — opens popover with LAN/Public connect strings -->
+    <button id="hdr-connect-btn" class="hdr-connect hidden" title="Share this server">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 6l-4-4-4 4"/><path d="M12 2v13"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></svg>
+      <span>Connect</span>
+    </button>
+
     <div id="hdr-actions">
+      <!-- Ctrl+K command palette trigger -->
+      <button id="hdr-cmd-trigger" class="hdr-cmd" title="Search / command (Ctrl+K)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <span class="hdr-cmd-ph">Search · type a command…</span>
+        <span class="hdr-cmd-kbd">Ctrl K</span>
+      </button>
       <span id="app-update-badge" class="update-badge hidden"></span>
       <span id="cs2-update-badge" class="update-badge hidden"></span>
     </div>
   </header>
+
+  <!-- Connect popover — anchored below the Connect button, toggled by app.js -->
+  <div id="connect-popover" class="connect-popover hidden">
+    <div class="cp-h">Share this server</div>
+    <div class="cp-row" id="cp-lan-row">
+      <div>
+        <div class="cp-k">LAN</div>
+        <div class="cp-v" id="cp-lan-val">—</div>
+      </div>
+      <button class="cp-copy" data-target="lan">Copy</button>
+    </div>
+    <div class="cp-row" id="cp-pub-row">
+      <div>
+        <div class="cp-k" id="cp-pub-k">Public</div>
+        <div class="cp-v" id="cp-pub-val">—</div>
+      </div>
+      <button class="cp-copy cp-copy-accent" data-target="pub">Copy</button>
+    </div>
+    <div class="cp-warn hidden" id="cp-warn">
+      <span class="cp-warn-d"></span>
+      <span class="cp-warn-l" id="cp-warn-l"></span>
+      <a class="cp-warn-a" id="cp-warn-a">Set →</a>
+    </div>
+  </div>
 
   <!-- Body -->
   <div id="body">
@@ -140,10 +188,6 @@
       <a class="nav-item" data-page="maps"     href="#maps">
         <svg viewBox="0 0 24 24"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/><line x1="9" y1="3" x2="9" y2="18"/><line x1="15" y1="6" x2="15" y2="21"/></svg>
         Maps
-      </a>
-      <a class="nav-item" data-page="workshop" href="#workshop">
-        <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-        Workshop
       </a>
       <a class="nav-item" data-page="appearance" href="#appearance">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2a10 10 0 1 0 10 10"/><path d="M12 8a4 4 0 1 0 4 4"/></svg>
@@ -167,6 +211,39 @@
     <!-- Page content (rendered by app.js) -->
     <main id="content"></main>
 
+  </div>
+
+  <!-- Persistent log drawer — pinned to bottom of every page, ` to toggle -->
+  <div id="log-drawer" class="log-drawer">
+    <div class="log-drawer-bar" id="log-drawer-bar">
+      <span class="log-drawer-chev" id="log-drawer-chev">▸</span>
+      <span class="log-drawer-lbl">Log</span>
+      <span class="log-drawer-heart"></span>
+      <span class="log-drawer-last" id="log-drawer-last"></span>
+      <span class="log-drawer-meta hidden" id="log-drawer-meta">streaming · <span id="log-drawer-count">0</span> lines</span>
+      <span class="log-drawer-key">`</span>
+    </div>
+    <div class="log-drawer-body hidden" id="log-drawer-body"></div>
+  </div>
+
+  <!-- ⌘K command palette — mounted but hidden until invoked -->
+  <div id="palette-overlay" class="palette-overlay hidden">
+    <div class="palette-dim" id="palette-dim"></div>
+    <div class="palette" id="palette">
+      <div class="palette-head">
+        <span class="palette-prompt">›</span>
+        <input id="palette-input" type="text" placeholder="type a command, name, map, or RCON…" autocomplete="off" spellcheck="false">
+        <span class="palette-esc">esc</span>
+      </div>
+      <div class="palette-results" id="palette-results"></div>
+      <div class="palette-foot">
+        <span><span class="palette-k">↑↓</span>navigate</span>
+        <span><span class="palette-k">↵</span>run</span>
+        <span><span class="palette-k">Ctrl P</span>RCON only</span>
+        <span class="palette-foot-spacer"></span>
+        <span id="palette-count">0 results</span>
+      </div>
+    </div>
   </div>
 
   <!-- Status bar -->
