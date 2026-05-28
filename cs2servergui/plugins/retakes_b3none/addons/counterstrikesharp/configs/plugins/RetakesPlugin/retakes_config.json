@@ -1,0 +1,9 @@
+{
+  "Game": {
+    "EnableFallbackAllocation": false
+  },
+  "Team": {
+    "RoundsToScramble": 3
+  },
+  "Version": 2
+}
