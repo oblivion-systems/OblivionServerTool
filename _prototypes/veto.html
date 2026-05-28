@@ -1,0 +1,1622 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Oblivion · Map Veto</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow-x: hidden; }
+  :root {
+    --bg-0: oklch(0.14 0.024 295);
+    --bg-1: oklch(0.18 0.028 295);
+    --bg-2: oklch(0.23 0.032 295);
+    --bg-3: oklch(0.28 0.036 295);
+    --bg-elev: oklch(0.22 0.038 295);
+    --line-1: oklch(0.30 0.032 295);
+    --line-2: oklch(0.40 0.036 295);
+    --text-1: oklch(0.98 0.005 295);
+    --text-2: oklch(0.80 0.020 295);
+    --text-3: oklch(0.62 0.030 295);
+    --text-4: oklch(0.48 0.030 295);
+    --accent: oklch(0.65 0.21 305);
+    --accent-h: oklch(0.78 0.18 305);
+    --accent-lo: oklch(0.65 0.21 305 / 0.10);
+    --accent-li: oklch(0.65 0.21 305 / 0.18);
+    --accent-on: oklch(0.13 0.018 290);
+    --ok:   oklch(0.74 0.16 150);
+    --warn: oklch(0.80 0.14 80);
+    --bad:  oklch(0.65 0.18 25);
+    --side-a: oklch(0.65 0.15 25);
+    --side-b: oklch(0.70 0.13 235);
+    --glow-1: oklch(0.65 0.21 305 / 0.55);
+    --glow-2: oklch(0.65 0.21 305 / 0.35);
+    --glow-3: oklch(0.65 0.21 305 / 0.18);
+    --scrim:  oklch(0.06 0.018 290 / 0.7);
+    --font-sans: 'Space Grotesk', system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', 'Cascadia Code', monospace;
+  }
+  body {
+    background: var(--bg-0); color: var(--text-1);
+    font-family: var(--font-sans); font-size: 14px;
+    font-feature-settings: 'ss01', 'cv11';
+    background-image:
+      radial-gradient(ellipse 1200px 900px at 10% -5%,  oklch(0.62 0.22 305 / 0.20) 0%, transparent 55%),
+      radial-gradient(ellipse 1000px 700px at 100% 105%, oklch(0.62 0.22 305 / 0.16) 0%, transparent 55%),
+      radial-gradient(ellipse 900px 700px at 50% 50%,    oklch(0.55 0.20 285 / 0.08) 0%, transparent 65%);
+    background-attachment: fixed;
+    padding: 32px 32px 64px;
+    display: flex; flex-direction: column; align-items: center; gap: 24px;
+    min-height: 100vh;
+  }
+  .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+  a { color: inherit; text-decoration: none; }
+  button { font-family: inherit; cursor: pointer; }
+  input { font-family: inherit; }
+
+  /* ═══════════════════════════════════════════ HEADER */
+  .hdr {
+    width: min(1280px, 100%);
+    display: flex; align-items: center; gap: 18px;
+    padding-bottom: 18px; border-bottom: 1px solid var(--line-1);
+  }
+  .hdr-brand { display: flex; align-items: center; gap: 12px; }
+  .hdr-emblem { height: 32px; filter: drop-shadow(0 0 18px var(--glow-2)); }
+  .hdr-name { font-family: var(--font-mono); font-size: 12px; font-weight: 600; letter-spacing: 0.28em; text-transform: uppercase; }
+  .hdr-sep { color: var(--text-4); font-family: var(--font-mono); font-size: 12px; }
+  .hdr-title { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--text-3); }
+  .hdr-spacer { flex: 1; }
+  .btn {
+    padding: 9px 16px; font-family: var(--font-mono); font-size: 11px;
+    letter-spacing: 0.18em; text-transform: uppercase; color: var(--text-2);
+    border: 1px solid var(--line-1); background: var(--bg-2); cursor: pointer;
+    transition: background .12s, color .12s, border-color .12s;
+  }
+  .btn:hover { background: var(--bg-3); color: var(--text-1); }
+  .btn:disabled { opacity: 0.35; pointer-events: none; }
+  .btn-accent {
+    background: var(--accent); color: var(--accent-on); border-color: var(--accent);
+    box-shadow: 0 0 20px -6px var(--glow-1);
+  }
+  .btn-accent:hover { background: var(--accent-h); box-shadow: 0 0 26px -4px var(--glow-1); }
+  .btn-ghost { background: transparent; }
+
+  /* ═══════════════════════════════════════════ STAGE INDICATOR */
+  .stages-pill {
+    width: min(1280px, 100%);
+    display: flex; align-items: center; gap: 0;
+    border: 1px solid var(--line-1); background: var(--bg-1);
+  }
+  .sp-cell {
+    flex: 1; padding: 12px 18px;
+    display: flex; align-items: center; gap: 10px;
+    border-right: 1px solid var(--line-1);
+    color: var(--text-4);
+    font-family: var(--font-mono);
+    font-size: 10px; letter-spacing: 0.20em; text-transform: uppercase;
+    transition: color .25s, background .25s;
+    position: relative;
+  }
+  .sp-cell:last-child { border-right: none; }
+  .sp-cell .sp-num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 20px; height: 20px;
+    border: 1px solid currentColor;
+    font-size: 11px; font-weight: 700; flex-shrink: 0;
+    clip-path: polygon(0 0, calc(100% - 4px) 0, 100% 4px, 100% 100%, 0 100%);
+  }
+  .sp-cell.done { color: var(--ok); }
+  .sp-cell.done .sp-num { color: var(--ok); border-color: var(--ok); background: oklch(0.74 0.16 150 / 0.12); }
+  .sp-cell.active { color: var(--accent); background: var(--accent-lo); }
+  .sp-cell.active::after {
+    content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
+    background: var(--accent); box-shadow: 0 0 12px var(--glow-1);
+    animation: stage-pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes stage-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+  /* ═══════════════════════════════════════════ STAGES */
+  .stage {
+    width: min(1280px, 100%);
+    display: none;
+    flex-direction: column;
+    gap: 22px;
+    animation: stage-in .35s ease-out;
+  }
+  .stage.active { display: flex; }
+  @keyframes stage-in {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .stage-head {
+    display: flex; align-items: baseline; gap: 14px;
+  }
+  .stage-h {
+    font-size: 26px; font-weight: 600; letter-spacing: -0.01em; color: var(--text-1);
+  }
+  .stage-sub {
+    font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.14em;
+    color: var(--text-3); text-transform: uppercase;
+  }
+  .stage-actions {
+    display: flex; gap: 10px; align-items: center;
+    padding-top: 6px;
+  }
+
+  /* ═══════════════════════════════════════════ STAGE 1 · ROSTER */
+  .roster-team-names {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
+  }
+  .roster-tn-card {
+    background: linear-gradient(180deg, var(--bg-elev) 0%, var(--bg-1) 100%);
+    border: 1px solid var(--line-1);
+    padding: 14px 18px;
+    display: flex; flex-direction: column; gap: 8px;
+    clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 0 100%);
+  }
+  .roster-tn-card.a { border-left: 2px solid var(--side-a); }
+  .roster-tn-card.b { border-left: 2px solid var(--side-b); }
+  .roster-tn-card label {
+    font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.22em;
+    text-transform: uppercase; color: var(--text-3);
+  }
+  .roster-tn-card.a label { color: var(--side-a); }
+  .roster-tn-card.b label { color: var(--side-b); }
+  .roster-tn-card input {
+    background: transparent; border: none; outline: none; padding: 0;
+    color: var(--text-1); font-size: 18px; font-weight: 600;
+    border-bottom: 1px dashed transparent; transition: border-color .15s;
+  }
+  .roster-tn-card input:hover { border-bottom-color: var(--line-2); }
+  .roster-tn-card input:focus { border-bottom-color: var(--accent); }
+
+  .roster-grid {
+    display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;
+  }
+  .roster-slot {
+    display: grid; grid-template-columns: 28px 1fr;
+    align-items: center;
+    background: var(--bg-1); border: 1px solid var(--line-1);
+    padding: 10px 14px;
+    transition: border-color .15s, background .15s;
+  }
+  .roster-slot:focus-within { border-color: var(--accent); background: var(--bg-2); }
+  .roster-slot.filled { border-color: var(--line-2); }
+  .roster-slot .rs-num {
+    font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.16em;
+    color: var(--text-4);
+  }
+  .roster-slot.filled .rs-num { color: var(--accent); }
+  .roster-slot input {
+    background: transparent; border: none; outline: none;
+    color: var(--text-1); font-size: 14px;
+    padding: 4px 0;
+  }
+  .roster-slot input::placeholder { color: var(--text-4); font-style: italic; }
+
+  .roster-helper {
+    font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.04em; color: var(--text-3);
+  }
+  .roster-helper strong { color: var(--text-1); font-weight: 400; }
+  .roster-progress {
+    display: flex; align-items: center; gap: 6px;
+    font-family: var(--font-mono); font-size: 11px; color: var(--text-2);
+    letter-spacing: 0.14em; text-transform: uppercase;
+  }
+  .roster-progress .ring {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 22px; height: 22px;
+    border: 2px solid var(--text-4);
+    color: var(--text-1); font-size: 10px;
+    transition: border-color .15s, color .15s;
+    clip-path: polygon(0 0, calc(100% - 4px) 0, 100% 4px, 100% 100%, 0 100%);
+  }
+  .roster-progress.ready .ring { border-color: var(--accent); color: var(--accent); }
+
+  /* ═══════════════════════════════════════════ STAGE 2 · TEAMS */
+  .teams-cols {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+  }
+  .team-col {
+    background: linear-gradient(180deg, var(--bg-elev) 0%, var(--bg-1) 100%);
+    border: 1px solid var(--line-1);
+    padding: 22px;
+    position: relative;
+    clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 0 100%);
+    box-shadow: 0 6px 30px -14px var(--glow-2);
+  }
+  .team-col.right { clip-path: polygon(14px 0, 100% 0, 100% 100%, 0 100%, 0 14px); }
+  .team-col.a { border-left: 2px solid var(--side-a); }
+  .team-col.b { border-right: 2px solid var(--side-b); }
+  .team-col-head {
+    display: flex; align-items: center; gap: 12px;
+    padding-bottom: 14px; border-bottom: 1px solid var(--line-1);
+    margin-bottom: 14px;
+  }
+  .team-col.right .team-col-head { flex-direction: row-reverse; }
+  .team-col-tag {
+    font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase;
+    padding: 4px 10px; border-left: 2px solid;
+  }
+  .team-col.a .team-col-tag { color: var(--side-a); border-color: var(--side-a); }
+  .team-col.b .team-col-tag { color: var(--side-b); border-color: var(--side-b); border-left: none; border-right: 2px solid; }
+  .team-col-name {
+    font-size: 22px; font-weight: 600; color: var(--text-1); flex: 1;
+  }
+  .team-col.right .team-col-name { text-align: right; }
+  .team-col-count {
+    font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--text-3);
+  }
+  .team-col-list {
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .team-chip {
+    display: grid; grid-template-columns: 30px 1fr auto;
+    align-items: center; gap: 12px;
+    padding: 10px 14px;
+    background: var(--bg-0); border: 1px solid var(--line-1);
+    position: relative;
+    animation: chip-in .5s cubic-bezier(.2,.7,.4,1.2) backwards;
+    transition: border-color .15s, transform .15s, box-shadow .15s, background .15s;
+  }
+  @keyframes chip-in {
+    from { opacity: 0; transform: scale(0.85) translateY(8px); }
+    to   { opacity: 1; transform: scale(1) translateY(0); }
+  }
+  .team-col.a .team-chip { border-left: 2px solid oklch(0.65 0.15 25 / 0.35); }
+  .team-col.b .team-chip { border-left: 2px solid oklch(0.70 0.13 235 / 0.35); }
+  .team-chip .tc-avatar {
+    width: 26px; height: 26px;
+    display: flex; align-items: center; justify-content: center;
+    border: 1px solid;
+    font-family: var(--font-mono); font-size: 11px; font-weight: 700;
+    clip-path: polygon(0 0, calc(100% - 4px) 0, 100% 4px, 100% 100%, 0 100%);
+  }
+  .team-col.a .team-chip .tc-avatar { color: var(--side-a); }
+  .team-col.b .team-chip .tc-avatar { color: var(--side-b); }
+  .team-chip .tc-name {
+    font-size: 14px; color: var(--text-1); font-weight: 500;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+
+  /* ═══════════════════════════════════════════ STAGE 3 · VOTE */
+  .vote-meta {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 6px;
+    font-family: var(--font-mono); font-size: 11px;
+    letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-3);
+  }
+  .vote-meta .vm-progress {
+    margin-left: auto;
+    display: inline-flex; align-items: center; gap: 8px;
+    color: var(--text-2);
+  }
+  .vote-meta .vm-progress.full { color: var(--ok); }
+  .vote-meta .vm-progress .dots { display: inline-flex; gap: 4px; }
+  .vote-meta .vm-progress .dot { width: 7px; height: 7px; background: var(--bg-3); }
+  .vote-meta .vm-progress .dot.filled { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+
+  .team-chip.votable { cursor: pointer; }
+  .team-chip.votable:hover { background: var(--bg-2); transform: translateX(3px); border-color: var(--accent-li); }
+  .team-chip.captain.a {
+    border-color: var(--side-a) !important;
+    box-shadow: 0 0 30px -8px var(--side-a);
+    background: oklch(0.65 0.15 25 / 0.08);
+  }
+  .team-chip.captain.b {
+    border-color: var(--side-b) !important;
+    box-shadow: 0 0 30px -8px var(--side-b);
+    background: oklch(0.70 0.13 235 / 0.08);
+  }
+  .team-chip .tc-votes {
+    font-family: var(--font-mono); font-size: 14px; font-weight: 700;
+    color: var(--text-1); font-variant-numeric: tabular-nums;
+    display: flex; align-items: center; gap: 6px;
+    transition: color .25s, transform .25s;
+  }
+  .team-chip .tc-votes .vote-pip {
+    width: 4px; height: 14px; background: var(--text-4);
+    transition: background .15s;
+  }
+  .team-chip .tc-votes .vote-pip.on {
+    background: var(--accent); box-shadow: 0 0 8px var(--accent);
+  }
+  .team-chip .tc-captain-mark {
+    position: absolute; right: -6px; top: -6px;
+    padding: 3px 8px;
+    font-family: var(--font-mono); font-size: 9px; font-weight: 700;
+    letter-spacing: 0.18em; text-transform: uppercase;
+    color: var(--bg-0); background: var(--accent);
+    box-shadow: 0 0 14px var(--accent);
+    opacity: 0; transform: scale(0.7) rotate(-8deg);
+    transition: opacity .35s, transform .35s cubic-bezier(.2,.7,.4,1.5);
+    pointer-events: none;
+  }
+  .team-chip.captain .tc-captain-mark { opacity: 1; transform: scale(1) rotate(-6deg); }
+  .team-chip.locked-out {
+    opacity: 0.55; pointer-events: none;
+  }
+  .team-chip.locked-out .tc-votes { color: var(--text-4); }
+
+  /* ═══════════════════════════════════════════ STAGE 4 · CAPTAIN LINKS */
+  .links-cols {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+  }
+  .link-card {
+    background: linear-gradient(180deg, var(--bg-elev) 0%, var(--bg-1) 100%);
+    border: 1px solid var(--line-1);
+    padding: 24px;
+    position: relative;
+    clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 0 100%);
+    box-shadow: 0 6px 40px -16px var(--glow-2);
+  }
+  .link-card.a { border-left: 2px solid var(--side-a); }
+  .link-card.b { border-left: 2px solid var(--side-b); }
+  .link-card-head {
+    display: flex; align-items: center; gap: 14px;
+    margin-bottom: 18px;
+  }
+  .link-card-avatar {
+    width: 48px; height: 48px;
+    display: flex; align-items: center; justify-content: center;
+    border: 2px solid;
+    font-family: var(--font-mono); font-size: 18px; font-weight: 700;
+    clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 0 100%);
+  }
+  .link-card.a .link-card-avatar { color: var(--side-a); }
+  .link-card.b .link-card-avatar { color: var(--side-b); }
+  .link-card-meta { display: flex; flex-direction: column; gap: 4px; }
+  .link-card-tag {
+    font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.22em;
+    text-transform: uppercase;
+  }
+  .link-card.a .link-card-tag { color: var(--side-a); }
+  .link-card.b .link-card-tag { color: var(--side-b); }
+  .link-card-name {
+    font-size: 20px; font-weight: 600; color: var(--text-1);
+  }
+  .link-row {
+    display: grid; grid-template-columns: 1fr auto; gap: 8px;
+    align-items: center;
+    padding: 12px 14px;
+    background: var(--bg-0); border: 1px solid var(--line-1);
+    margin-bottom: 10px;
+  }
+  .link-row .lr-url {
+    font-family: var(--font-mono); font-size: 12px; color: var(--text-1);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+  .link-row .lr-copy {
+    padding: 6px 12px;
+    font-family: var(--font-mono); font-size: 10px;
+    letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--text-2); background: var(--bg-2); border: 1px solid var(--line-1);
+    transition: background .12s, color .12s;
+  }
+  .link-row .lr-copy:hover { background: var(--bg-3); color: var(--text-1); }
+  .link-row .lr-copy.copied { background: var(--ok); color: var(--bg-0); border-color: var(--ok); }
+  .link-fine {
+    font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.04em;
+    color: var(--text-3); line-height: 1.55;
+    padding: 10px 12px; border-left: 2px solid var(--accent);
+    background: var(--accent-lo);
+  }
+  .link-fine strong { color: var(--accent); font-weight: 400; }
+
+  /* ═══════════════════════════════════════════ STAGE 5 · VETO */
+  .veto-captains {
+    display: grid; grid-template-columns: 1fr auto 1fr; gap: 16px; align-items: stretch;
+  }
+  .captain {
+    background: linear-gradient(180deg, var(--bg-elev) 0%, var(--bg-1) 100%);
+    border: 1px solid var(--line-1);
+    padding: 18px 22px;
+    position: relative;
+    transition: border-color .25s, box-shadow .25s;
+    clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 0 100%);
+  }
+  .captain.right { clip-path: polygon(14px 0, 100% 0, 100% 100%, 0 100%, 0 14px); }
+  .captain.active.a {
+    border-color: var(--side-a);
+    box-shadow: 0 0 40px -14px var(--side-a), inset 0 0 50px -30px var(--side-a);
+  }
+  .captain.active.b {
+    border-color: var(--side-b);
+    box-shadow: 0 0 40px -14px var(--side-b), inset 0 0 50px -30px var(--side-b);
+  }
+  .captain .cap-top { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+  .captain.right .cap-top { flex-direction: row-reverse; }
+  .captain .cap-avatar {
+    width: 36px; height: 36px; flex-shrink: 0;
+    border: 2px solid currentColor;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--font-mono); font-size: 14px; font-weight: 700;
+    clip-path: polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 0 100%);
+  }
+  .captain.a .cap-avatar { color: var(--side-a); }
+  .captain.b .cap-avatar { color: var(--side-b); }
+  .captain .cap-info { flex: 1; min-width: 0; }
+  .captain.right .cap-info { text-align: right; }
+  .captain .cap-side {
+    font-family: var(--font-mono);
+    font-size: 9px; letter-spacing: 0.22em; text-transform: uppercase;
+    margin-bottom: 2px;
+  }
+  .captain.a .cap-side { color: var(--side-a); }
+  .captain.b .cap-side { color: var(--side-b); }
+  .captain .cap-name {
+    color: var(--text-1); font-size: 18px; font-weight: 600;
+  }
+  .captain .cap-counts {
+    display: flex; gap: 16px;
+    padding-top: 12px; border-top: 1px solid var(--line-1);
+    font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  }
+  .captain.right .cap-counts { justify-content: flex-end; }
+  .cap-count { display: flex; flex-direction: column; gap: 2px; }
+  .cap-count .k { font-size: 9px; letter-spacing: 0.20em; text-transform: uppercase; color: var(--text-4); }
+  .cap-count .v { font-size: 17px; color: var(--text-1); line-height: 1; }
+  .cap-count .v.ok { color: var(--ok); }
+  .cap-count .v.bad { color: var(--bad); }
+
+  .captain .turn-badge {
+    position: absolute; top: 12px; right: 14px;
+    padding: 4px 10px;
+    font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.22em; text-transform: uppercase;
+    color: var(--bg-0);
+    opacity: 0; transform: translateY(-4px); transition: opacity .25s, transform .25s;
+    border: none; white-space: nowrap;
+    clip-path: polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 0 100%);
+  }
+  .captain.right .turn-badge { right: auto; left: 14px;
+    clip-path: polygon(6px 0, 100% 0, 100% 100%, 0 100%, 0 6px); }
+  .captain.active .turn-badge { opacity: 1; transform: translateY(0); }
+  .captain.active.a .turn-badge { background: var(--side-a); box-shadow: 0 0 24px var(--side-a); }
+  .captain.active.b .turn-badge { background: var(--side-b); box-shadow: 0 0 24px var(--side-b); }
+  .captain .turn-badge .pulse {
+    display: inline-block; width: 5px; height: 5px; border-radius: 50%;
+    background: var(--bg-0); margin-right: 6px; vertical-align: middle;
+    animation: turn-pulse 1.1s ease-in-out infinite;
+  }
+  @keyframes turn-pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%      { opacity: 0.4; transform: scale(0.7); }
+  }
+
+  .phase-pill {
+    align-self: center;
+    display: flex; flex-direction: column; align-items: center; gap: 8px;
+    padding: 12px 18px;
+    background: var(--bg-1); border: 1px solid var(--accent-li);
+    text-align: center; min-width: 140px;
+    clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%);
+  }
+  .phase-pill .pp-step { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--text-3); }
+  .phase-pill .pp-action {
+    font-family: var(--font-mono); font-size: 18px; font-weight: 600;
+    letter-spacing: 0.18em; color: var(--accent);
+  }
+  .phase-pill .pp-action.done { color: var(--ok); }
+
+  .mode-tabs { display: flex; border: 1px solid var(--line-1); flex-shrink: 0; }
+  .mode-tab {
+    padding: 7px 14px; font-family: var(--font-mono); font-size: 11px;
+    letter-spacing: 0.18em; text-transform: uppercase; color: var(--text-3);
+    border-right: 1px solid var(--line-1); background: var(--bg-1); border-top: none; border-bottom: none; border-left: none;
+    transition: background .12s, color .12s; cursor: pointer;
+  }
+  .mode-tab:last-child { border-right: none; }
+  .mode-tab:hover { color: var(--text-1); background: var(--bg-2); }
+  .mode-tab.active { background: var(--accent-lo); color: var(--accent); box-shadow: inset 0 -2px 12px -4px var(--glow-1); }
+
+  .sequence {
+    display: flex; gap: 0; border: 1px solid var(--line-1); background: var(--bg-1);
+  }
+  .seq-step {
+    flex: 1; padding: 12px 14px;
+    border-right: 1px solid var(--line-1);
+    display: flex; flex-direction: column; gap: 6px;
+    position: relative; transition: background .25s;
+  }
+  .seq-step:last-child { border-right: none; }
+  .seq-step .ss-num { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.18em; color: var(--text-4); }
+  .seq-step .ss-action {
+    font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .seq-step .ss-action::before { content: ''; width: 3px; height: 12px; background: currentColor; }
+  .seq-step.a .ss-action { color: var(--side-a); }
+  .seq-step.b .ss-action { color: var(--side-b); }
+  .seq-step.dec .ss-action { color: var(--accent); }
+  .seq-step .ss-result {
+    font-family: var(--font-mono); font-size: 11px; color: var(--text-2);
+    height: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .seq-step.current { background: var(--bg-2); }
+  .seq-step.current::after {
+    content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
+    background: var(--accent); box-shadow: 0 0 12px var(--glow-1);
+    animation: seq-current 1.4s ease-in-out infinite;
+  }
+  @keyframes seq-current { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+  .seq-step.done .ss-result { color: var(--text-1); }
+  .seq-step.done .ss-result.banned { color: var(--bad); text-decoration: line-through; text-decoration-color: oklch(0.65 0.18 25 / 0.5); }
+  .seq-step.done .ss-result.picked { color: var(--ok); }
+
+  .map-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+  .map-card {
+    position: relative;
+    background: var(--bg-1); border: 1px solid var(--line-1);
+    overflow: hidden; cursor: pointer;
+    aspect-ratio: 16 / 11;
+    transition: transform .2s cubic-bezier(.2,.7,.4,1.4), border-color .2s, box-shadow .2s, opacity .35s, filter .35s;
+    clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 0 100%);
+    will-change: transform;
+  }
+  .map-card:hover:not(.banned):not(.picked):not(.disabled) {
+    transform: translateY(-4px);
+    border-color: var(--accent-li);
+    box-shadow: 0 10px 30px -12px var(--glow-1);
+  }
+  .map-card.disabled { cursor: not-allowed; }
+  .map-card .mc-thumb {
+    position: absolute; inset: 0;
+    background-size: cover; background-position: center 35%;
+    filter: saturate(0.75) contrast(1.05) brightness(0.85);
+    transition: filter .35s, transform .35s;
+  }
+  .map-card .mc-overlay { position: absolute; inset: 0; background: linear-gradient(180deg, transparent 35%, oklch(0.10 0.024 295 / 0.85) 100%); }
+  .map-card .mc-name { position: absolute; bottom: 12px; left: 14px; right: 14px; font-family: var(--font-mono); font-size: 14px; font-weight: 600; letter-spacing: 0.06em; color: var(--text-1); z-index: 2; }
+  .map-card .mc-bracket { position: absolute; top: 8px; left: 8px; width: 14px; height: 14px; border-top: 1px solid var(--text-1); border-left: 1px solid var(--text-1); z-index: 2; transition: border-color .25s; }
+
+  .map-card.banned { opacity: 0.45; pointer-events: none; }
+  .map-card.banned .mc-thumb { filter: saturate(0) contrast(1.05) brightness(0.5); transform: scale(1.02); }
+  .map-card.banned .mc-overlay { background: linear-gradient(180deg, oklch(0.65 0.18 25 / 0.18) 0%, oklch(0.65 0.18 25 / 0.35) 100%); }
+  .map-card.banned .mc-name { color: var(--text-3); }
+  .map-card.banned .mc-bracket { border-color: var(--bad); }
+  .ban-stamp {
+    position: absolute; top: 50%; left: 50%;
+    transform: translate(-50%, -50%) scale(0.5) rotate(-12deg);
+    opacity: 0; z-index: 3;
+    border: 3px solid var(--bad); color: var(--bad);
+    padding: 6px 18px;
+    font-family: var(--font-mono); font-size: 18px; font-weight: 700; letter-spacing: 0.32em;
+    background: oklch(0.10 0.024 295 / 0.75); pointer-events: none;
+  }
+  .map-card.banned .ban-stamp { animation: stamp .55s cubic-bezier(.2,.9,.3,1.2) forwards; }
+  @keyframes stamp {
+    0%   { opacity: 0; transform: translate(-50%, -50%) scale(2.4) rotate(-25deg); }
+    60%  { opacity: 1; transform: translate(-50%, -50%) scale(0.85) rotate(-8deg); }
+    100% { opacity: 0.95; transform: translate(-50%, -50%) scale(1) rotate(-12deg); }
+  }
+
+  .map-card.picked.a { border-color: var(--side-a); box-shadow: 0 0 40px -10px var(--side-a); }
+  .map-card.picked.b { border-color: var(--side-b); box-shadow: 0 0 40px -10px var(--side-b); }
+  .map-card.picked .mc-thumb { filter: saturate(1.0) contrast(1.1) brightness(1); transform: scale(1.05); }
+  .map-card.picked .mc-bracket { border-color: var(--accent); }
+  .pick-badge {
+    position: absolute; top: 8px; right: 8px;
+    padding: 4px 9px;
+    font-family: var(--font-mono); font-size: 9px;
+    letter-spacing: 0.22em; text-transform: uppercase;
+    z-index: 3; opacity: 0; transform: translateX(20px);
+    pointer-events: none;
+  }
+  .map-card.picked .pick-badge { animation: badge-in .45s cubic-bezier(.2,.7,.4,1.2) forwards; }
+  .map-card.picked.a .pick-badge { color: var(--bg-0); background: var(--side-a); }
+  .map-card.picked.b .pick-badge { color: var(--bg-0); background: var(--side-b); }
+  @keyframes badge-in {
+    0%   { opacity: 0; transform: translateX(24px) scale(0.7); }
+    60%  { opacity: 1; transform: translateX(-2px) scale(1.05); }
+    100% { opacity: 1; transform: translateX(0) scale(1); }
+  }
+  @keyframes pick-pulse {
+    0%   { transform: scale(1); }
+    40%  { transform: scale(1.045); }
+    100% { transform: scale(1); }
+  }
+  .map-card.just-picked { animation: pick-pulse .55s cubic-bezier(.2,.7,.4,1.4); }
+  .map-card.decider {
+    border-color: var(--accent);
+    box-shadow: 0 0 50px -10px var(--glow-1), inset 0 0 80px -40px var(--glow-1);
+    animation: decider-reveal .9s cubic-bezier(.2,.7,.4,1.2) forwards;
+  }
+  .map-card.decider .mc-thumb { filter: saturate(1.1) contrast(1.1) brightness(1.05); }
+  @keyframes decider-reveal {
+    0%   { transform: scale(0.94); opacity: 0.6; }
+    50%  { transform: scale(1.06); opacity: 1; }
+    100% { transform: scale(1); }
+  }
+  .map-card.decider .pick-badge {
+    color: var(--bg-0); background: var(--accent);
+    animation: badge-in .45s cubic-bezier(.2,.7,.4,1.2) forwards .3s;
+  }
+
+  .result-panel {
+    background: linear-gradient(180deg, var(--bg-elev) 0%, var(--bg-1) 100%);
+    border: 1px solid var(--line-1);
+    padding: 22px 28px;
+    box-shadow: 0 6px 50px -16px var(--glow-2);
+    transition: opacity .35s, transform .35s;
+  }
+  .result-panel.hidden { opacity: 0; transform: translateY(20px); pointer-events: none; height: 0; padding: 0; border: 0; margin: 0; overflow: hidden; }
+  .result-head { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+  .result-h { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.28em; text-transform: uppercase; color: var(--text-2); }
+  .result-rule { flex: 1; height: 1px; background: var(--line-1); }
+  .result-meta { font-family: var(--font-mono); font-size: 10px; color: var(--text-4); letter-spacing: 0.10em; }
+  .result-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+  .result-card {
+    display: grid; grid-template-columns: 56px 1fr; gap: 12px; align-items: center;
+    background: var(--bg-0); border: 1px solid var(--line-1);
+    padding: 8px;
+    position: relative; overflow: hidden;
+    clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 0 100%);
+    animation: result-in .5s ease-out backwards;
+  }
+  @keyframes result-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  .result-card .rc-thumb { width: 56px; height: 42px; background-size: cover; background-position: center 35%; border: 1px solid var(--line-1); }
+  .result-card .rc-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .result-card .rc-name { font-family: var(--font-mono); font-size: 13px; color: var(--text-1); letter-spacing: 0.04em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .result-card .rc-tag { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.20em; text-transform: uppercase; display: flex; align-items: center; gap: 6px; }
+  .result-card .rc-tag::before { content: ''; width: 3px; height: 10px; background: currentColor; }
+  .result-card.a .rc-tag { color: var(--side-a); }
+  .result-card.b .rc-tag { color: var(--side-b); }
+  .result-card.dec .rc-tag { color: var(--accent); }
+
+  .done-banner {
+    position: fixed; top: 24px; left: 50%; transform: translateX(-50%) translateY(-100px);
+    background: var(--accent); color: var(--accent-on);
+    padding: 12px 24px;
+    font-family: var(--font-mono); font-size: 12px; font-weight: 600;
+    letter-spacing: 0.22em; text-transform: uppercase;
+    z-index: 100;
+    transition: transform .35s cubic-bezier(.2,.9,.3,1.2);
+    box-shadow: 0 12px 50px var(--scrim), 0 0 40px var(--glow-1);
+    clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 0 100%);
+  }
+  .done-banner.shown { transform: translateX(-50%) translateY(0); }
+  .done-banner .check { display: inline-block; margin-right: 10px; font-size: 14px; }
+
+  .confetti { position: fixed; top: 50%; left: 50%; pointer-events: none; width: 1px; height: 1px; z-index: 50; }
+  .confetti span {
+    position: absolute; width: 6px; height: 6px; top: 0; left: 0;
+    animation: confetti-burst 1.4s cubic-bezier(.2,.7,.4,1) forwards;
+  }
+  @keyframes confetti-burst {
+    0%   { opacity: 1; transform: translate(0, 0) rotate(0); }
+    100% { opacity: 0; transform: translate(var(--dx), var(--dy)) rotate(var(--rot)); }
+  }
+
+  /* Token-restricted veto: dim the other captain card */
+  .captain.locked-view { opacity: 0.5; }
+  .captain.locked-view .turn-badge { display: none; }
+  .veto-token-badge {
+    align-self: flex-start;
+    padding: 6px 12px;
+    background: var(--accent-lo); border: 1px solid var(--accent-li); color: var(--accent);
+    font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase;
+  }
+
+  @media (max-width: 880px) {
+    .map-grid { grid-template-columns: repeat(2, 1fr); }
+    .veto-captains, .teams-cols, .links-cols, .roster-grid, .roster-team-names {
+      grid-template-columns: 1fr;
+    }
+    .stages-pill { flex-wrap: wrap; }
+    .sp-cell { flex-basis: 50%; }
+    .sequence { flex-wrap: wrap; }
+    .seq-step { flex-basis: 50%; }
+  }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="hdr">
+  <div class="hdr-brand">
+    <img src="assets/emblem.png" class="hdr-emblem" alt="">
+    <span class="hdr-name">Oblivion</span>
+    <span class="hdr-sep">/</span>
+    <span class="hdr-title">Veto · Match Setup</span>
+  </div>
+  <div class="hdr-spacer"></div>
+  <button class="btn btn-ghost" id="reset-btn">↺ Reset all</button>
+</div>
+
+<!-- STAGE INDICATOR -->
+<div class="stages-pill" id="stages-pill">
+  <div class="sp-cell" data-s="0"><span class="sp-num">1</span><span>Roster</span></div>
+  <div class="sp-cell" data-s="1"><span class="sp-num">2</span><span>Teams</span></div>
+  <div class="sp-cell" data-s="2"><span class="sp-num">3</span><span>Captain vote</span></div>
+  <div class="sp-cell" data-s="3"><span class="sp-num">4</span><span>Links</span></div>
+  <div class="sp-cell" data-s="4"><span class="sp-num">5</span><span>Veto</span></div>
+</div>
+
+<!-- ════════════════════ STAGE 1 · ROSTER ════════════════════ -->
+<div class="stage" id="stage-0">
+  <div class="stage-head">
+    <h1 class="stage-h">Add 10 players</h1>
+    <span class="stage-sub">they'll be randomly split into two teams of 5</span>
+  </div>
+
+  <div class="roster-team-names">
+    <div class="roster-tn-card a">
+      <label>Team A name</label>
+      <input id="team-a-name" value="Team Alpha" maxlength="22" spellcheck="false">
+    </div>
+    <div class="roster-tn-card b">
+      <label>Team B name</label>
+      <input id="team-b-name" value="Team Bravo" maxlength="22" spellcheck="false">
+    </div>
+  </div>
+
+  <div class="roster-grid" id="roster-grid"></div>
+
+  <div class="stage-actions">
+    <div class="roster-helper">Tip: paste a list and hit <strong>Paste 10 names</strong> to fill all slots at once.</div>
+    <div style="margin-left:auto"></div>
+    <button class="btn btn-ghost" id="paste-btn">Paste 10 names</button>
+    <button class="btn btn-ghost" id="demo-btn">Demo names</button>
+    <div class="roster-progress" id="roster-progress"><span class="ring" id="ring">0</span><span>of 10 ready</span></div>
+    <button class="btn btn-accent" id="distribute-btn" disabled>Distribute teams →</button>
+  </div>
+</div>
+
+<!-- ════════════════════ STAGE 2 · TEAMS ════════════════════ -->
+<div class="stage" id="stage-1">
+  <div class="stage-head">
+    <h1 class="stage-h">Teams locked in</h1>
+    <span class="stage-sub">re-shuffle if you don't like the split</span>
+  </div>
+
+  <div class="teams-cols">
+    <div class="team-col a">
+      <div class="team-col-head">
+        <span class="team-col-tag">Team A</span>
+        <span class="team-col-name" id="ta-name">Team Alpha</span>
+        <span class="team-col-count">5 players</span>
+      </div>
+      <div class="team-col-list" id="ta-list"></div>
+    </div>
+    <div class="team-col b right">
+      <div class="team-col-head">
+        <span class="team-col-tag">Team B</span>
+        <span class="team-col-name" id="tb-name">Team Bravo</span>
+        <span class="team-col-count">5 players</span>
+      </div>
+      <div class="team-col-list" id="tb-list"></div>
+    </div>
+  </div>
+
+  <div class="stage-actions">
+    <button class="btn btn-ghost" id="reshuffle-btn">↺ Re-shuffle</button>
+    <button class="btn btn-ghost" id="back-to-roster-btn">← Edit roster</button>
+    <div style="margin-left:auto"></div>
+    <button class="btn btn-accent" id="to-vote-btn">Vote for captains →</button>
+  </div>
+</div>
+
+<!-- ════════════════════ STAGE 3 · VOTE ════════════════════ -->
+<div class="stage" id="stage-2">
+  <div class="stage-head">
+    <h1 class="stage-h">Vote for your captain</h1>
+    <span class="stage-sub">each team votes 5 times · most votes wins · ties auto-revote</span>
+  </div>
+
+  <div class="teams-cols">
+    <div class="team-col a">
+      <div class="team-col-head">
+        <span class="team-col-tag">Team A</span>
+        <span class="team-col-name" id="va-name">Team Alpha</span>
+      </div>
+      <div class="vote-meta">
+        <span>Votes cast</span>
+        <span class="vm-progress" id="va-progress">
+          <span class="dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></span>
+          <span class="counter">0 / 5</span>
+        </span>
+      </div>
+      <div class="team-col-list" id="va-list"></div>
+    </div>
+    <div class="team-col b right">
+      <div class="team-col-head">
+        <span class="team-col-tag">Team B</span>
+        <span class="team-col-name" id="vb-name">Team Bravo</span>
+      </div>
+      <div class="vote-meta">
+        <span>Votes cast</span>
+        <span class="vm-progress" id="vb-progress">
+          <span class="dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></span>
+          <span class="counter">0 / 5</span>
+        </span>
+      </div>
+      <div class="team-col-list" id="vb-list"></div>
+    </div>
+  </div>
+
+  <div class="stage-actions">
+    <button class="btn btn-ghost" id="reset-votes-btn">↺ Reset votes</button>
+    <div style="margin-left:auto"></div>
+    <button class="btn btn-accent" id="to-links-btn" disabled>Generate captain links →</button>
+  </div>
+</div>
+
+<!-- ════════════════════ STAGE 4 · LINKS ════════════════════ -->
+<div class="stage" id="stage-3">
+  <div class="stage-head">
+    <h1 class="stage-h">Captain access links</h1>
+    <span class="stage-sub">send each captain their one-time link · single-use, expires when opened</span>
+  </div>
+
+  <div class="links-cols">
+    <div class="link-card a">
+      <div class="link-card-head">
+        <div class="link-card-avatar">A</div>
+        <div class="link-card-meta">
+          <span class="link-card-tag">Captain · Team A</span>
+          <span class="link-card-name" id="link-name-a">—</span>
+        </div>
+      </div>
+      <div class="link-row">
+        <span class="lr-url" id="link-url-a">—</span>
+        <button class="lr-copy" data-cap="a">Copy</button>
+      </div>
+      <div class="link-fine">
+        <strong>One-time use.</strong> Opening this link confirms the captain and unlocks the veto on their device.
+        Don't share — anyone with the link can claim the role.
+      </div>
+    </div>
+    <div class="link-card b">
+      <div class="link-card-head">
+        <div class="link-card-avatar">B</div>
+        <div class="link-card-meta">
+          <span class="link-card-tag">Captain · Team B</span>
+          <span class="link-card-name" id="link-name-b">—</span>
+        </div>
+      </div>
+      <div class="link-row">
+        <span class="lr-url" id="link-url-b">—</span>
+        <button class="lr-copy" data-cap="b">Copy</button>
+      </div>
+      <div class="link-fine">
+        <strong>One-time use.</strong> Opening this link confirms the captain and unlocks the veto on their device.
+        Don't share — anyone with the link can claim the role.
+      </div>
+    </div>
+  </div>
+
+  <div class="stage-actions">
+    <button class="btn btn-ghost" id="back-to-vote-btn">← Back to vote</button>
+    <div style="margin-left:auto"></div>
+    <button class="btn btn-accent" id="to-veto-btn">Open veto here →</button>
+  </div>
+</div>
+
+<!-- ════════════════════ STAGE 5 · VETO ════════════════════ -->
+<div class="stage" id="stage-4">
+  <div class="stage-head">
+    <h1 class="stage-h">Map veto</h1>
+    <span class="stage-sub" id="veto-sub">captains alternate · CS2 active-duty pool</span>
+    <div style="margin-left:auto;display:flex;gap:10px;align-items:center;">
+      <div class="mode-tabs" id="mode-tabs">
+        <button class="mode-tab" data-m="bo1">BO1</button>
+        <button class="mode-tab active" data-m="bo3">BO3</button>
+        <button class="mode-tab" data-m="bo5">BO5</button>
+      </div>
+      <button class="btn btn-ghost" id="reset-veto-btn">↺ Restart veto</button>
+    </div>
+  </div>
+
+  <div class="veto-token-badge" id="token-badge" style="display:none">
+    🔒 viewing as <span id="token-cap">Captain</span> · other team's actions are read-only
+  </div>
+
+  <div class="veto-captains">
+    <div class="captain a active" id="cap-a">
+      <span class="turn-badge"><span class="pulse"></span>your turn</span>
+      <div class="cap-top">
+        <div class="cap-avatar">A</div>
+        <div class="cap-info">
+          <div class="cap-side" id="cap-a-side-label">Captain · Team A</div>
+          <div class="cap-name" id="cap-a-name">—</div>
+        </div>
+      </div>
+      <div class="cap-counts">
+        <div class="cap-count"><span class="k">Bans</span><span class="v bad" id="bans-a">0</span></div>
+        <div class="cap-count"><span class="k">Picks</span><span class="v ok" id="picks-a">0</span></div>
+      </div>
+    </div>
+
+    <div class="phase-pill">
+      <span class="pp-step" id="pp-step">Step 01 of 07</span>
+      <span class="pp-action" id="pp-action">BAN</span>
+    </div>
+
+    <div class="captain b right" id="cap-b">
+      <span class="turn-badge"><span class="pulse"></span>your turn</span>
+      <div class="cap-top">
+        <div class="cap-avatar">B</div>
+        <div class="cap-info">
+          <div class="cap-side" id="cap-b-side-label">Captain · Team B</div>
+          <div class="cap-name" id="cap-b-name">—</div>
+        </div>
+      </div>
+      <div class="cap-counts">
+        <div class="cap-count"><span class="k">Bans</span><span class="v bad" id="bans-b">0</span></div>
+        <div class="cap-count"><span class="k">Picks</span><span class="v ok" id="picks-b">0</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sequence" id="sequence"></div>
+  <div class="map-grid" id="map-grid"></div>
+
+  <div class="result-panel hidden" id="result-panel">
+    <div class="result-head">
+      <span class="result-h">Match Lineup</span>
+      <span class="result-rule"></span>
+      <span class="result-meta" id="result-meta">— maps</span>
+    </div>
+    <div class="result-list" id="result-list"></div>
+  </div>
+</div>
+
+<div class="done-banner" id="done-banner">
+  <span class="check">✓</span><span id="done-text">Veto complete</span>
+</div>
+
+<script>
+  /* ════════════════════ STATE ════════════════════ */
+  const STORE_KEY = 'oblivion.veto';
+
+  const POOL = ['de_mirage','de_inferno','de_ancient','de_anubis','de_nuke','de_overpass','de_vertigo'];
+  const SEQUENCES = {
+    bo1: [
+      {team:'a',action:'ban'},{team:'b',action:'ban'},{team:'a',action:'ban'},
+      {team:'b',action:'ban'},{team:'a',action:'ban'},{team:'b',action:'ban'},
+    ],
+    bo3: [
+      {team:'a',action:'ban'},{team:'b',action:'ban'},{team:'a',action:'pick'},
+      {team:'b',action:'pick'},{team:'a',action:'ban'},{team:'b',action:'ban'},
+    ],
+    bo5: [
+      {team:'a',action:'ban'},{team:'b',action:'ban'},{team:'a',action:'pick'},
+      {team:'b',action:'pick'},{team:'a',action:'pick'},{team:'b',action:'pick'},
+    ],
+  };
+
+  function newToken() {
+    if (window.crypto && crypto.getRandomValues) {
+      const a = new Uint8Array(16);
+      crypto.getRandomValues(a);
+      return Array.from(a).map(b => b.toString(16).padStart(2,'0')).join('');
+    }
+    return Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+  }
+
+  function load() {
+    try { return JSON.parse(localStorage.getItem(STORE_KEY)) || {}; }
+    catch (e) { return {}; }
+  }
+  function save() {
+    localStorage.setItem(STORE_KEY, JSON.stringify(state));
+  }
+  function fullReset() {
+    localStorage.removeItem(STORE_KEY);
+    location.hash = ''; location.search = '';
+    state = freshState();
+    renderStage(0);
+  }
+  function freshState() {
+    return {
+      stage: 0,
+      teamAName: 'Team Alpha',
+      teamBName: 'Team Bravo',
+      roster: Array(10).fill(''),
+      teamA: [], teamB: [],
+      votesA: {}, votesB: {},
+      captainA: null, captainB: null,
+      tokenA: null, tokenB: null,
+      tokenAUsed: false, tokenBUsed: false,
+      mode: 'bo3',
+      vetoStep: 0,
+      vetoResults: [],
+      tokenView: null,  // 'a' | 'b' | null
+    };
+  }
+
+  let state = Object.assign(freshState(), load());
+
+  /* ════════════════════ TOKEN GATE ════════════════════
+     If the URL has ?join=TOKEN, validate and jump into the veto. */
+  (function tokenGate() {
+    const params = new URLSearchParams(location.search);
+    const token = params.get('join');
+    if (!token) return;
+    if (state.tokenA === token) {
+      if (state.tokenAUsed) {
+        // For demo: still let them in (in real backend, token would be invalidated)
+      }
+      state.tokenAUsed = true;
+      state.tokenView = 'a';
+      state.stage = 4;
+    } else if (state.tokenB === token) {
+      state.tokenBUsed = true;
+      state.tokenView = 'b';
+      state.stage = 4;
+    }
+    save();
+  })();
+
+  /* ════════════════════ STAGE ROUTER ════════════════════ */
+  function renderStage(n) {
+    state.stage = n;
+    save();
+
+    document.querySelectorAll('.stage').forEach(s => s.classList.remove('active'));
+    document.getElementById('stage-' + n).classList.add('active');
+
+    document.querySelectorAll('.sp-cell').forEach(c => {
+      const i = parseInt(c.dataset.s, 10);
+      c.classList.toggle('active', i === n);
+      c.classList.toggle('done',   i <  n);
+    });
+
+    if (n === 0) renderRoster();
+    if (n === 1) renderTeams();
+    if (n === 2) renderVote();
+    if (n === 3) renderLinks();
+    if (n === 4) renderVeto();
+
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  /* ════════════════════ STAGE 1 · ROSTER ════════════════════ */
+  function renderRoster() {
+    const grid = document.getElementById('roster-grid');
+    grid.innerHTML = '';
+    for (let i = 0; i < 10; i++) {
+      const slot = document.createElement('div');
+      slot.className = 'roster-slot' + (state.roster[i] ? ' filled' : '');
+      slot.innerHTML = `
+        <span class="rs-num">${String(i+1).padStart(2,'0')}</span>
+        <input data-i="${i}" placeholder="nickname…" value="${escapeHtml(state.roster[i] || '')}" maxlength="20" spellcheck="false" autocomplete="off">
+      `;
+      grid.appendChild(slot);
+    }
+    grid.querySelectorAll('input').forEach(inp => {
+      inp.addEventListener('input', e => {
+        const i = parseInt(e.target.dataset.i, 10);
+        state.roster[i] = e.target.value;
+        save();
+        e.target.parentElement.classList.toggle('filled', !!e.target.value.trim());
+        updateRosterProgress();
+      });
+    });
+
+    document.getElementById('team-a-name').value = state.teamAName;
+    document.getElementById('team-b-name').value = state.teamBName;
+    document.getElementById('team-a-name').oninput = e => { state.teamAName = e.target.value; save(); };
+    document.getElementById('team-b-name').oninput = e => { state.teamBName = e.target.value; save(); };
+
+    updateRosterProgress();
+  }
+  function updateRosterProgress() {
+    const filled = state.roster.filter(n => n && n.trim()).length;
+    const dedup  = new Set(state.roster.map(n => (n||'').trim().toLowerCase()).filter(Boolean)).size;
+    const ready  = (filled === 10) && (dedup === 10);
+    document.getElementById('ring').textContent = filled;
+    document.getElementById('roster-progress').classList.toggle('ready', ready);
+    document.getElementById('distribute-btn').disabled = !ready;
+  }
+  document.getElementById('paste-btn').addEventListener('click', async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      const names = text.split(/[\r\n,]/).map(s => s.trim()).filter(Boolean).slice(0, 10);
+      if (names.length < 1) return;
+      for (let i = 0; i < 10; i++) state.roster[i] = names[i] || '';
+      save();
+      renderRoster();
+    } catch (e) { /* clipboard blocked */ }
+  });
+  document.getElementById('demo-btn').addEventListener('click', () => {
+    state.roster = ['lambda','phantom','nyx','cerise','helo','orin','stratos','vox','rune','kade'];
+    save();
+    renderRoster();
+  });
+  document.getElementById('distribute-btn').addEventListener('click', () => {
+    distributeTeams();
+    renderStage(1);
+  });
+
+  /* ════════════════════ STAGE 2 · TEAMS ════════════════════ */
+  function distributeTeams() {
+    const pool = [...state.roster];
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    state.teamA = pool.slice(0, 5);
+    state.teamB = pool.slice(5, 10);
+    state.votesA = {}; state.votesB = {};
+    state.captainA = null; state.captainB = null;
+    state.tokenA = null;   state.tokenB = null;
+    save();
+  }
+  function renderTeams() {
+    document.getElementById('ta-name').textContent = state.teamAName;
+    document.getElementById('tb-name').textContent = state.teamBName;
+    const ta = document.getElementById('ta-list');
+    const tb = document.getElementById('tb-list');
+    ta.innerHTML = ''; tb.innerHTML = '';
+    state.teamA.forEach((p, i) => ta.appendChild(chip(p, 'a', i)));
+    state.teamB.forEach((p, i) => tb.appendChild(chip(p, 'b', i)));
+  }
+  function chip(name, side, i, opts={}) {
+    const c = document.createElement('div');
+    c.className = 'team-chip';
+    if (opts.votable) c.classList.add('votable');
+    c.style.animationDelay = `${i * 0.06}s`;
+    c.dataset.name = name;
+    c.dataset.side = side;
+    const initial = (name[0] || '?').toUpperCase();
+    c.innerHTML = `
+      <div class="tc-avatar">${initial}</div>
+      <div class="tc-name">${escapeHtml(name)}</div>
+      ${opts.votable ? `<div class="tc-votes">
+        <span class="vote-pip"></span><span class="vote-pip"></span><span class="vote-pip"></span><span class="vote-pip"></span><span class="vote-pip"></span>
+      </div>` : `<div class="tc-votes" style="visibility:hidden">—</div>`}
+      <span class="tc-captain-mark">★ Captain</span>
+    `;
+    return c;
+  }
+  document.getElementById('reshuffle-btn').addEventListener('click', () => {
+    distributeTeams(); renderTeams();
+  });
+  document.getElementById('back-to-roster-btn').addEventListener('click', () => renderStage(0));
+  document.getElementById('to-vote-btn').addEventListener('click', () => {
+    state.votesA = {}; state.votesB = {};
+    state.captainA = null; state.captainB = null;
+    save();
+    renderStage(2);
+  });
+
+  /* ════════════════════ STAGE 3 · VOTE ════════════════════ */
+  function renderVote() {
+    document.getElementById('va-name').textContent = state.teamAName;
+    document.getElementById('vb-name').textContent = state.teamBName;
+
+    ['a','b'].forEach(side => {
+      const list = document.getElementById(side === 'a' ? 'va-list' : 'vb-list');
+      list.innerHTML = '';
+      const players = side === 'a' ? state.teamA : state.teamB;
+      players.forEach((p, i) => list.appendChild(chip(p, side, i, { votable: true })));
+    });
+
+    updateVoteUI();
+
+    // Click handlers — each click = one vote for that player
+    document.querySelectorAll('#va-list .team-chip, #vb-list .team-chip').forEach(c => {
+      c.addEventListener('click', () => {
+        const side = c.dataset.side;
+        const votes = side === 'a' ? state.votesA : state.votesB;
+        const total = Object.values(votes).reduce((a,b)=>a+b,0);
+        if (total >= 5) return;
+        votes[c.dataset.name] = (votes[c.dataset.name] || 0) + 1;
+        if (side === 'a') state.votesA = votes; else state.votesB = votes;
+        save();
+        animateVote(c);
+        updateVoteUI();
+      });
+    });
+  }
+  function animateVote(chip) {
+    const v = chip.querySelector('.tc-votes');
+    v.style.transform = 'scale(1.15)';
+    v.style.color = 'var(--accent)';
+    setTimeout(() => { v.style.transform = ''; v.style.color = ''; }, 280);
+  }
+  function updateVoteUI() {
+    ['a','b'].forEach(side => {
+      const list = document.getElementById(side === 'a' ? 'va-list' : 'vb-list');
+      const votes = side === 'a' ? state.votesA : state.votesB;
+      const total = Object.values(votes).reduce((a,b)=>a+b,0);
+
+      // Per-chip pip update
+      list.querySelectorAll('.team-chip').forEach(c => {
+        const name = c.dataset.name;
+        const v = votes[name] || 0;
+        const pips = c.querySelectorAll('.vote-pip');
+        pips.forEach((p, idx) => p.classList.toggle('on', idx < v));
+        c.classList.remove('captain','a','b','locked-out');
+      });
+
+      // Progress bar
+      const prog = document.getElementById(side === 'a' ? 'va-progress' : 'vb-progress');
+      prog.querySelectorAll('.dot').forEach((d, i) => d.classList.toggle('filled', i < total));
+      prog.querySelector('.counter').textContent = `${total} / 5`;
+      prog.classList.toggle('full', total === 5);
+
+      // Captain determination — at 5 votes, find max; if tie, reset votes
+      let captain = null;
+      if (total === 5) {
+        const entries = Object.entries(votes).sort((a,b) => b[1] - a[1]);
+        if (entries.length === 1 || entries[0][1] > entries[1][1]) {
+          captain = entries[0][0];
+        }
+      }
+      if (side === 'a') state.captainA = captain;
+      else              state.captainB = captain;
+
+      if (captain) {
+        const cChip = Array.from(list.querySelectorAll('.team-chip')).find(c => c.dataset.name === captain);
+        if (cChip) {
+          cChip.classList.add('captain', side);
+        }
+        list.querySelectorAll('.team-chip').forEach(c => {
+          if (c.dataset.name !== captain) c.classList.add('locked-out');
+        });
+      } else if (total === 5) {
+        // Tie — reset votes for this team
+        if (side === 'a') state.votesA = {};
+        else              state.votesB = {};
+        save();
+        flashTie(side);
+        setTimeout(() => updateVoteUI(), 50);
+        return;
+      }
+    });
+
+    save();
+    document.getElementById('to-links-btn').disabled = !(state.captainA && state.captainB);
+  }
+  function flashTie(side) {
+    const list = document.getElementById(side === 'a' ? 'va-list' : 'vb-list');
+    list.animate(
+      [{ transform: 'translateX(0)' }, { transform: 'translateX(-6px)' },
+       { transform: 'translateX(6px)' }, { transform: 'translateX(0)' }],
+      { duration: 300 }
+    );
+    showToast(`Tie — re-voting ${side === 'a' ? state.teamAName : state.teamBName}`);
+  }
+  document.getElementById('reset-votes-btn').addEventListener('click', () => {
+    state.votesA = {}; state.votesB = {}; state.captainA = null; state.captainB = null;
+    save(); renderVote();
+  });
+  document.getElementById('to-links-btn').addEventListener('click', () => {
+    if (!state.tokenA) state.tokenA = newToken();
+    if (!state.tokenB) state.tokenB = newToken();
+    state.tokenAUsed = false; state.tokenBUsed = false;
+    save();
+    renderStage(3);
+  });
+
+  /* ════════════════════ STAGE 4 · LINKS ════════════════════ */
+  function renderLinks() {
+    document.getElementById('link-name-a').textContent = state.captainA || '—';
+    document.getElementById('link-name-b').textContent = state.captainB || '—';
+    const base = location.origin + location.pathname;
+    const ua = `${base}?join=${state.tokenA}`;
+    const ub = `${base}?join=${state.tokenB}`;
+    document.getElementById('link-url-a').textContent = ua;
+    document.getElementById('link-url-b').textContent = ub;
+  }
+  document.querySelectorAll('.lr-copy').forEach(b => {
+    b.addEventListener('click', async () => {
+      const which = b.dataset.cap;
+      const url = (which === 'a' ? state.tokenA : state.tokenB);
+      const full = `${location.origin}${location.pathname}?join=${url}`;
+      try { await navigator.clipboard.writeText(full); }
+      catch (e) {
+        const ta = document.createElement('textarea');
+        ta.value = full; document.body.appendChild(ta);
+        ta.select(); document.execCommand('copy'); ta.remove();
+      }
+      b.classList.add('copied'); b.textContent = '✓ Copied';
+      setTimeout(() => { b.classList.remove('copied'); b.textContent = 'Copy'; }, 1400);
+    });
+  });
+  document.getElementById('back-to-vote-btn').addEventListener('click', () => renderStage(2));
+  document.getElementById('to-veto-btn').addEventListener('click', () => renderStage(4));
+
+  /* ════════════════════ STAGE 5 · VETO ════════════════════ */
+  function renderVeto() {
+    document.getElementById('cap-a-name').textContent = state.captainA || '—';
+    document.getElementById('cap-b-name').textContent = state.captainB || '—';
+    document.getElementById('cap-a-side-label').textContent = `Captain · ${state.teamAName}`;
+    document.getElementById('cap-b-side-label').textContent = `Captain · ${state.teamBName}`;
+
+    // Token-view restrictions
+    const badge = document.getElementById('token-badge');
+    if (state.tokenView) {
+      badge.style.display = '';
+      document.getElementById('token-cap').textContent = state.tokenView === 'a' ? state.captainA : state.captainB;
+      document.getElementById('cap-a').classList.toggle('locked-view', state.tokenView !== 'a');
+      document.getElementById('cap-b').classList.toggle('locked-view', state.tokenView !== 'b');
+    } else {
+      badge.style.display = 'none';
+    }
+
+    document.querySelectorAll('.mode-tab').forEach(t =>
+      t.classList.toggle('active', t.dataset.m === state.mode));
+
+    buildMapGrid();
+    buildSequence();
+    refreshPhase();
+    updateResultPanel();
+  }
+
+  function buildMapGrid() {
+    const grid = document.getElementById('map-grid');
+    grid.innerHTML = '';
+    POOL.forEach(map => {
+      const card = document.createElement('div');
+      card.className = 'map-card';
+      card.dataset.map = map;
+      card.innerHTML = `
+        <div class="mc-thumb" style="background-image: url('assets/${map}.png'), url('assets/${map}.jpg')"></div>
+        <div class="mc-overlay"></div>
+        <span class="mc-bracket"></span>
+        <span class="ban-stamp">BAN</span>
+        <span class="pick-badge"></span>
+        <span class="mc-name">${map}</span>
+      `;
+      card.addEventListener('click', () => onCardClick(map, card));
+      grid.appendChild(card);
+    });
+    // Re-apply prior results if user came back
+    state.vetoResults.forEach((r, i) => {
+      const card = document.querySelector(`.map-card[data-map="${r.map}"]`);
+      if (!card) return;
+      if (r.team === 'dec') {
+        card.classList.add('decider');
+        card.querySelector('.pick-badge').textContent = 'DECIDER';
+      } else if (r.action === 'ban') {
+        card.classList.add('banned');
+      } else {
+        card.classList.add('picked', r.team);
+        card.querySelector('.pick-badge').textContent = `${r.team.toUpperCase()} · PICK`;
+      }
+    });
+  }
+  function buildSequence() {
+    const seqRoot = document.getElementById('sequence');
+    const steps = SEQUENCES[state.mode];
+    seqRoot.innerHTML = '';
+    steps.forEach((s, i) => {
+      const div = document.createElement('div');
+      div.className = `seq-step ${s.team}`;
+      div.dataset.idx = i;
+      div.innerHTML = `
+        <span class="ss-num">STEP ${String(i+1).padStart(2,'0')}</span>
+        <span class="ss-action">${s.team.toUpperCase()} ${s.action}</span>
+        <span class="ss-result"></span>
+      `;
+      seqRoot.appendChild(div);
+    });
+    const dec = document.createElement('div');
+    dec.className = 'seq-step dec';
+    dec.dataset.idx = steps.length;
+    dec.innerHTML = `
+      <span class="ss-num">STEP ${String(steps.length+1).padStart(2,'0')}</span>
+      <span class="ss-action">DECIDER</span>
+      <span class="ss-result"></span>
+    `;
+    seqRoot.appendChild(dec);
+
+    // Re-apply prior results
+    state.vetoResults.forEach((r, i) => {
+      const el = document.querySelector(`.seq-step[data-idx="${i}"]`);
+      if (!el) return;
+      el.classList.add('done');
+      const res = el.querySelector('.ss-result');
+      res.textContent = r.map;
+      res.classList.add(r.action === 'ban' ? 'banned' : 'picked');
+    });
+  }
+  function refreshPhase() {
+    const steps = SEQUENCES[state.mode];
+    const total = steps.length + 1;
+    const idx = state.vetoStep;
+    const capA = document.getElementById('cap-a');
+    const capB = document.getElementById('cap-b');
+    capA.classList.remove('active'); capB.classList.remove('active');
+    if (idx < steps.length) {
+      const cur = steps[idx];
+      (cur.team === 'a' ? capA : capB).classList.add('active');
+    }
+    if (idx < steps.length) {
+      const cur = steps[idx];
+      document.getElementById('pp-step').textContent = `Step ${String(idx+1).padStart(2,'0')} of ${String(total).padStart(2,'0')}`;
+      document.getElementById('pp-action').textContent = cur.action;
+      document.getElementById('pp-action').classList.remove('done');
+    } else if (idx === steps.length) {
+      document.getElementById('pp-step').textContent = `Step ${String(total).padStart(2,'0')} of ${String(total).padStart(2,'0')}`;
+      document.getElementById('pp-action').textContent = 'DECIDER';
+      document.getElementById('pp-action').classList.remove('done');
+    } else {
+      document.getElementById('pp-step').textContent = 'Veto complete';
+      document.getElementById('pp-action').textContent = '✓ done';
+      document.getElementById('pp-action').classList.add('done');
+    }
+
+    document.querySelectorAll('.seq-step').forEach(e => e.classList.remove('current'));
+    const cur = document.querySelector(`.seq-step[data-idx="${idx}"]`);
+    if (cur) cur.classList.add('current');
+
+    const counts = state.vetoResults.reduce((acc, r) => {
+      if (r.team !== 'a' && r.team !== 'b') return acc;
+      acc[r.team + ':' + r.action] = (acc[r.team + ':' + r.action] || 0) + 1;
+      return acc;
+    }, {});
+    document.getElementById('bans-a').textContent  = counts['a:ban']  || 0;
+    document.getElementById('bans-b').textContent  = counts['b:ban']  || 0;
+    document.getElementById('picks-a').textContent = counts['a:pick'] || 0;
+    document.getElementById('picks-b').textContent = counts['b:pick'] || 0;
+  }
+
+  function onCardClick(map, card) {
+    const steps = SEQUENCES[state.mode];
+    if (state.vetoStep >= steps.length) return;
+    if (card.classList.contains('banned') || card.classList.contains('picked')) return;
+
+    const cur = steps[state.vetoStep];
+    // Token gate: only allow clicks for current team if the viewer holds that token
+    if (state.tokenView && state.tokenView !== cur.team) {
+      showToast(`Waiting on ${cur.team === 'a' ? state.captainA : state.captainB}…`);
+      return;
+    }
+
+    if (cur.action === 'ban') {
+      card.classList.add('banned');
+    } else {
+      card.classList.add('picked', cur.team, 'just-picked');
+      card.querySelector('.pick-badge').textContent = `${cur.team.toUpperCase()} · PICK`;
+      setTimeout(() => card.classList.remove('just-picked'), 600);
+    }
+
+    const seqEl = document.querySelector(`.seq-step[data-idx="${state.vetoStep}"]`);
+    if (seqEl) {
+      seqEl.classList.add('done');
+      const result = seqEl.querySelector('.ss-result');
+      result.textContent = map;
+      result.classList.add(cur.action === 'ban' ? 'banned' : 'picked');
+    }
+
+    state.vetoResults.push({ map, team: cur.team, action: cur.action });
+    state.vetoStep++;
+    save();
+    refreshPhase();
+    updateResultPanel();
+
+    if (state.vetoStep === steps.length) setTimeout(revealDecider, 700);
+  }
+  function revealDecider() {
+    const remaining = POOL.filter(m => !state.vetoResults.some(r => r.map === m));
+    if (remaining.length !== 1) return;
+    const deciderMap = remaining[0];
+    const card = document.querySelector(`.map-card[data-map="${deciderMap}"]`);
+    if (!card) return;
+    card.classList.add('decider');
+    card.querySelector('.pick-badge').textContent = 'DECIDER';
+    state.vetoResults.push({ map: deciderMap, team: 'dec', action: 'pick' });
+    state.vetoStep++;
+
+    const steps = SEQUENCES[state.mode];
+    const seqEl = document.querySelector(`.seq-step[data-idx="${steps.length}"]`);
+    if (seqEl) {
+      seqEl.classList.add('done');
+      const result = seqEl.querySelector('.ss-result');
+      result.textContent = deciderMap;
+      result.classList.add('picked');
+    }
+
+    save();
+    refreshPhase();
+    updateResultPanel();
+    fireConfetti();
+    showDoneBanner();
+  }
+  function updateResultPanel() {
+    const picks = state.vetoResults.filter(r => r.action === 'pick');
+    const panel = document.getElementById('result-panel');
+    if (!picks.length) { panel.classList.add('hidden'); return; }
+    panel.classList.remove('hidden');
+    document.getElementById('result-meta').textContent = `${picks.length} map${picks.length !== 1 ? 's' : ''}`;
+    const list = document.getElementById('result-list');
+    list.innerHTML = '';
+    picks.forEach((p, i) => {
+      const card = document.createElement('div');
+      card.className = `result-card ${p.team}`;
+      const tagLabel = p.team === 'dec' ? 'DECIDER'
+                    : (p.team === 'a' ? state.captainA : state.captainB) + ' · PICK';
+      card.style.animationDelay = `${i * 0.08}s`;
+      card.innerHTML = `
+        <div class="rc-thumb" style="background-image: url('assets/${p.map}.png'), url('assets/${p.map}.jpg')"></div>
+        <div class="rc-body">
+          <span class="rc-name">${p.map}</span>
+          <span class="rc-tag">${escapeHtml(tagLabel)}</span>
+        </div>`;
+      list.appendChild(card);
+    });
+  }
+  function fireConfetti() {
+    const colors = ['oklch(0.65 0.21 305)','oklch(0.74 0.16 150)','oklch(0.65 0.15 25)','oklch(0.70 0.13 235)'];
+    const root = document.createElement('div');
+    root.className = 'confetti';
+    const card = document.querySelector('.map-card.decider');
+    if (card) {
+      const r = card.getBoundingClientRect();
+      root.style.top = (r.top + r.height/2) + 'px';
+      root.style.left = (r.left + r.width/2) + 'px';
+    }
+    for (let i = 0; i < 32; i++) {
+      const s = document.createElement('span');
+      const angle = (i / 32) * Math.PI * 2 + Math.random() * 0.4;
+      const dist  = 120 + Math.random() * 140;
+      s.style.background = colors[i % colors.length];
+      s.style.setProperty('--dx',  `${Math.cos(angle) * dist}px`);
+      s.style.setProperty('--dy',  `${Math.sin(angle) * dist - 40}px`);
+      s.style.setProperty('--rot', `${(Math.random() * 720 - 360)}deg`);
+      s.style.animationDelay = `${Math.random() * 0.1}s`;
+      root.appendChild(s);
+    }
+    document.body.appendChild(root);
+    setTimeout(() => root.remove(), 1800);
+  }
+  function showDoneBanner() {
+    const picks = state.vetoResults.filter(r => r.action === 'pick');
+    const banner = document.getElementById('done-banner');
+    document.getElementById('done-text').textContent =
+      picks.length === 1 ? `Match map: ${picks[0].map.toUpperCase()}` : `Veto complete · ${picks.length} maps`;
+    banner.classList.add('shown');
+    setTimeout(() => banner.classList.remove('shown'), 3500);
+  }
+
+  document.querySelectorAll('.mode-tab').forEach(t => {
+    t.addEventListener('click', () => {
+      document.querySelectorAll('.mode-tab').forEach(x => x.classList.toggle('active', x === t));
+      state.mode = t.dataset.m;
+      state.vetoStep = 0;
+      state.vetoResults = [];
+      save();
+      buildMapGrid();
+      buildSequence();
+      refreshPhase();
+      updateResultPanel();
+    });
+  });
+  document.getElementById('reset-veto-btn').addEventListener('click', () => {
+    state.vetoStep = 0;
+    state.vetoResults = [];
+    save();
+    renderVeto();
+  });
+
+  /* Global reset */
+  document.getElementById('reset-btn').addEventListener('click', fullReset);
+
+  /* Toast */
+  function showToast(msg) {
+    const banner = document.getElementById('done-banner');
+    document.getElementById('done-text').textContent = msg;
+    banner.classList.add('shown');
+    setTimeout(() => banner.classList.remove('shown'), 2200);
+  }
+
+  /* Helpers */
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  /* Boot */
+  renderStage(state.stage || 0);
+</script>
+</body>
+</html>
