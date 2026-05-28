@@ -323,7 +323,11 @@ def create_flask(core: AppCore) -> Flask:
     def server_stop():
         if not core.running:
             return jsonify({"error": "Server is not running"}), 400
-        core.stop_server()
+        try:
+            core.stop_server()
+        except Exception as exc:
+            core.log(f"[stop] server_stop failed: {exc!r}")
+            return jsonify({"error": str(exc)}), 500
         return jsonify({"ok": True})
 
     @app.route("/api/server/map", methods=["POST"])
