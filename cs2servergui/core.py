@@ -1348,12 +1348,18 @@ class AppCore:
             self.log("  Phase 2 — login anonymous")
             self.log("  Phase 3 — download changed files  (progress below)")
             try:
+                # NO +force_install_dir.  steamcmd's default library is its own
+                # directory (CS2_SERVER_DIR), where the manifest-tracked install
+                # already lives (steamapps/common/Counter-Strike Global Offensive/,
+                # the path CS2_PATH points to) — so it updates that install IN PLACE.
+                #
+                # Passing "+force_install_dir <CS2_SERVER_DIR>" was WRONG: CS2's
+                # content root is a top-level "game/" folder, so steamcmd unpacked it
+                # directly into the server dir as "<CS2_SERVER_DIR>/game/" — a full
+                # ~64 GB DUPLICATE install separate from the one the server runs.
+                # Every update grew that orphan and never touched the real files.
                 proc = subprocess.Popen(
-                    # force_install_dir MUST come before +login (steamcmd applies
-                    # it to the session); otherwise a fresh install can land in
-                    # steamcmd's default dir instead of the configured server dir.
                     [_config.STEAMCMD_PATH,
-                     "+force_install_dir", _config.CS2_SERVER_DIR,
                      "+login", "anonymous",
                      "+app_update", CS2_APP_ID, "validate", "+quit"],
                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
