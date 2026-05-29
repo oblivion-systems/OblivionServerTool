@@ -117,6 +117,11 @@ deferred loose ends. Full prose in [CHANGELOG.md](CHANGELOG.md) → v0.9.1.*
 ## Phase 2 — Verify Every Mode ⬜
 **Exit:** all 14 modes confirmed working on a real server (matrix fully checked).
 
+> **Static side is green** (via [`tests/smoke.py`](tests/smoke.py)): every mode's plugins exist
+> across the copy/verify/kind tables and ship in the bundle, so deploys won't fail on missing
+> files. What's left is **in-game runtime** verification (a human must join) — the matrix below.
+> For the friends night, prioritise the modes you'll actually play first.
+
 ### 2.1 Test harness setup
 - [ ] Stand up a clean local CS2 server pointed at by the tool
 - [ ] Confirm MetaMod + CounterStrikeSharp base installs are present/installable
