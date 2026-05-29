@@ -891,6 +891,30 @@ kbd {
 }
 .map-id { font-size: 10px; color: var(--text-4); margin-top: 2px; letter-spacing: 0.04em; }
 
+/* Recommended-mode badges (derived from a map's workshop tags) */
+.map-modes { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 7px; }
+.mode-badge {
+  display: inline-flex; align-items: center;
+  padding: 2px 7px;
+  font-size: 9px; font-weight: 600; letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: var(--accent-lo); border: 1px solid var(--accent-li);
+  border-radius: 2px;
+}
+/* Raw workshop tags — muted, secondary to the mode badges */
+.map-tags { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 5px; }
+.tag-chip {
+  display: inline-flex; align-items: center;
+  padding: 1px 6px;
+  font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.06em;
+  color: var(--text-4);
+  background: var(--bg-0); border: 1px solid var(--line-1); border-radius: 2px;
+}
+/* Cards that don't suit the selected mode are de-emphasised, not hidden */
+.map-card.mode-dim { opacity: 0.45; }
+.map-card.mode-dim:hover { opacity: 1; }
+
 /* Per-map command-filter chip on workshop cards */
 .cmdfilter-chip {
   margin-top: 8px;

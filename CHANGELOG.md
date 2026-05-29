@@ -24,6 +24,24 @@ configured a team size (they ran the plugin's default, i.e. mostly 1v1).
 - ⚠️ *Needs in-game verification:* the generated 2v2 arena config and the MatchZy team-size
   matches couldn't be tested without a live server.
 
+### 🗺️ Workshop Map Flagging — Recommended Modes
+
+The map browser now tells you what each workshop map is *for*, instead of leaving you to
+guess from its name. All derived from the Steam Workshop tags we already cache (no new API
+calls).
+
+- **Recommended-mode badges** on every workshop card — derived by inverting `MODE_WORKSHOP_TAGS`
+  but ignoring generic tags (`classic`/`competitive`/…) so only *distinctive* tags drive them
+  (a `ze_` map shows **Zombie Escape**, an `aim_` map shows **1v1 / 2v2**, etc.). Plain comp maps
+  read "Competitive / Team".
+- **Steam tag chips** shown (muted) under the badges for at-a-glance context.
+- **Mode-mismatch guard** — starting or loading a map whose recommended modes don't include the
+  selected mode pops a confirm ("looks made for *Zombie Escape*, you've selected *Competitive* —
+  load anyway?") instead of silently launching it wrong. Applies on the status page and the grid.
+- **Sort + dim by current mode** — the card grid floats maps that suit the selected mode to the
+  top and de-emphasises clear mismatches (they brighten on hover; nothing is hidden).
+- ⚠️ *Frontend-only change; worth an eyeball in the running app to confirm the badges render.*
+
 ### 🐛 CS2 Update / Disk Bloat — Critical Fix
 
 - **Stopped the updater creating a duplicate ~64 GB install.** The steamcmd update ran with

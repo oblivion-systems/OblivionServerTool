@@ -812,14 +812,16 @@ function buildStatusPage() {
   renderStatusState();
 
   // ── Wire server controls ─────────────────────────────────────────────────
-  el('sp-start-btn').addEventListener('click', async () => {
+  el('sp-start-btn').addEventListener('click', () => {
     const wsId   = el('ws-map-select').value.trim();
     const mapSel = el('map-select').value;
     const mode   = el('mode-select').value;
     const map    = wsId || mapSel;
     const ws     = !!wsId;
-    try { await api.start(map, mode, ws); toast('Server starting…', 'var(--ok)'); }
-    catch (e) { toast(e.message, 'var(--bad)'); }
+    withModeMatchGuard(mode, map, ws, async () => {
+      try { await api.start(map, mode, ws); toast('Server starting…', 'var(--ok)'); }
+      catch (e) { toast(e.message, 'var(--bad)'); }
+    });
   });
   el('sp-restart-btn').addEventListener('click', doQuickRestart);
   el('sp-stop-btn').addEventListener('click', async () => {
@@ -839,13 +841,15 @@ function buildStatusPage() {
     populateModeWorkshopMaps(e.target.value);
     updateModeHint(e.target.value);
   });
-  el('map-change-btn').addEventListener('click', async () => {
+  el('map-change-btn').addEventListener('click', () => {
     const wsId = el('ws-map-select').value.trim();
     const map  = wsId || el('map-select').value;
     const mode = el('mode-select').value;
     const ws   = !!wsId;
-    try { await api.map(map, mode, ws); toast(`Changing to ${map}…`); }
-    catch (e) { toast(e.message, 'var(--bad)'); }
+    withModeMatchGuard(mode, map, ws, async () => {
+      try { await api.map(map, mode, ws); toast(`Changing to ${map}…`); }
+      catch (e) { toast(e.message, 'var(--bad)'); }
+    });
   });
   el('ss-change-btn').addEventListener('click', () => {
     el('map-mode-card').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -1648,6 +1652,58 @@ function _cf(status) {
   return { cls: s.effective ? 'cf-on' : 'cf-off', label };
 }
 
+/* ── Workshop map → recommended modes ──────────────────────────────────────────
+ * A map's Steam Workshop tags imply which modes it suits. We derive that from the
+ * existing MODE_WORKSHOP_TAGS (mode→tags) by inverting it, but ignore GENERIC tags
+ * (classic/competitive/…) that match half the modes — only DISTINCTIVE tags
+ * (wingman, aim, retake, zombie/ze, jailbreak, armsrace, …) drive recommendations. */
+const GENERIC_WS_TAGS = new Set(['classic', 'competitive', 'casual', 'map']);
+
+/** Modes whose DISTINCTIVE tags intersect this map's tags. [] = generic/untagged. */
+function recommendedModes(tags) {
+  const t = (tags || []).map(x => x.toLowerCase());
+  if (!t.length) return [];
+  const mwt   = state.modeWorkshopTags || {};
+  const modes = state.modes || Object.keys(mwt);
+  const out   = [];
+  for (const mode of modes) {
+    const sig = (mwt[mode] || [])
+      .map(x => x.toLowerCase())
+      .filter(x => !GENERIC_WS_TAGS.has(x));
+    if (sig.length && sig.some(x => t.includes(x))) out.push(mode);
+  }
+  return out;
+}
+
+/** Recommended modes for display — falls back to a generic label for plain comp maps. */
+function recommendedModesDisplay(tags) {
+  const r = recommendedModes(tags);
+  if (r.length) return r;
+  const t = (tags || []).map(x => x.toLowerCase());
+  if (t.some(x => x === 'classic' || x === 'competitive')) return ['Competitive / Team'];
+  return [];
+}
+
+/** True if a map is fine in *mode*. Only flags when the map clearly targets other
+ *  modes (distinctive tags present and mode not among them). Generic/untagged → ok. */
+function modeSuitsMap(mode, tags) {
+  const rec = recommendedModes(tags);
+  return rec.length === 0 || rec.includes(mode);
+}
+
+/** Guard a map action with a mismatch confirm. Official maps have no tags → pass. */
+function withModeMatchGuard(mode, mapId, isWorkshop, proceed) {
+  if (!isWorkshop) { proceed(); return; }
+  const m = (state.workshopMaps || []).find(x => x.id === mapId);
+  if (!m || modeSuitsMap(mode, m.tags)) { proceed(); return; }
+  const rec = recommendedModes(m.tags).join(', ');
+  modal('Mode mismatch',
+    `<p style="color:var(--text-3);font-size:.9rem">` +
+    `“${esc(m.name || mapId)}” looks made for <strong>${esc(rec)}</strong>, ` +
+    `but you've selected <strong>${esc(mode)}</strong>.<br><br>Load it anyway?</p>`,
+    proceed, 'Load anyway');
+}
+
 async function loadWorkshopMapsGrid(grid, mode) {
   try {
     const maps = await api.workshopMaps();
@@ -1662,22 +1718,44 @@ async function loadWorkshopMapsGrid(grid, mode) {
     }
     grid.innerHTML = '';
     const isLocal = state.server.is_local;
-    maps.forEach(m => {
-      const card = h('div', 'map-card' + (m.id === state.server.map ? ' active' : ''));
+    // Surface maps that suit the selected mode first; dim clear mismatches.
+    const suited = m => modeSuitsMap(mode, m.tags);
+    maps.slice()
+      .sort((a, b) => (suited(b) ? 1 : 0) - (suited(a) ? 1 : 0)
+                   || (a.name || a.id).localeCompare(b.name || b.id))
+      .forEach(m => {
+      const card = h('div', 'map-card'
+        + (m.id === state.server.map ? ' active' : '')
+        + (suited(m) ? '' : ' mode-dim'));
       card.dataset.name = `${(m.name || '')} ${m.id}`.toLowerCase();
       const thumbHtml = m.preview_url
         ? `<img class="map-thumb" src="${esc(m.preview_url)}" loading="lazy" onerror="this.style.display='none'">`
         : `<div class="map-thumb-placeholder">${icon('<polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/>')}</div>`;
+      // Recommended-mode badges (derived from tags) + a few raw tag chips.
+      const recs = recommendedModesDisplay(m.tags);
+      const modesHtml = recs.length
+        ? `<div class="map-modes">${recs.slice(0, 3)
+            .map(md => `<span class="mode-badge">${esc(md)}</span>`).join('')}</div>`
+        : '';
+      const rawTags = (m.tags || []).filter(t => !GENERIC_WS_TAGS.has(t.toLowerCase()));
+      const tagsHtml = rawTags.length
+        ? `<div class="map-tags">${rawTags.slice(0, 4)
+            .map(t => `<span class="tag-chip">${esc(t)}</span>`).join('')}</div>`
+        : '';
       card.innerHTML = `
         ${thumbHtml}
         <div class="map-info">
           <div class="map-name">${esc(m.name || m.id)}</div>
           <div class="map-id">${esc(m.id)}</div>
+          ${modesHtml}
+          ${tagsHtml}
           ${isLocal ? `<button class="cmdfilter-chip ${_cf(m.cmdfilter).cls}" title="Command filtering for this map — click to change. Maps with custom server-command logic need this OFF.">${_cf(m.cmdfilter).label}</button>` : ''}
         </div>`;
-      card.addEventListener('click', async () => {
-        try { await api.map(m.id, mode, true); toast(`Loading workshop map…`); }
-        catch (e) { toast(e.message, 'var(--bad)'); }
+      card.addEventListener('click', () => {
+        withModeMatchGuard(mode, m.id, true, async () => {
+          try { await api.map(m.id, mode, true); toast(`Loading workshop map…`); }
+          catch (e) { toast(e.message, 'var(--bad)'); }
+        });
       });
       // Per-map command-filter override: cycle auto → ON → OFF → auto
       const chip = card.querySelector('.cmdfilter-chip');
