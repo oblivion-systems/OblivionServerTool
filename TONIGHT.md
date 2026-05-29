@@ -31,6 +31,15 @@ the panel to the internet. Fine for one night; tear it down after.
 > Safety: the PIN is 4 digits. Behind the HTTPS tunnel that's acceptable for a friends night.
 > Brute-force backoff (20 fails → 5 min lockout) and IP-bound sessions are already in place.
 
+### Optional: hand out a GUEST PIN (limited access)
+Config → Security → set a **Guest PIN** (separate from the admin PIN; blank disables it). Share
+the **guest** PIN with friends and keep the admin PIN to yourself:
+- **Guest can:** change map, change game mode, download workshop maps.
+- **Guest can't:** start/stop the server, edit config, manage bots/bans, view logs.
+
+So you can let people remix the map rotation without risk of someone stopping the server or
+changing settings. The admin PIN still grants everything (and RCON/install stay local-only).
+
 ---
 
 ## 1. Pre-flight (solo, before friends arrive)

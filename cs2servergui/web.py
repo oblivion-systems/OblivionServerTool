@@ -48,12 +48,13 @@ _sessions:      dict[str, dict] = {}   # token → {ip, is_local, created_at}
 _sessions_lock  = threading.Lock()
 
 
-def _create_session(ip: str, is_local: bool = False) -> str:
+def _create_session(ip: str, is_local: bool = False, role: str = "admin") -> str:
     token = secrets.token_hex(32)
     with _sessions_lock:
         _sessions[token] = {
             "ip":         ip,
             "is_local":   is_local,
+            "role":       role,        # "admin" (full) | "guest" (maps/modes/downloads)
             "created_at": time.time(),
         }
     return token
@@ -188,6 +189,42 @@ def create_flask(core: AppCore) -> Flask:
             return f(*args, **kwargs)
         return wrapper
 
+    # ── Role gate (fail-closed) ──────────────────────────────────────────────────
+    # The "guest" role may only touch an explicit allowlist (status, map/mode
+    # change, workshop browse/download). EVERYTHING else under /api is admin-only.
+    # New routes are admin-only by default unless added to the allowlist here.
+    # require_local routes layer on top (admin includes local; remote admin still
+    # 403s on those), so install/RCON/Steam stay strictly local.
+    _GUEST_PATHS = frozenset({
+        "/api/state",
+        "/api/server/map",        # change map + game mode
+        "/api/players",           # read-only roster for the status view
+        "/api/workshop/maps",     # browse downloaded maps
+        "/api/workshop/download", # download a new workshop map
+        "/api/workshop/cancel",   # cancel a download they started
+        "/api/request_workshop",
+        "/api/setup/status",
+    })
+    _PUBLIC_PATHS = frozenset({
+        "/api/ping", "/api/auth/login", "/api/auth/logout",
+    })
+
+    @app.before_request
+    def _role_gate():
+        p = request.path
+        if not p.startswith("/api/"):
+            return None                      # SPA shell, static, /auth/auto
+        if p in _PUBLIC_PATHS or p in _GUEST_PATHS:
+            return None
+        if p.startswith("/api/data/") or p.startswith("/api/maps/thumb/"):
+            return None                      # static reference data + thumbnails
+        # Everything else is admin-only. Let require_auth issue the 401 when there
+        # is no session at all; only downgrade an authenticated *guest* to 403.
+        session = _current_session()
+        if session and not (session.get("is_local") or session.get("role") == "admin"):
+            return jsonify({"error": "admin access only"}), 403
+        return None
+
     # ── SPA shell ──────────────────────────────────────────────────────────────
 
     @app.route("/")
@@ -210,7 +247,7 @@ def create_flask(core: AppCore) -> Flask:
         token = request.args.get("token", "")
         if token and core.startup_token and secrets.compare_digest(token, core.startup_token):
             core.startup_token = ""    # invalidate immediately — single-use
-            session_token = _create_session("127.0.0.1", is_local=True)
+            session_token = _create_session("127.0.0.1", is_local=True, role="admin")
             core.log("Local window authenticated (auto-auth)")
             resp = redirect("/")
             resp.set_cookie(
@@ -229,13 +266,20 @@ def create_flask(core: AppCore) -> Flask:
         if wait:
             return jsonify({"ok": False, "error": "Too many attempts",
                             "locked_for": wait}), 429
-        pin = (request.get_json() or {}).get("pin", "")
-        if secrets.compare_digest(str(pin), str(core.admin_pin)):
+        pin = str((request.get_json() or {}).get("pin", ""))
+        # Admin PIN wins (checked first); a separate guest PIN, if set, grants the
+        # limited role (maps/modes/workshop downloads only).
+        role = None
+        if secrets.compare_digest(pin, str(core.admin_pin)):
+            role = "admin"
+        elif core.guest_pin and secrets.compare_digest(pin, str(core.guest_pin)):
+            role = "guest"
+        if role:
             _clear_attempts(ip)
             _clear_global()
-            core.log(f"Web login from {ip}")
-            session_token = _create_session(ip, is_local=False)
-            resp = jsonify({"ok": True})
+            core.log(f"Web login from {ip} (role={role})")
+            session_token = _create_session(ip, is_local=False, role=role)
+            resp = jsonify({"ok": True, "role": role})
             resp.set_cookie(
                 "session", session_token,
                 httponly=True, samesite="Strict",
@@ -273,8 +317,11 @@ def create_flask(core: AppCore) -> Flask:
     def api_state():
         session  = _current_session()
         is_local = bool(session and session.get("is_local"))
+        role     = "admin" if is_local else ((session or {}).get("role") or "guest")
         return jsonify({
             "running":            core.running,
+            "role":               role,
+            "guest_pin_set":      bool(core.guest_pin),
             "is_installed":       core.is_installed,
             "boot_state":         core.boot_state,
             "player_count":       core.player_count,
@@ -507,6 +554,7 @@ def create_flask(core: AppCore) -> Flask:
             "bots_enabled":          core.bots_enabled,
             "max_players_override":  core.max_players_override,
             "admin_pin":             core.admin_pin     if is_local else "***",
+            "guest_pin":             core.guest_pin     if is_local else "***",
             "rcon_password":         core.rcon_password  if is_local else "***",
             "steam_username":        core.steam_username if is_local else "***",
             "steam_session_active":  core.steam_session_active,
@@ -541,6 +589,13 @@ def create_flask(core: AppCore) -> Flask:
                 if new_pin.isdigit() and len(new_pin) >= 4:
                     core.admin_pin    = new_pin
                     _config.ADMIN_PIN = new_pin
+            if "guest_pin" in d:
+                # Empty string disables guest login; otherwise 4+ digits and must
+                # differ from the admin PIN (admin wins at login, so equal = useless).
+                new_gpin = str(d["guest_pin"]).strip()
+                if new_gpin == "" or (new_gpin.isdigit() and len(new_gpin) >= 4
+                                       and new_gpin != core.admin_pin):
+                    core.guest_pin = new_gpin
             if "gslt_token" in d:
                 core.gslt_token = str(d["gslt_token"])
             if "rcon_password" in d:
@@ -643,8 +698,7 @@ def create_flask(core: AppCore) -> Flask:
         ])
 
     @app.route("/api/workshop/download", methods=["POST"])
-    @require_auth
-    @require_local
+    @require_auth   # guest-allowed (see _GUEST_PATHS) — friends can pull new maps
     def workshop_download():
         wid = (request.get_json() or {}).get("id", "").strip()
         if not wid.isdigit():
@@ -663,8 +717,7 @@ def create_flask(core: AppCore) -> Flask:
         return jsonify({"ok": True})
 
     @app.route("/api/workshop/cancel", methods=["POST"])
-    @require_auth
-    @require_local
+    @require_auth   # guest-allowed — cancel a download they started
     def workshop_cancel():
         core.cancel_download()
         return jsonify({"ok": True})

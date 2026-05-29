@@ -433,7 +433,9 @@ class AppCore:
 
         # Security — loaded from config; auto-generated on first run
         self.rcon_password: str = ""   # used as CS2's +rcon_password arg
-        self.admin_pin:     str = ""   # 4-digit PIN for the web panel
+        self.admin_pin:     str = ""   # PIN for the web panel (full admin access)
+        self.guest_pin:     str = ""   # optional PIN for the limited guest role
+                                       # (maps/modes/workshop downloads); "" = off
 
         # One-time token set by main.py so the local pywebview window can
         # auto-authenticate without entering the PIN.  Cleared after first use.
@@ -583,6 +585,8 @@ class AppCore:
 
         # Admin PIN: default to "1234" if never configured, prompt user to change.
         self.admin_pin = cfg.get("admin_pin", "1234")
+        # Guest PIN: optional limited-access PIN; empty string disables guest login.
+        self.guest_pin = cfg.get("guest_pin", "")
 
         # ── Steam credentials ──────────────────────────────────────────────
         self.steam_username = cfg.get("steam_username", "")
@@ -631,6 +635,7 @@ class AppCore:
                 "server_dir":            self.server_dir,
                 "rcon_password":         self.rcon_password,
                 "admin_pin":             self.admin_pin,
+                "guest_pin":             self.guest_pin,
                 "steam_username":        self.steam_username,
                 "steam_password":        steam_pw_stored,
                 "steam_session_active":  self.steam_session_active,
