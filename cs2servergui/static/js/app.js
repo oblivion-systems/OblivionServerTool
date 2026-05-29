@@ -330,6 +330,9 @@ function applyState(s) {
   else appBadge.classList.add('hidden');
   if (s.update_available) { cs2Badge.textContent = '⬆ CS2 Update'; cs2Badge.classList.remove('hidden'); }
   else cs2Badge.classList.add('hidden');
+  // Pulse the Config update button when an update was detected (it stays a
+  // normal forced-update button when not pulsing — the glow is just a cue).
+  el('cfg-update-btn')?.classList.toggle('update-pending', !!s.update_available);
 
   // Local uptime counter (client-side increments between polls)
   clearInterval(state._uptimeTimer);
@@ -2105,6 +2108,8 @@ pages['config'] = async function() {
       );
     });
 
+    // Reflect a detected update immediately (don't wait for the next poll).
+    el('cfg-update-btn')?.classList.toggle('update-pending', !!state.server.update_available);
     el('cfg-update-btn')?.addEventListener('click', () => {
       if (state.server.running) { toast('Stop the server before updating', 'var(--bad)'); return; }
       modal(

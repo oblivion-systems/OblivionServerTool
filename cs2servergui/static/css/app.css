@@ -1069,6 +1069,18 @@ kbd {
 /* Role-based UI: hide admin-only controls for the limited "guest" remote role */
 body.role-guest .admin-only { display: none !important; }
 
+/* "Update / Validate CS2" button pulses when an update was detected (still
+   always clickable for a forced update even when not pulsing). */
+@keyframes update-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 transparent; }
+  50%      { box-shadow: 0 0 12px 1px var(--accent-li); }
+}
+.btn.update-pending {
+  color: var(--accent);
+  border-color: var(--accent);
+  animation: update-pulse 1.8s ease-in-out infinite;
+}
+
 /* Utility */
 .hidden   { display: none !important; }
 .mt-8     { margin-top: 8px; }
