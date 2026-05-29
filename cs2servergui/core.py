@@ -1386,54 +1386,29 @@ class AppCore:
                 # directly into the server dir as "<CS2_SERVER_DIR>/game/" — a full
                 # ~64 GB DUPLICATE install separate from the one the server runs.
                 # Every update grew that orphan and never touched the real files.
+                # Run steamcmd in its OWN console window rather than capturing its
+                # output into the app. A standalone console lets steamcmd self-update
+                # cleanly (the captured-pipe path is what triggers the "exit code 8"
+                # self-update failure and no-output hangs) and shows native progress.
+                # We still hold the process handle and wait on it, so the app detects
+                # completion and re-verifies the build afterwards.
                 proc = subprocess.Popen(
                     [_config.STEAMCMD_PATH,
                      "+login", "anonymous",
                      "+app_update", CS2_APP_ID, "validate", "+quit"],
-                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    creationflags=(subprocess.CREATE_NEW_CONSOLE
+                                   if sys.platform == "win32" else 0),
                 )
-                out_q: queue.Queue = queue.Queue()
-
-                def _reader() -> None:
-                    buf = b""
-                    while True:
-                        chunk = proc.stdout.read(256)
-                        if not chunk:
-                            break
-                        buf += chunk
-                        while True:
-                            for sep in (b"\r\n", b"\n", b"\r"):
-                                idx = buf.find(sep)
-                                if idx != -1:
-                                    out_q.put(buf[:idx].decode("utf-8", errors="replace"))
-                                    buf = buf[idx + len(sep):]
-                                    break
-                            else:
-                                break
-                    if buf:
-                        out_q.put(buf.decode("utf-8", errors="replace"))
-                    out_q.put(None)
-
-                threading.Thread(target=_reader, daemon=True).start()
-                last_output = time.time()
-                warned_at: set[int] = set()
-                while True:
-                    try:
-                        line = out_q.get(timeout=0.25)
-                    except queue.Empty:
-                        silence = int(time.time() - last_output)
-                        for t in (15, 30, 60, 120):
-                            if t not in warned_at and silence >= t:
-                                warned_at.add(t)
-                                self.log(f"  … still working ({silence}s, no steamcmd output)")
-                        continue
-                    if line is None:
-                        break
-                    last_output = time.time()
-                    warned_at.clear()   # re-arm the silence warnings for the next gap
-                    s = line.strip()
-                    if s:
-                        self.log(f"[steamcmd] {s}")
+                self.log("  steamcmd is running in its own window — watch progress there.")
+                self.log("  (Standalone so it can self-update cleanly; the app will verify")
+                self.log("   the build automatically once the window finishes & closes.)")
+                start = time.time()
+                next_mark = 30
+                while proc.poll() is None:
+                    time.sleep(1)
+                    if time.time() - start >= next_mark:
+                        self.log(f"  … still updating ({next_mark}s) — see the steamcmd window")
+                        next_mark += 30
                 proc.wait()
                 self.log("─" * 48)
                 if proc.returncode == 0:

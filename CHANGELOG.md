@@ -100,9 +100,13 @@ with no visual cue which would actually launch.
   successful update, `check_update` re-reads the updated `appmanifest` buildid and compares it to
   the latest public build — confirming the update actually landed rather than optimistically
   clearing the flag.
-- **Update path hardened.** steamcmd.zip download uses `urlopen(timeout=60)` + `copyfileobj` (a
-  stalled CDN can't hang the install thread); the "still working" silence warnings re-arm after
-  each output line so later quiet gaps still report.
+- **Update path hardened.** steamcmd.zip download uses `urlopen(timeout=60)` + `copyfileobj` so a
+  stalled CDN can't hang the install thread.
+- **Server update now runs steamcmd in its own console window** instead of capturing its output
+  into the app. The captured-pipe path is what triggered steamcmd's "exit code 8" self-update
+  failure and no-output hangs; a standalone console lets steamcmd self-update cleanly and shows
+  native progress. The app still holds the process handle, waits for it to finish (heartbeat in
+  the log), then re-verifies the build — so the badge still clears automatically on completion.
 - **Always-available "Update / Validate CS2" button** (Config → Server Installation, local-only).
   Previously the CS2 update was *only* reachable via the `⬆ CS2 Update` badge, which appears only
   when the mirror-based check (`api.steamcmd.net`, which can lag Valve) flags an update — leaving
