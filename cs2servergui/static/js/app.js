@@ -917,14 +917,15 @@ function populateMapSelect(mode) {
     sel.appendChild(grp);
   }
 
-  // ── Workshop maps, split by whether they suit this mode (by tag) ─────────
-  const maps     = state.workshopMaps || [];
-  const modeTags = (state.modeWorkshopTags[mode] || []).map(t => t.toLowerCase());
-  const sort     = arr => arr.slice().sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
-  const matchWs  = m => !m.tags || m.tags.length === 0
-                     || m.tags.some(t => modeTags.includes(t.toLowerCase()));
-  const rec   = sort(maps.filter(matchWs));
-  const other = sort(maps.filter(m => !matchWs(m)));
+  // ── Workshop maps, split by whether they suit this mode ──────────────────
+  // Use the SAME modeSuitsMap notion as the badges + mismatch guard, so the
+  // group header and each option's recommended-mode suffix never contradict
+  // (a map tagged classic+wingman shouldn't sit under "Recommended for
+  // Competitive" while its suffix says "Wingman").
+  const maps = state.workshopMaps || [];
+  const sort = arr => arr.slice().sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
+  const suitedMaps = sort(maps.filter(m => modeSuitsMap(mode, m.tags)));
+  const otherMaps  = sort(maps.filter(m => !modeSuitsMap(mode, m.tags)));
   const addWs = (list, label) => {
     if (!list.length) return;
     const grp = document.createElement('optgroup');
@@ -940,8 +941,8 @@ function populateMapSelect(mode) {
     });
     sel.appendChild(grp);
   };
-  addWs(rec,   `Workshop — Recommended for ${mode}`);
-  addWs(other, 'Workshop — Other');
+  addWs(suitedMaps, `Workshop — Recommended for ${mode}`);
+  addWs(otherMaps,  'Workshop — Other');
 
   // ── Restore selection: keep prior pick, else reflect the running map ─────
   const has = v => [...sel.options].some(o => o.value === v);
