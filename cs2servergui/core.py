@@ -256,6 +256,13 @@ _MODE_PLUGIN_NAMES: dict[str, list[str]] = {
     # meaning deploy_plugins() runs a vanilla server with no managed plugins.
 }
 
+# Modes that MUST launch with -disable_workshop_command_filtering regardless of map.
+# Mounting a workshop content addon (MultiAddonManager) turns CS2's workshop command
+# filtering ON for the whole session — even on official maps — which then rejects the
+# mode's own server CVars. Zombie Escape mounts the ZombieReborn pack and relies on
+# zm_enable + cs2f_*/zr_*/zm_* CVars, so without the flag ZM silently never enables.
+_CMDFILTER_REQUIRED_MODES: frozenset[str] = frozenset({"Zombie Escape"})
+
 # Copy rules per plugin: list of (src_subdir, dst_subdir_relative_to_csgo[, exclude_subdirs]).
 # The CONTENTS of src_subdir are merged into dst_subdir.
 # Optional third element: frozenset of immediate subdirectory names to skip during the walk.
@@ -825,13 +832,18 @@ class AppCore:
         if self.gslt_token:
             cmd += ["+sv_setsteamaccount", self.gslt_token]
         # Some workshop maps run server commands from their own map logic, which
-        # CS2 blocks unless launched with this flag.  Only added for workshop maps
-        # that are flagged (auto-detected from the Steam description or a manual
-        # override) so the command filter stays ON for everything else.
-        if is_workshop and self.cmdfilter_effective(map_name):
+        # CS2 blocks unless launched with this flag.  Added for: (a) workshop maps
+        # flagged (auto-detected from the Steam description or a manual override),
+        # and (b) modes that MOUNT a workshop content addon — mounting any addon
+        # turns on workshop command filtering for the whole session (even on
+        # official maps), which would otherwise reject the mode's own convars
+        # (e.g. Zombie Escape's zm_enable + all cs2f_*/zr_*/zm_* CVars).
+        mode_needs_nofilter = mode in _CMDFILTER_REQUIRED_MODES
+        if (is_workshop and self.cmdfilter_effective(map_name)) or mode_needs_nofilter:
             cmd.append("-disable_workshop_command_filtering")
+            reason = mode if mode_needs_nofilter else map_name
             self.log("[workshop] Launching with -disable_workshop_command_filtering "
-                     f"for {map_name}")
+                     f"for {reason}")
         cmd += ["+map", startup_map]
         _server_env = os.environ.copy()
 
