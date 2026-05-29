@@ -2010,6 +2010,8 @@ pages['config'] = async function() {
             <button class="btn btn-ghost flex-1" id="cfg-dir-save">Set Directory</button>
             <button class="btn btn-accent flex-1" id="cfg-install-btn">Install / Reinstall</button>
           </div>
+          <button class="btn btn-ghost btn-full mt-12" id="cfg-update-btn">↻ Update / Validate CS2 (steamcmd)</button>
+          <div class="text-xs" style="color:var(--text-4);margin-top:6px">Forces a steamcmd <code>app_update 730 validate</code> in place — use this when you need to update even if no update badge is showing (the badge relies on a mirror that can lag Valve). Stop the server first.</div>
         </div>
         <div class="config-label">RCON Console</div>
         <div class="card">
@@ -2100,6 +2102,19 @@ pages['config'] = async function() {
           catch (e) { toast(e.message, 'var(--red)'); }
         },
         'Install'
+      );
+    });
+
+    el('cfg-update-btn')?.addEventListener('click', () => {
+      if (state.server.running) { toast('Stop the server before updating', 'var(--bad)'); return; }
+      modal(
+        'Update / Validate CS2 Server',
+        '<p style="color:var(--text-3);font-size:.86rem">Runs steamcmd <code>app_update 730 validate</code> against the live install (in place — no duplicate). Use this to force an update/repair even when no update badge is shown. Progress appears in the live log.</p>',
+        async () => {
+          try { await api.updateCs2(); toast('CS2 update started — check the log'); }
+          catch (e) { toast(e.message, 'var(--red)'); }
+        },
+        'Update / Validate'
       );
     });
   }

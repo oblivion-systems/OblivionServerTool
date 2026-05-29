@@ -103,6 +103,11 @@ with no visual cue which would actually launch.
 - **Update path hardened.** steamcmd.zip download uses `urlopen(timeout=60)` + `copyfileobj` (a
   stalled CDN can't hang the install thread); the "still working" silence warnings re-arm after
   each output line so later quiet gaps still report.
+- **Always-available "Update / Validate CS2" button** (Config → Server Installation, local-only).
+  Previously the CS2 update was *only* reachable via the `⬆ CS2 Update` badge, which appears only
+  when the mirror-based check (`api.steamcmd.net`, which can lag Valve) flags an update — leaving
+  no way to force a steamcmd `app_update 730 validate` when the badge wasn't showing. The button
+  runs the same in-place update on demand (refuses while the server is running).
 
 ### 🧹 Workshop Cleanup
 
