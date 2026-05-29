@@ -844,6 +844,13 @@ class AppCore:
             reason = mode if mode_needs_nofilter else map_name
             self.log("[workshop] Launching with -disable_workshop_command_filtering "
                      f"for {reason}")
+        # K4-Arenas ladder bots: force bot_quota_mode "normal" so the bots plugin
+        # adds exactly ONE bot to even an odd player count and that bot joins the
+        # 1v1 ladder like a player. The default "fill" sets bot_quota 2 — a second,
+        # unpaired bot that sticks onto a side as a 2v1. Set at launch for arenas.
+        if "arenas" in _MODE_PLUGIN_NAMES.get(mode, []):
+            cmd += ["+bot_quota_mode", "normal"]
+            self.log("[arenas] bot_quota_mode normal (ladder bots fill odd slots 1v1)")
         cmd += ["+map", startup_map]
         _server_env = os.environ.copy()
 
