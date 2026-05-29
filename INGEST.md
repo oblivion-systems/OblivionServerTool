@@ -5,15 +5,16 @@ each with a one-sentence summary. No code, no behavioural changes — reference 
 
 ---
 
-## `main.py` (218 lines)
+## `main.py` (217 lines)
 
 | Symbol | Summary |
 |--------|---------|
-| `_kill_zombie_instances()` | Finds and terminates any other `cs2servergui` processes already running so only one instance runs at a time. |
-| `_start_flask(core)` | Builds the Flask app, starts it on `0.0.0.0:5000` in a daemon thread, returns the app object. |
-| `_open_browser(url)` | Opens the default browser to `url` if pywebview is not available (headless/remote mode). |
-| `_main()` | Top-level bootstrap: loads config, kills zombies, launches Flask, starts pywebview window (or browser), blocks until window closes, calls `os._exit(0)`. |
-| `if __name__ == "__main__":` | Calls `_main()`. |
+| `_enable_high_dpi()` | Makes the process per-monitor DPI-aware on Windows before any UI is created. |
+| `_port_in_use(port)` | Returns `True` if something is already listening on `127.0.0.1:port`. |
+| `_kill_zombie_instance(port)` | If the Flask port is held by a previous instance (zombie Edge/pywebview process), finds the PID via `netstat` and `taskkill`s it, then waits for release. |
+| `_wait_for_flask(port, timeout)` | Polls `/api/ping` until Flask accepts connections or the timeout expires. |
+| `main()` | Bootstrap: builds `AppCore`, sets a one-time `startup_token`, starts the crash monitor, probes for an existing server, kills any zombie, launches Flask in a daemon thread, fires update/IP checks, opens the pywebview window at the `/auth/auto` URL, then `os._exit(0)` on close. |
+| `if __name__ == "__main__":` | Calls `main()`. |
 
 ---
 
@@ -25,7 +26,7 @@ each with a one-sentence summary. No code, no behavioural changes — reference 
 
 ---
 
-## `cs2servergui/config.py` (242 lines)
+## `cs2servergui/config.py` (264 lines)
 
 ### Functions
 
@@ -72,121 +73,95 @@ each with a one-sentence summary. No code, no behavioural changes — reference 
 
 ---
 
-## `cs2servergui/web.py` (788 lines)
+## `cs2servergui/web.py` (958 lines)
 
-### Factory
-
-| Symbol | Summary |
-|--------|---------|
-| `create_flask(core)` | Factory that builds and returns the complete Flask application wired to the given `AppCore` instance. |
-
-### Auth helpers (inner)
+### Session store & lockout (module-level)
 
 | Symbol | Summary |
 |--------|---------|
-| `_is_local(request)` | Returns `True` when the request comes from localhost (127.0.0.1 or ::1). |
-| `_require_auth()` | Before-request hook that enforces PIN login; redirects unauthenticated non-local requests to `/login`. |
+| `_create_session(ip, is_local, role)` | Mints a random session token storing `ip`, `is_local`, `role` (`"admin"`/`"guest"`), and `created_at`. |
+| `_get_session(token)` / `_clear_session(token)` | Look up a session (expiring remote ones past the 8 h TTL) / drop a session. |
+| `_check_lockout(ip)` / `_record_fail(ip)` / `_clear_attempts(ip)` | Per-IP PIN brute-force lockout: 5 fails → 300 s. |
+| `_check_global_lockout()` / `_record_global_fail()` / `_clear_global()` | Global backoff (20 fails → 300 s, decays after 600 s quiet) defending against distributed brute force. |
+
+### Factory & auth (inner to `create_flask`)
+
+| Symbol | Summary |
+|--------|---------|
+| `create_flask(core)` | Factory that builds and returns the complete Flask app wired to the given `AppCore`. |
+| `_current_session()` | Returns the session dict for the request's `session` cookie, or `None`. |
+| `require_auth(f)` | Decorator: 401 unless a valid session exists; binds remote sessions to their origin IP. |
+| `require_local(f)` | Decorator (stacks on `require_auth`): 403 unless the session `is_local` — keeps RCON/install/Steam strictly on the desktop window. |
+| `_role_gate()` | `@app.before_request` **fail-closed** role enforcer: only an explicit guest/public allowlist is reachable by the `guest` role; every other `/api/*` route is admin-only by default. |
 
 ### Auth routes
 
 | Route | Summary |
 |-------|---------|
-| `GET /login` | Renders PIN entry page. |
-| `POST /login` | Validates PIN, sets session cookie; enforces 5-attempt / 300s lockout per IP. |
-| `GET /auth/auto` | One-time token endpoint used by pywebview to auto-login the desktop window without showing a PIN prompt. |
-| `GET /logout` | Clears session and redirects to `/login`. |
+| `GET /auth/auto` | One-time `startup_token` endpoint (loopback only) that mints a local admin session for the pywebview window. |
+| `POST /api/auth/login` | Validates the PIN against the admin PIN (→ `admin`) or guest PIN (→ `guest`); sets the session cookie; enforces per-IP + global lockout. |
+| `POST /api/auth/logout` | Clears the session and deletes the cookie. |
+| `GET /api/ping` | Unauthenticated health check. |
+| `GET /` | Renders the SPA shell (`index.html`). |
 
-### Page routes
-
-| Route | Summary |
-|-------|---------|
-| `GET /` | Renders main SPA shell (`index.html`). |
-
-### API — server control
+### API — server state & control
 
 | Route | Summary |
 |-------|---------|
-| `POST /api/start` | Starts the CS2 server with provided map, mode, GSLT, and workshop-map flag. |
-| `POST /api/stop` | Stops the running CS2 server. |
-| `POST /api/change_map` | Changes map on the running server (RCON `changelevel` or workshop map). |
-| `POST /api/deploy_plugins` | Deploys plugin files for the given mode asynchronously. |
-| `POST /api/check_plugins` | Runs the plugin diagnostic on a background thread. |
-| `GET /api/state` | Returns full server state snapshot as JSON (running, map, mode, players, RCON status, etc.). |
-| `GET /api/log/stream` | SSE endpoint streaming live log lines to the browser. |
+| `GET /api/state` | Full state snapshot (running, boot_state, map, mode, players, IPs, update flags, `role`, `guest_pin_set`, dl_progress). **(guest-allowed)** |
+| `POST /api/server/start` | Starts the server with map/mode/workshop flag. *(admin)* |
+| `POST /api/server/stop` | Stops the running server. *(admin)* |
+| `POST /api/server/map` | Changes map + game mode (RCON or `_restart_into` on plugin swap). **(guest-allowed)** |
+| `POST /api/server/broadcast` | RCON `say` chat broadcast. *(admin)* |
+| `POST /api/server/ff` | Toggles friendly fire. *(admin)* |
+| `POST /api/server/round/restart` / `/round/warmup` | `mp_restartgame 1` / `mp_warmup_end`. *(admin)* |
+| `POST /api/server/match/pause` / `/match/unpause` | Pause / unpause the match. *(admin)* |
+| `POST /api/server/install` / `/update_cs2` | SteamCMD install / in-place update. *(local-only)* |
 
-### API — install / update
-
-| Route | Summary |
-|-------|---------|
-| `POST /api/install` | Launches SteamCMD CS2 install/update on a background thread. |
-| `POST /api/check_update` | Triggers a CS2 update check (compares installed vs. Steam manifest build IDs). |
-| `POST /api/check_app_update` | Checks GitHub releases for a newer app version. |
-
-### API — settings
+### API — bots / players / bans  *(all admin; player list is guest-readable)*
 
 | Route | Summary |
 |-------|---------|
-| `GET /api/settings` | Returns all user-configurable settings as JSON (server dir, RCON, Steam, bots, etc.). |
-| `POST /api/settings` | Validates and saves updated settings to `oblivion_config.json`. |
-| `POST /api/change_password` | Changes the admin PIN (validates current PIN first). |
+| `POST /api/bots/add` / `/bots/kick` | Add N bots / kick all bots. |
+| `GET /api/players` | Roster parsed from RCON `status`. **(guest-allowed, read-only)** |
+| `POST /api/players/kick` / `/players/ban` | Kick by userid / ban by SteamID. |
+| `GET /api/bans` / `POST /api/bans/remove` | List bans / unban by SteamID. |
 
-### API — game controls
-
-| Route | Summary |
-|-------|---------|
-| `POST /api/restart_round` | Sends `mp_restartgame 1` via RCON. |
-| `POST /api/end_warmup` | Sends `mp_warmup_end` via RCON. |
-| `POST /api/pause_match` | Sends `mp_pause_match` via RCON. |
-| `POST /api/unpause_match` | Sends `mp_unpause_match` via RCON. |
-| `POST /api/friendly_fire` | Toggles `mp_friendlyfire` and `mp_autokick` via RCON. |
-| `POST /api/server_say` | Broadcasts a message to server chat via RCON `say`. |
-| `POST /api/rcon` | Executes an arbitrary RCON command and returns the response (remote sessions see credentials masked). |
-
-### API — players
+### API — config / presets  *(admin; secrets local-only)*
 
 | Route | Summary |
 |-------|---------|
-| `GET /api/players` | Returns current player list parsed from RCON `status`. |
-| `POST /api/kick` | Kicks a player by userid. |
-| `POST /api/ban` | Bans a player by SteamID and optionally duration. |
-| `GET /api/bans` | Returns the current ban list from disk or RCON. |
-| `POST /api/unban` | Removes a ban by SteamID. |
-| `POST /api/add_bot` / `POST /api/kick_bots` | Adds one bot or kicks all bots via RCON. |
+| `GET /api/config` | Returns settings; secrets (`sv_password`, `gslt_token`, `admin_pin`, `guest_pin`, `rcon_password`, `steam_username`) masked as `***` for non-local sessions. |
+| `POST /api/config` | Saves settings; security fields (admin/guest PIN, RCON pw, server dir, Steam creds) only writable by the local window. |
+| `GET /api/presets` · `POST /api/presets/save` · `/presets/load` · `DELETE /api/presets/<name>` | List / save / load / delete launch presets. |
+| `POST /api/rcon` | Arbitrary RCON command. *(local-only)* |
 
-### API — workshop
+### API — workshop & maps
 
 | Route | Summary |
 |-------|---------|
-| `GET /api/workshop` | Returns list of downloaded workshop map IDs with cached names/tags. |
-| `POST /api/workshop/download` | Queues a workshop map download request. |
-| `GET /api/workshop/pending` | Returns pending download requests awaiting approval. |
-| `POST /api/workshop/approve` | Approves and starts a pending DepotDownloader download. |
-| `POST /api/workshop/cancel` | Cancels the active download. |
-| `GET /api/workshop/status` | Returns current download state (idle/downloading/done). |
+| `GET /api/workshop/maps` | Downloaded maps with cached name/tags/preview/cmdfilter. **(guest-allowed)** |
+| `POST /api/workshop/download` | DepotDownloader staged download. **(guest-allowed)** |
+| `POST /api/workshop/cancel` | Cancel the active download. **(guest-allowed)** |
+| `POST /api/workshop/update` | Re-pull subscribed maps that changed. *(local-only)* |
+| `POST /api/workshop/cmdfilter/scan` / `/cmdfilter/override` | Scan descriptions for the command-filter flag / per-map override. *(local-only)* |
+| `POST /api/request_workshop` | Log a remote download request. **(guest-allowed)** |
+| `GET /api/data/modes` · `/data/maps` · `/data/mode_maps` · `/data/mode_workshop_tags` | Static reference data for the SPA. **(public)** |
+| `GET /api/maps/thumb/<map_name>` | Proxy a map thumbnail from the local panorama folder. **(public)** |
 
-### API — maps
-
-| Route | Summary |
-|-------|---------|
-| `GET /api/maps` | Returns mode-specific official and workshop map lists with metadata. |
-| `GET /api/maps/thumb/<map_name>` | Proxies map thumbnail from the local CS2 panorama folder; returns 404 if absent. |
-
-### API — Steam
+### API — Steam / setup / system / logs
 
 | Route | Summary |
 |-------|---------|
-| `POST /api/steam/login` | Launches interactive steamcmd console for 2FA setup. |
-| `GET /api/steam/session` | Returns current Steam session state (active/inactive). |
-
-### API — public IP
-
-| Route | Summary |
-|-------|---------|
-| `GET /api/public_ip` | Returns cached public IP or triggers a fresh `ipify.org` lookup. |
+| `POST /api/steam/login` | Interactive steamcmd console for 2FA. *(local-only)* |
+| `GET /api/system/pick_directory` | Native folder picker for the server dir. *(local-only)* |
+| `GET /api/setup/status` | First-run wizard state. **(guest-allowed)** |
+| `POST /api/setup/complete` | Persist first-run setup. *(local-only)* |
+| `GET /api/log/history` / `GET /api/log/stream` | Log history / live SSE stream. *(admin)* |
 
 ---
 
-## `cs2servergui/core.py` (2583 lines)
+## `cs2servergui/core.py` (3143 lines)
 
 ### Module-level constants & helpers
 
@@ -209,7 +184,7 @@ each with a one-sentence summary. No code, no behavioural changes — reference 
 | Symbol | Summary |
 |--------|---------|
 | `AppCore.__init__()` | Initialises all state attributes (server dir, RCON, Steam, bot config, caches) and loads `oblivion_config.json` if present. |
-| `AppCore.load_config()` | Reads `oblivion_config.json` and populates all settings; calls `update_paths()` and generates a random RCON password on first run. |
+| `AppCore.load_config()` | Reads `oblivion_config.json` and populates all settings (incl. `admin_pin`, optional `guest_pin`, `bots_enabled`, cmdfilter overrides); calls `update_paths()` and generates a random RCON password on first run. |
 | `AppCore.save_config()` | Serialises current settings to `oblivion_config.json`; stores Steam password in OS keyring if available. |
 | `AppCore.update_server_dir(path)` | Updates `server_dir` in memory and on disk, recomputes path constants. |
 
@@ -267,7 +242,9 @@ each with a one-sentence summary. No code, no behavioural changes — reference 
 
 | Symbol | Summary |
 |--------|---------|
-| `AppCore.deploy_plugins(mode)` | Full deploy pipeline: undeploy old plugins, copy new plugin files skipping CSS host DLLs, patch gameinfo.gi, verify, then hot-reload CSS or log restart requirement. |
+| `AppCore.deploy_plugins(mode)` | Full deploy pipeline: undeploy old plugins, copy new plugin files skipping CSS host DLLs (excluding K4-Arenas-Bots when bots off), patch gameinfo.gi, apply per-mode config writers, verify, then hot-reload CSS or log restart requirement. |
+| `AppCore._apply_retakes_bots(csgo_dir)` | Honours the Use-bots toggle for Retakes by rewriting the deployed `retakes.cfg` (`bot_quota 0` + `bot_kick` when bots off). |
+| `AppCore._apply_arena_size(csgo_dir, mode)` | Sets the K4-Arenas arena size: clears any generated config for `1v1` (plugin default = pure 1v1), or writes a `round-settings` config forcing `TeamSize 2` for `2v2`. |
 | `AppCore._hot_reload_css()` | Sends `css_plugins reload` via RCON; detects "unknown command" and logs that a restart is needed instead. |
 | `AppCore.deploy_plugins_async(mode, on_done)` | Non-blocking wrapper that runs `deploy_plugins()` on a daemon thread. |
 | `AppCore.check_plugins()` | Logs a full infrastructure + per-plugin file presence diagnostic on a daemon thread. |

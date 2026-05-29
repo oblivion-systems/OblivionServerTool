@@ -172,6 +172,23 @@ The tool runs a local Flask server on port 5000. The same interface you see in t
 
 Remote sessions authenticate with a PIN and expire after 8 hours. The desktop window gets an automatic session and never prompts for the PIN.
 
+### Access tiers
+
+Two PINs, two levels of access (set both in Config → Security; the guest PIN is optional):
+
+- **Admin PIN** — full control of everything the panel exposes.
+- **Guest PIN** — limited role for friends: change map, change game mode, and download workshop
+  maps. Guests can't start/stop the server, edit config, manage bots/bans, or use keybinds.
+  RCON, CS2 install/update, and Steam login stay local-window-only regardless.
+
+Enforcement is fail-closed (an allowlist of guest-reachable routes; everything else is admin-only).
+
+### Off-LAN access (optional)
+
+To let friends reach the panel over the internet, run a Cloudflare quick tunnel
+(`cloudflared tunnel --url http://localhost:5000`) and share the printed HTTPS URL + a PIN — no
+router changes, encrypted transport. See [TONIGHT.md](TONIGHT.md) for the full steps.
+
 ---
 
 ## Versioning

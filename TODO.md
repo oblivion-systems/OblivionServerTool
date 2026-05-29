@@ -37,6 +37,14 @@ deferred loose ends. Full prose in [CHANGELOG.md](CHANGELOG.md) → v0.9.1.*
 - [x] **Team-size modes reworked** — arenas capped at 1v1/2v2 (K4-Arenas; 2v2 via a generated
   `round-settings` config), team matches added as MatchZy modes 3v3/4v4/5v5 (maxplayers 6/8/10).
   Fixes the old gap where 3v3/4v4 were arenas that never set a team size. *(needs in-game verify)*
+- [x] **Workshop map flagging** — recommended-mode badges + tag chips on cards, self-describing
+  dropdown options, mode-mismatch guard ("switch & load"), unified single map picker with a
+  "Selected: …" readout. *(browser-verified)*
+- [x] **Two-tier remote access** — optional **guest PIN** (Config → Security) grants a limited
+  role: maps/modes + workshop downloads only; everything else admin-only via a fail-closed
+  `before_request` gate. Guest UI stripped down (incl. keybinds disabled). *(tunnel-verified)*
+- [x] **Remote-access docs** — Cloudflare quick-tunnel steps in [TONIGHT.md](TONIGHT.md)
+  (cloudflared installed via winget); guest-PIN section for handing out limited access.
 - [ ] **Cut the v0.9.2 release** — bump `APP_VERSION` → `0.9.2` in `config.py`, tag `v0.9.2`, push,
   create the GitHub release. (Deferred until you decide to ship; harmless to sit on while private.)
 
@@ -275,7 +283,8 @@ Plugin-backed modes (verify deploy, verify markers, verify defining behaviour):
 - [ ] Server metrics / history dashboard
 - [ ] Multi-server management
 - [ ] Re-evaluate adding back modes whose upstream plugins regain active maintenance
-- [ ] Optional secure off-LAN remote tunnel (carefully)
+- [~] Optional secure off-LAN remote tunnel — Cloudflare quick-tunnel flow documented in
+  [TONIGHT.md](TONIGHT.md) + README; a built-in/managed tunnel (stable URL) is still future work.
 - [ ] **Custom Warcraft menu — recompile the plugin** *(config can't fix this; deferred by choice)*
   - **Root cause (confirmed 2026-05-28):** the `!class`/`!skills`/`!shop` menus are rendered by
     the plugin's **own** menu code (the installed DLL contains both CS2MenuManager *and* a custom

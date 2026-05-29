@@ -133,6 +133,8 @@ Candidate ideas to revisit only after 1.0 ships. None are commitments.
 - Server metrics / lightweight dashboard (player count over time, uptime history).
 - Multi-server management from one panel.
 - Optional secure tunnel for true off-LAN remote admin (carefully — see BIBLE.md §5.7).
+  *(Cloudflare quick-tunnel flow now documented in [TONIGHT.md](TONIGHT.md); a managed/stable
+  tunnel and the two-tier guest/admin role split are done.)*
 - **Custom Warcraft menu (recompile).** The in-game `!class`/`!skills`/`!shop` menus are
   rendered by the plugin's **own** menu code, which **enlarges the highlighted item's font** —
   opening a gap before its description and clipping tall pages. This is **compiled in**, not
