@@ -36,8 +36,9 @@ calls).
   read "Competitive / Team".
 - **Steam tag chips** shown (muted) under the badges for at-a-glance context.
 - **Mode-mismatch guard** — starting or loading a map whose recommended modes don't include the
-  selected mode pops a confirm ("looks made for *Zombie Escape*, you've selected *Competitive* —
-  load anyway?") instead of silently launching it wrong. Applies on the status page and the grid.
+  selected mode pops a confirm ("looks made for *Zombie Escape*, you've selected *Competitive*").
+  The confirm offers **Switch to &lt;mode&gt; & load** (fixes the mismatch in one click), *Load
+  anyway* (keeps the current mode), or Cancel. Applies on the status page and the grid.
 - **Sort + dim by current mode** — the card grid floats maps that suit the selected mode to the
   top and de-emphasises clear mismatches (they brighten on hover; nothing is hidden).
 
@@ -49,7 +50,8 @@ with no visual cue which would actually launch.
 
 - **One unified Map dropdown** now lists everything in optgroups: *Official Maps*,
   *Workshop — Recommended for &lt;mode&gt;*, *Workshop — Other*. One control = one selected map =
-  zero ambiguity for both **Start** and **Change Map**.
+  zero ambiguity for both **Start** and **Change Map**. Each workshop option is also labelled
+  with its recommended mode(s) (e.g. `ze_random · Zombie Escape`) so every option self-describes.
 - **"Selected: &lt;map&gt; [Official|Workshop]" readout** under the picker confirms exactly what
   will load and from where.
 - Start / Change Map read that single selection (and still run through the mode-mismatch guard);
