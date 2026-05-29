@@ -16,16 +16,16 @@ RCON or install/update (those are local-only) — exactly what you want.
 2. Make sure the app (and its Flask server) is running.
 3. Open a **new** terminal (PowerShell) and run:
    ```
-   cloudflared tunnel --url http://localhost:5000
+   cloudflared tunnel --url http://localhost:5050
    ```
    *(installed at `C:\Program Files (x86)\cloudflared\cloudflared.exe` — a fresh terminal has it on PATH)*
 4. It prints a URL like `https://random-words.trycloudflare.com`. **Share that link + the PIN.**
 5. Friends open the link, enter the PIN, and they're in.
 6. **When done:** press `Ctrl+C` in that terminal — the URL dies instantly.
 
-### Alternative (no tunnel): port-forward `5000`
-Forward TCP `5000` on the router to this PC (like you did `27015`). Friends go to
-`http://<your-public-ip>:5000`. Simpler, but **plaintext HTTP** (PIN sent in clear) and exposes
+### Alternative (no tunnel): port-forward `5050`
+Forward TCP `5050` on the router to this PC (like you did `27015`). Friends go to
+`http://<your-public-ip>:5050`. Simpler, but **plaintext HTTP** (PIN sent in clear) and exposes
 the panel to the internet. Fine for one night; tear it down after.
 
 > Safety: the PIN is 4 digits. Behind the HTTPS tunnel that's acceptable for a friends night.
