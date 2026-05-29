@@ -40,7 +40,21 @@ calls).
   load anyway?") instead of silently launching it wrong. Applies on the status page and the grid.
 - **Sort + dim by current mode** — the card grid floats maps that suit the selected mode to the
   top and de-emphasises clear mismatches (they brighten on hover; nothing is hidden).
-- ⚠️ *Frontend-only change; worth an eyeball in the running app to confirm the badges render.*
+
+### 🎯 Unified Map Picker — No More Ambiguity
+
+The status-page "Map & Mode" card had **two** map dropdowns (Official + Workshop) and silently
+resolved `workshop || official` — so picking a workshop map secretly overrode the official one
+with no visual cue which would actually launch.
+
+- **One unified Map dropdown** now lists everything in optgroups: *Official Maps*,
+  *Workshop — Recommended for &lt;mode&gt;*, *Workshop — Other*. One control = one selected map =
+  zero ambiguity for both **Start** and **Change Map**.
+- **"Selected: &lt;map&gt; [Official|Workshop]" readout** under the picker confirms exactly what
+  will load and from where.
+- Start / Change Map read that single selection (and still run through the mode-mismatch guard);
+  an empty selection now prompts "Select a map first" instead of failing silently.
+- ⚠️ *Frontend-only change; worth an eyeball in the running app to confirm the picker renders.*
 
 ### 🐛 CS2 Update / Disk Bloat — Critical Fix
 
