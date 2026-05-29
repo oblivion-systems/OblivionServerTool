@@ -2418,8 +2418,8 @@ pages['appearance'] = function() {
 
     </div>
 
-    <!-- Keybinds — full width below the two columns -->
-    <div class="appearance-section keybinds-section">
+    <!-- Keybinds — full width below the two columns (admin only) -->
+    <div class="appearance-section keybinds-section admin-only">
       <div class="appearance-section-title">
         Keybinds
         <span class="appearance-section-hint">Active when focus is not in a text field · F1–F12, or Ctrl / Alt / Shift + any key</span>
@@ -2559,6 +2559,7 @@ async function init() {
 
   // Global keybind handler
   document.addEventListener('keydown', e => {
+    if (!state.isAdmin) return;                              // guests: keybinds disabled
     if (e.target.matches('input,textarea,select')) return;  // never fire while typing
     if (document.querySelector('.modal-overlay,.setup-overlay')) return; // modal open
     const key = _keyStr(e);
