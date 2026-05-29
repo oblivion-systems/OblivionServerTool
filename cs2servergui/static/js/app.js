@@ -48,20 +48,31 @@ function fmtUptime(secs) {
   return `${s}s`;
 }
 
-function modal(titleText, bodyHtml, onConfirm, confirmLabel = 'Confirm') {
+function modal(titleText, bodyHtml, onConfirm, confirmLabel = 'Confirm', opts = {}) {
+  // opts.secondaryLabel + opts.onSecondary add a third (middle) button.
+  const { secondaryLabel, onSecondary } = opts;
   const ov = h('div', 'modal-overlay');
+  const secondaryBtn = secondaryLabel
+    ? `<button class="btn" id="modal-secondary">${secondaryLabel}</button>`
+    : '';
   ov.innerHTML = `
     <div class="modal">
       <div class="modal-title">${titleText}</div>
       <div class="modal-body">${bodyHtml}</div>
       <div class="modal-actions">
         <button class="btn btn-ghost" id="modal-cancel">Cancel</button>
+        ${secondaryBtn}
         <button class="btn btn-accent" id="modal-ok">${confirmLabel}</button>
       </div>
     </div>`;
   document.body.appendChild(ov);
   ov.querySelector('#modal-cancel').onclick = () => ov.remove();
   ov.querySelector('#modal-ok').onclick = () => { ov.remove(); onConfirm(ov); };
+  if (secondaryLabel) {
+    ov.querySelector('#modal-secondary').onclick = () => {
+      ov.remove(); if (onSecondary) onSecondary(ov);
+    };
+  }
   ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
   return ov;
 }
@@ -812,9 +823,11 @@ function buildStatusPage() {
     const { map, ws } = getSelectedMap();
     const mode = el('mode-select').value;
     if (!map) { toast('Select a map first', 'var(--bad)'); return; }
-    withModeMatchGuard(mode, map, ws, async () => {
-      try { await api.start(map, mode, ws); toast('Server starting…', 'var(--ok)'); }
-      catch (e) { toast(e.message, 'var(--bad)'); }
+    withModeMatchGuard(mode, map, ws, (useMode) => {
+      (async () => {
+        try { await api.start(map, useMode, ws); toast('Server starting…', 'var(--ok)'); }
+        catch (e) { toast(e.message, 'var(--bad)'); }
+      })();
     });
   });
   el('sp-restart-btn').addEventListener('click', doQuickRestart);
@@ -839,9 +852,11 @@ function buildStatusPage() {
     const { map, ws } = getSelectedMap();
     const mode = el('mode-select').value;
     if (!map) { toast('Select a map first', 'var(--bad)'); return; }
-    withModeMatchGuard(mode, map, ws, async () => {
-      try { await api.map(map, mode, ws); toast(`Changing to ${map}…`); }
-      catch (e) { toast(e.message, 'var(--bad)'); }
+    withModeMatchGuard(mode, map, ws, (useMode) => {
+      (async () => {
+        try { await api.map(map, useMode, ws); toast(`Changing to ${map}…`); }
+        catch (e) { toast(e.message, 'var(--bad)'); }
+      })();
     });
   });
   el('ss-change-btn').addEventListener('click', () => {
@@ -916,7 +931,11 @@ function populateMapSelect(mode) {
     grp.label = label;
     list.forEach(m => {
       const o = document.createElement('option');
-      o.value = m.id; o.textContent = m.name || m.id; o.dataset.ws = '1';
+      o.value = m.id; o.dataset.ws = '1';
+      // Append the map's recommended mode(s) so each option is self-describing
+      // (e.g. "ze_random · Zombie Escape"). Only distinctive tags add a suffix.
+      const rec = recommendedModes(m.tags);
+      o.textContent = (m.name || m.id) + (rec.length ? ` · ${rec.join('/')}` : '');
       grp.appendChild(o);
     });
     sel.appendChild(grp);
@@ -1705,17 +1724,32 @@ function modeSuitsMap(mode, tags) {
   return rec.length === 0 || rec.includes(mode);
 }
 
-/** Guard a map action with a mismatch confirm. Official maps have no tags → pass. */
-function withModeMatchGuard(mode, mapId, isWorkshop, proceed) {
-  if (!isWorkshop) { proceed(); return; }
+/** Sync the visible mode control(s) to *mode* (status-page picker and/or maps filter). */
+function setModeControl(mode) {
+  const ms = el('mode-select');
+  if (ms) { ms.value = mode; populateMapSelect(mode); updateModeHint(mode); }
+  const mf = el('maps-mode-filter');
+  if (mf) mf.value = mode;
+}
+
+/** Guard a map action with a mismatch confirm. `run(modeToUse)` performs the action.
+ *  Official maps have no tags → run as-is. On a mismatch the user can switch to the
+ *  recommended mode (and load), load anyway in the current mode, or cancel. */
+function withModeMatchGuard(mode, mapId, isWorkshop, run) {
+  if (!isWorkshop) { run(mode); return; }
   const m = (state.workshopMaps || []).find(x => x.id === mapId);
-  if (!m || modeSuitsMap(mode, m.tags)) { proceed(); return; }
-  const rec = recommendedModes(m.tags).join(', ');
+  if (!m || modeSuitsMap(mode, m.tags)) { run(mode); return; }
+  const rec    = recommendedModes(m.tags);
+  const target = rec[0];                       // first/most-specific recommended mode
+  const recStr = rec.join(', ');
   modal('Mode mismatch',
     `<p style="color:var(--text-3);font-size:.9rem">` +
-    `“${esc(m.name || mapId)}” looks made for <strong>${esc(rec)}</strong>, ` +
-    `but you've selected <strong>${esc(mode)}</strong>.<br><br>Load it anyway?</p>`,
-    proceed, 'Load anyway');
+    `“${esc(m.name || mapId)}” looks made for <strong>${esc(recStr)}</strong>, ` +
+    `but you've selected <strong>${esc(mode)}</strong>.<br><br>` +
+    `Switch to <strong>${esc(target)}</strong> and load it, or load it as-is?</p>`,
+    () => { setModeControl(target); run(target); },   // primary: switch & load
+    `Switch to ${esc(target)} & load`,
+    { secondaryLabel: 'Load anyway', onSecondary: () => run(mode) });
 }
 
 async function loadWorkshopMapsGrid(grid, mode) {
@@ -1766,9 +1800,11 @@ async function loadWorkshopMapsGrid(grid, mode) {
           ${isLocal ? `<button class="cmdfilter-chip ${_cf(m.cmdfilter).cls}" title="Command filtering for this map — click to change. Maps with custom server-command logic need this OFF.">${_cf(m.cmdfilter).label}</button>` : ''}
         </div>`;
       card.addEventListener('click', () => {
-        withModeMatchGuard(mode, m.id, true, async () => {
-          try { await api.map(m.id, mode, true); toast(`Loading workshop map…`); }
-          catch (e) { toast(e.message, 'var(--bad)'); }
+        withModeMatchGuard(mode, m.id, true, (useMode) => {
+          (async () => {
+            try { await api.map(m.id, useMode, true); toast(`Loading workshop map…`); }
+            catch (e) { toast(e.message, 'var(--bad)'); }
+          })();
         });
       });
       // Per-map command-filter override: cycle auto → ON → OFF → auto
