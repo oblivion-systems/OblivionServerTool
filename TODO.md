@@ -171,7 +171,8 @@ Plugin-backed modes (verify deploy, verify markers, verify defining behaviour):
 - [ ] Jailbreak — CSS Jailbreak plugin **only** (CS2Fixes removed — caused native crash); warden/prisoner ruleset
 - [ ] Practice — MatchZy; practice/match flow
 - [ ] Warcraft — WarcraftPlugin + ModelPrecacher; classes/XP/items, Barbarian models render, menus readable on 4:3 & 16:9
-- [ ] Zombie Escape — ZombieMod + MultiAddonManager + ZombieReborn; `zm_enable 1` wins over zombie base
+- [x] Zombie Escape — ZombieMod + MultiAddonManager + ZombieReborn; `zm_enable 1` wins over zombie
+  base. *Confirmed in-game 2026-05-29 (needed `-disable_workshop_command_filtering` — now forced for the mode).*
 
 ### 2.3 Plugin lifecycle correctness
 - [ ] gameinfo.gi auto-**patch** fires when entering a plugin mode

@@ -86,6 +86,15 @@ with no visual cue which would actually launch.
   `bg-1 → bg-0` (into the base tone) and softened the inset edge glow, so the tab rail now sits in
   the dark theme instead of floating above it.
 
+### 🧟 Zombie Escape — Command-Filter Fix
+
+- **Zombie Escape now always launches with `-disable_workshop_command_filtering`.** Mounting the
+  ZombieReborn content addon (MultiAddonManager) turns on CS2's workshop command filtering for the
+  whole session — even on official maps — which silently rejected `zm_enable` and every
+  `cs2f_*`/`zr_*`/`zm_*` CVar (a wall of `DISALLOWED WORKSHOP CONVAR` in the log), so ZM never
+  actually enabled. Added `_CMDFILTER_REQUIRED_MODES` so the flag is forced for the mode
+  regardless of map. *Confirmed working in-game (2026-05-29).*
+
 ### 🐛 CS2 Update / Disk Bloat — Critical Fix
 
 - **Stopped the updater creating a duplicate ~64 GB install.** The steamcmd update ran with
@@ -107,6 +116,8 @@ with no visual cue which would actually launch.
   failure and no-output hangs; a standalone console lets steamcmd self-update cleanly and shows
   native progress. The app still holds the process handle, waits for it to finish (heartbeat in
   the log), then re-verifies the build — so the badge still clears automatically on completion.
+  *Confirmed working in-game (2026-05-29): update applied cleanly, no duplicate install, server
+  rejoined the matching client build.*
 - **Always-available "Update / Validate CS2" button** (Config → Server Installation, local-only).
   Previously the CS2 update was *only* reachable via the `⬆ CS2 Update` badge, which appears only
   when the mirror-based check (`api.steamcmd.net`, which can lag Valve) flags an update — leaving
