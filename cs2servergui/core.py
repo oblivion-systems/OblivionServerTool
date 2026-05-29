@@ -1403,8 +1403,12 @@ class AppCore:
                 proc.wait()
                 self.log("─" * 48)
                 if proc.returncode == 0:
-                    self.log("  UPDATE COMPLETE.")
-                    self.update_available = False
+                    self.log("  UPDATE COMPLETE — verifying build…")
+                    self.update_available = False   # optimistic clear (steamcmd reported OK)
+                    # Re-read the now-updated appmanifest and compare to the latest
+                    # public buildid: confirms the update actually landed and corrects
+                    # the badge if somehow still behind. Also clears the badge live.
+                    self.check_update()
                 elif proc.returncode == 8:
                     self.log("  Exit code 8 — update failed (run steamcmd manually once to self-update)")
                 else:
