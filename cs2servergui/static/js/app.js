@@ -774,14 +774,11 @@ function buildStatusPage() {
         <div id="mode-hint" class="mode-hint hidden"></div>
       </div>
       <div class="field">
-        <label>Official Map</label>
+        <label>Map</label>
         <select class="select" id="map-select"></select>
       </div>
     </div>
-    <div class="field">
-      <label>Workshop Map (optional)</label>
-      <select class="select" id="ws-map-select"></select>
-    </div>
+    <div class="selected-map" id="selected-map"></div>
     <button class="btn btn-accent btn-full" id="map-change-btn" style="margin-top:4px">
       ${icon('<polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/>')}
       Change Map
@@ -798,9 +795,8 @@ function buildStatusPage() {
     modeSel.appendChild(o);
   });
 
-  // Populate maps
-  populateModeOfficialMaps(modeSel.value);
-  populateModeWorkshopMaps(modeSel.value);
+  // Populate maps (single unified picker: official + workshop)
+  populateMapSelect(modeSel.value);
   updateModeHint(modeSel.value);
 
   // Apply current state
@@ -813,11 +809,9 @@ function buildStatusPage() {
 
   // ── Wire server controls ─────────────────────────────────────────────────
   el('sp-start-btn').addEventListener('click', () => {
-    const wsId   = el('ws-map-select').value.trim();
-    const mapSel = el('map-select').value;
-    const mode   = el('mode-select').value;
-    const map    = wsId || mapSel;
-    const ws     = !!wsId;
+    const { map, ws } = getSelectedMap();
+    const mode = el('mode-select').value;
+    if (!map) { toast('Select a map first', 'var(--bad)'); return; }
     withModeMatchGuard(mode, map, ws, async () => {
       try { await api.start(map, mode, ws); toast('Server starting…', 'var(--ok)'); }
       catch (e) { toast(e.message, 'var(--bad)'); }
@@ -837,15 +831,14 @@ function buildStatusPage() {
 
   // ── Wire mode picker / map change ────────────────────────────────────────
   modeSel.addEventListener('change', e => {
-    populateModeOfficialMaps(e.target.value);
-    populateModeWorkshopMaps(e.target.value);
+    populateMapSelect(e.target.value);
     updateModeHint(e.target.value);
   });
+  el('map-select').addEventListener('change', updateSelectedMap);
   el('map-change-btn').addEventListener('click', () => {
-    const wsId = el('ws-map-select').value.trim();
-    const map  = wsId || el('map-select').value;
+    const { map, ws } = getSelectedMap();
     const mode = el('mode-select').value;
-    const ws   = !!wsId;
+    if (!map) { toast('Select a map first', 'var(--bad)'); return; }
     withModeMatchGuard(mode, map, ws, async () => {
       try { await api.map(map, mode, ws); toast(`Changing to ${map}…`); }
       catch (e) { toast(e.message, 'var(--bad)'); }
@@ -887,53 +880,74 @@ function updateModeHint(mode) {
   else       { hint.innerHTML = '';   hint.classList.add('hidden');    }
 }
 
-function populateModeOfficialMaps(mode) {
+/* Single unified map picker: official maps + workshop maps in one <select>, each
+ * option tagged with data-ws (0=official, 1=workshop). One control = one selected
+ * map = no ambiguity about what Start / Change Map will use. */
+function populateMapSelect(mode) {
   const sel = el('map-select');
   if (!sel) return;
-  const valid = (state.modeMaps[mode] || state.maps).slice().sort();
-  sel.innerHTML = valid.map(m => `<option value="${m}">${m}</option>`).join('');
-}
+  const prev = sel.value;   // preserve the user's pick across a mode change
+  sel.innerHTML = '';
 
-function populateModeWorkshopMaps(mode) {
-  const sel = el('ws-map-select');
-  if (!sel) return;
-
-  const maps     = state.workshopMaps;
-  const modeTags = (state.modeWorkshopTags[mode] || []).map(t => t.toLowerCase());
-  const sort     = arr => arr.slice().sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
-
-  const matched = sort(maps.filter(m =>
-    !m.tags || m.tags.length === 0 || m.tags.some(t => modeTags.includes(t.toLowerCase()))
-  ));
-  const others = sort(maps.filter(m =>
-    m.tags && m.tags.length > 0 && !m.tags.some(t => modeTags.includes(t.toLowerCase()))
-  ));
-
-  sel.innerHTML = '<option value="">— None (use official map) —</option>';
-
-  if (!maps.length) {
-    const opt = document.createElement('option');
-    opt.disabled = true;
-    opt.textContent = 'No workshop maps downloaded yet';
-    sel.appendChild(opt);
-    return;
+  // ── Official maps for this mode ──────────────────────────────────────────
+  const official = (state.modeMaps[mode] || state.maps).slice().sort();
+  if (official.length) {
+    const grp = document.createElement('optgroup');
+    grp.label = 'Official Maps';
+    official.forEach(m => {
+      const o = document.createElement('option');
+      o.value = m; o.textContent = m; o.dataset.ws = '0';
+      grp.appendChild(o);
+    });
+    sel.appendChild(grp);
   }
 
-  const addGroup = (list, label) => {
+  // ── Workshop maps, split by whether they suit this mode (by tag) ─────────
+  const maps     = state.workshopMaps || [];
+  const modeTags = (state.modeWorkshopTags[mode] || []).map(t => t.toLowerCase());
+  const sort     = arr => arr.slice().sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
+  const matchWs  = m => !m.tags || m.tags.length === 0
+                     || m.tags.some(t => modeTags.includes(t.toLowerCase()));
+  const rec   = sort(maps.filter(matchWs));
+  const other = sort(maps.filter(m => !matchWs(m)));
+  const addWs = (list, label) => {
     if (!list.length) return;
     const grp = document.createElement('optgroup');
     grp.label = label;
     list.forEach(m => {
-      const opt = document.createElement('option');
-      opt.value       = m.id;
-      opt.textContent = m.name || m.id;
-      grp.appendChild(opt);
+      const o = document.createElement('option');
+      o.value = m.id; o.textContent = m.name || m.id; o.dataset.ws = '1';
+      grp.appendChild(o);
     });
     sel.appendChild(grp);
   };
+  addWs(rec,   `Workshop — Recommended for ${mode}`);
+  addWs(other, 'Workshop — Other');
 
-  addGroup(matched, mode + ' Maps');
-  addGroup(others,  'Other Maps');
+  // ── Restore selection: keep prior pick, else reflect the running map ─────
+  const has = v => [...sel.options].some(o => o.value === v);
+  if (prev && has(prev))                    sel.value = prev;
+  else if (state.server.map && has(state.server.map)) sel.value = state.server.map;
+  updateSelectedMap();
+}
+
+/** The currently chosen map + whether it's a workshop item (from data-ws). */
+function getSelectedMap() {
+  const sel = el('map-select');
+  const opt = sel && sel.selectedOptions && sel.selectedOptions[0];
+  if (!opt) return { map: '', ws: false, label: '' };
+  return { map: opt.value, ws: opt.dataset.ws === '1', label: opt.textContent };
+}
+
+/** Refresh the "Selected: <map> [Official|Workshop]" readout under the picker. */
+function updateSelectedMap() {
+  const box = el('selected-map');
+  if (!box) return;
+  const { map, ws, label } = getSelectedMap();
+  if (!map) { box.innerHTML = '<span class="sm-empty">No map selected</span>'; return; }
+  const src = ws ? 'Workshop' : 'Official';
+  box.innerHTML = `Selected: <strong>${esc(label)}</strong>`
+                + ` <span class="sm-src sm-${ws ? 'ws' : 'off'}">${src}</span>`;
 }
 
 pages['status'] = buildStatusPage;

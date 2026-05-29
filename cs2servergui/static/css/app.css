@@ -915,6 +915,21 @@ kbd {
 .map-card.mode-dim { opacity: 0.45; }
 .map-card.mode-dim:hover { opacity: 1; }
 
+/* "Selected: <map> [source]" readout under the unified map picker */
+.selected-map {
+  margin: 9px 2px 11px;
+  font-size: 12px; color: var(--text-3); letter-spacing: 0.02em;
+}
+.selected-map strong { color: var(--text-1); font-weight: 600; }
+.selected-map .sm-empty { color: var(--text-4); font-style: italic; }
+.sm-src {
+  display: inline-block; margin-left: 6px;
+  padding: 1px 6px; border-radius: 2px;
+  font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase;
+  border: 1px solid var(--line-1); color: var(--text-4);
+}
+.sm-src.sm-ws { color: var(--accent); background: var(--accent-lo); border-color: var(--accent-li); }
+
 /* Per-map command-filter chip on workshop cards */
 .cmdfilter-chip {
   margin-top: 8px;
