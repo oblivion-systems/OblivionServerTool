@@ -104,6 +104,16 @@ with no visual cue which would actually launch.
   actually enabled. Added `_CMDFILTER_REQUIRED_MODES` so the flag is forced for the mode
   regardless of map. *Confirmed working in-game (2026-05-29).*
 
+### 🧟 Zombie Escape — Missing ZM Configs (gun pickup + models)
+
+- **Humans couldn't pick up guns in Zombie mode.** CS2Fixes' ZM reads a per-weapon whitelist from
+  `addons/cs2fixes/configs/zm/weapons.cfg` (each weapon's `"enabled" "1"` = humans may use it), but
+  the bundle only ever shipped `weapons.cfg.example` — so the active file was missing
+  (`Failed to load … zm/weapons.cfg` in the boot log) and **no weapons were whitelisted → pickups
+  blocked.** Now ship the active `weapons.cfg` (all 43 weapons enabled), plus `hitgroups.cfg` and
+  `playerclass.jsonc` (the latter fixes zombies having no custom model), for both `zm/` and `zr/`.
+  *Confirmed cause in-game; takes effect on map reload (CS2Fixes loads these at level init).*
+
 ### 🐛 CS2 Update / Disk Bloat — Critical Fix
 
 - **Stopped the updater creating a duplicate ~64 GB install.** The steamcmd update ran with
