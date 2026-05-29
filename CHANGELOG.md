@@ -6,6 +6,25 @@
 *Post-v0.9.1 fixes (committed + pushed, not yet tagged). Bump `APP_VERSION` → `0.9.2`
 and tag `v0.9.2` when ready to cut a release.*
 
+### 🔐 Two-Tier Remote Access — Guest vs Admin
+
+The remote panel now has an optional **guest role** so you can hand friends limited control
+without exposing full admin.
+
+- **Guest PIN** (Config → Security, local-only to set; blank = disabled). A separate PIN from
+  the admin PIN; admin wins if they collide.
+- **Guest can:** view status, change map, change game mode, browse + **download workshop maps**.
+  **Guest cannot:** start/stop the server, edit config, manage bots/bans/players, view logs, or
+  anything else — and RCON/install/Steam stay strictly local as before.
+- Enforcement is **fail-closed**: a single `before_request` gate allows only an explicit
+  guest/public allowlist; every other `/api/*` route is admin-only by default (new routes are
+  locked down automatically). The login assigns `session["role"]`; the local desktop window is
+  always admin.
+- The SPA hides admin-only UI for guests (Start/Stop, settings strip, Config & Players tabs) and
+  shows an "Admin only" notice on direct navigation; `/api/state` exposes `role`.
+- *Verified live through a Cloudflare tunnel:* guest → 403 on admin routes / 200 on allowed ones;
+  admin → full access; wrong PIN → 401; guest UI correctly stripped down.
+
 ### 🎮 Team-Size Modes — Arenas (1v1/2v2) + MatchZy (3v3/4v4/5v5)
 
 Reworked the small-team modes so duels and team matches are cleanly separated, fixing

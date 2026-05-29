@@ -288,6 +288,13 @@ function applyState(s) {
   const oldBoot = state.server.boot_state;
   Object.assign(state.server, s);
 
+  // Role-based UI. Guests (remote, limited PIN) only get status + map/mode + the
+  // workshop browser; everything tagged .admin-only is hidden via CSS. Local
+  // window and the admin PIN are always full-access.
+  const isAdmin = !!(s.is_local || s.role === 'admin');
+  state.isAdmin = isAdmin;
+  document.body.classList.toggle('role-guest', !isAdmin);
+
   // Browser notifications on state transitions
   if (s.boot_state === 'ready'   && oldBoot !== 'ready')   _notify('Server Online',  `Map: ${s.map || '—'}  Mode: ${s.mode || '—'}`);
   if (s.boot_state === 'offline' && oldBoot !== 'offline' && old)  _notify('Server Offline', 'The server has stopped.');
@@ -720,7 +727,7 @@ function buildStatusPage() {
       <div class="sp-m"><div class="k">Players</div><div class="v" id="sp-players">—</div></div>
       <div class="sp-m"><div class="k">Tick</div><div class="v" id="sp-tick">—</div></div>
     </div>
-    <div class="sp-controls">
+    <div class="sp-controls admin-only">
       <button class="btn btn-green" id="sp-start-btn">
         ${icon('<polygon points="5 3 19 12 5 21 5 3"/>')} Start
       </button>
@@ -740,8 +747,8 @@ function buildStatusPage() {
   mp.innerHTML = 'Server is offline — start the server to see live match data.';
   root.appendChild(mp);
 
-  // ── Settings strip (FF, bots, mode) ──────────────────────────────────────
-  const strip = h('div', 'settings-strip');
+  // ── Settings strip (FF, bots, mode) — admin-only ─────────────────────────
+  const strip = h('div', 'settings-strip admin-only');
   strip.innerHTML = `
     <div class="ss">
       <span class="ss-lbl">Friendly Fire<span class="desc">mp_friendlyfire</span></span>
@@ -979,8 +986,21 @@ pages['status'] = buildStatusPage;
 let _playersFilter = 'all';     // all | t | ct | bots | humans
 let _playersSearch = '';
 
+/** Render an "admin only" notice for guest-role sessions. Returns true if blocked. */
+function _guestBlocked(root) {
+  if (state.isAdmin) return false;
+  root.innerHTML = `<div class="empty-state" style="padding:48px;text-align:center;color:var(--text-3)">
+    <div style="font-size:1rem;color:var(--text-1);margin-bottom:8px">Admin only</div>
+    <div style="font-size:.85rem;max-width:420px;margin:0 auto">This section needs the admin PIN.
+    You're signed in with limited access — change maps &amp; modes and download workshop maps
+    from the <strong>Status</strong> and <strong>Maps</strong> tabs.</div>
+  </div>`;
+  return true;
+}
+
 pages['players'] = function() {
   const root = el('content');
+  if (_guestBlocked(root)) return;
   const s = state.server;
   const hasScore = (s.t_score != null && s.ct_score != null);
 
@@ -1845,6 +1865,7 @@ pages['workshop'] = function() {
 
 pages['config'] = async function() {
   const root = el('content');
+  if (_guestBlocked(root)) return;
   root.innerHTML = '<div class="empty-state">Loading config…</div>';
 
   let cfg;
@@ -1917,9 +1938,12 @@ pages['config'] = async function() {
         <div class="config-label">Security</div>
         <div class="card mb-16">
           <div class="flex-col gap-8">
-            <div class="field"><label>Admin PIN (4+ digits, web panel login)</label>
+            <div class="field"><label>Admin PIN (4+ digits, full web-panel access)</label>
               <input class="input" id="cfg-pin" type="password"
                      value="${esc(cfg.admin_pin || '')}" maxlength="8"></div>
+            <div class="field"><label>Guest PIN (optional — limited remote access: maps, modes &amp; workshop downloads only. Blank = off)</label>
+              <input class="input" id="cfg-guest-pin" type="password"
+                     value="${esc(cfg.guest_pin || '')}" maxlength="8" placeholder="(disabled)"></div>
             <div class="field"><label>RCON Password (auto-generated, change if needed)</label>
               <input class="input" id="cfg-rcon-pw" type="password"
                      value="${esc(cfg.rcon_password || '')}"></div>
@@ -2021,6 +2045,7 @@ pages['config'] = async function() {
   if (secSaveBtn) secSaveBtn.addEventListener('click', async () => {
     const data = {
       admin_pin:     el('cfg-pin').value,
+      guest_pin:     el('cfg-guest-pin').value.trim(),
       rcon_password: el('cfg-rcon-pw').value,
     };
     try { await api.setConfig(data); toast('Security settings saved'); }

@@ -1066,6 +1066,9 @@ kbd {
 }
 .modal-actions { display: flex; gap: 8px; margin-top: 20px; justify-content: flex-end; }
 
+/* Role-based UI: hide admin-only controls for the limited "guest" remote role */
+body.role-guest .admin-only { display: none !important; }
+
 /* Utility */
 .hidden   { display: none !important; }
 .mt-8     { margin-top: 8px; }
