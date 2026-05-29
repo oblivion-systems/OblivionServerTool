@@ -1255,7 +1255,13 @@ class AppCore:
                     os.makedirs(_config.CS2_SERVER_DIR, exist_ok=True)
                     zip_path = os.path.join(_config.CS2_SERVER_DIR, "steamcmd.zip")
                     url = "https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip"
-                    urllib.request.urlretrieve(url, zip_path)
+                    # urlopen(timeout) instead of urlretrieve so a stalled CDN can't
+                    # hang the install thread indefinitely.
+                    req = urllib.request.Request(
+                        url, headers={"User-Agent": f"OblivionServerTool/{APP_VERSION}"})
+                    with urllib.request.urlopen(req, timeout=60) as resp, \
+                            open(zip_path, "wb") as fh:
+                        shutil.copyfileobj(resp, fh)
                     with zipfile.ZipFile(zip_path) as zf:
                         zf.extractall(_config.CS2_SERVER_DIR)
                     os.remove(zip_path)
@@ -1343,8 +1349,12 @@ class AppCore:
             self.log("  Phase 3 — download changed files  (progress below)")
             try:
                 proc = subprocess.Popen(
-                    [_config.STEAMCMD_PATH, "+login", "anonymous",
+                    # force_install_dir MUST come before +login (steamcmd applies
+                    # it to the session); otherwise a fresh install can land in
+                    # steamcmd's default dir instead of the configured server dir.
+                    [_config.STEAMCMD_PATH,
                      "+force_install_dir", _config.CS2_SERVER_DIR,
+                     "+login", "anonymous",
                      "+app_update", CS2_APP_ID, "validate", "+quit"],
                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 )
@@ -1381,11 +1391,12 @@ class AppCore:
                         for t in (15, 30, 60, 120):
                             if t not in warned_at and silence >= t:
                                 warned_at.add(t)
-                                self.log(f"  … still initialising ({silence}s)")
+                                self.log(f"  … still working ({silence}s, no steamcmd output)")
                         continue
                     if line is None:
                         break
                     last_output = time.time()
+                    warned_at.clear()   # re-arm the silence warnings for the next gap
                     s = line.strip()
                     if s:
                         self.log(f"[steamcmd] {s}")
