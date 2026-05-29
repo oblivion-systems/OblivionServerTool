@@ -27,7 +27,7 @@ The desktop app and the remote web panel are the same interface: a Flask SPA ren
 
 ### Map & Mode Selection
 - Pick from all **official CS2 maps**, filtered per game mode
-- **14 game modes**: Competitive, Casual, Wingman, 3v3, 4v4, 1v1, Arms Race, Demolition, Deathmatch, Retakes, Jailbreak, Practice, Warcraft, Zombie Escape
+- **16 game modes**: Competitive, Casual, Wingman, 3v3, 4v4, 5v5, 1v1, 2v2, Arms Race, Demolition, Deathmatch, Retakes, Jailbreak, Practice, Warcraft, Zombie Escape
 - **Workshop map picker** — shows downloaded maps by real name, not just ID
 - **Map search** — filter official and workshop maps by name or ID in real time
 - **Browse Steam Workshop** button, pre-filtered by the currently selected game mode
@@ -38,8 +38,8 @@ Oblivion automatically deploys the correct CounterStrikeSharp / MetaMod plugins 
 | Mode | Plugins deployed |
 |---|---|
 | Retakes | B3none cs2-retakes + RetakesAllocator |
-| Practice | MatchZy |
-| 1v1 / 3v3 / 4v4 | K4-Arenas (K4-Arenas-Bots optional, via the **Use bots** toggle) |
+| Practice / 3v3 / 4v4 / 5v5 | MatchZy (3v3/4v4/5v5 = team matches capped at maxplayers 6/8/10) |
+| 1v1 / 2v2 | K4-Arenas duel ladder, capped at 2-per-side (2v2 via a generated round config; K4-Arenas-Bots optional, via the **Use bots** toggle) |
 | Deathmatch | CS2Fixes (MetaMod) + CS2-Deathmatch |
 | Jailbreak | Jailbreak (CS2Fixes removed in v0.9.1 — it crashed the server) |
 | Warcraft | CS2-Warcraft-Plugin + ModelPrecacher |

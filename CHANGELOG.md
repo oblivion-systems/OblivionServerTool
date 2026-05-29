@@ -6,6 +6,24 @@
 *Post-v0.9.1 fixes (committed + pushed, not yet tagged). Bump `APP_VERSION` → `0.9.2`
 and tag `v0.9.2` when ready to cut a release.*
 
+### 🎮 Team-Size Modes — Arenas (1v1/2v2) + MatchZy (3v3/4v4/5v5)
+
+Reworked the small-team modes so duels and team matches are cleanly separated, fixing
+the long-standing gap where `3v3`/`4v4` were secretly K4-Arenas modes that never actually
+configured a team size (they ran the plugin's default, i.e. mostly 1v1).
+
+- **Arena duels capped at 2-per-side:** `1v1` and `2v2` are the K4-Arenas ladder modes.
+  `1v1` uses the plugin's default rounds (already pure 1v1 — its bundled `2vs2`/`3vs3`
+  rounds ship `EnabledByDefault=false`); `2v2` gets a **generated `round-settings` config**
+  forcing `TeamSize: 2` across a small weapon rotation (written on deploy by
+  `_apply_arena_size`; the generated config is scrubbed on switch-away so it can't linger).
+- **Team matches via MatchZy:** `3v3`, `4v4`, `5v5` are now MatchZy-managed team matches
+  (same plugin as Practice) on the competitive ruleset, bounded by `maxplayers` 6 / 8 / 10.
+- **Mode list** gained `2v2` and `5v5`; `3v3`/`4v4` switched from arenas to MatchZy. The
+  arena Use-bots toggle still applies to `1v1`/`2v2`.
+- ⚠️ *Needs in-game verification:* the generated 2v2 arena config and the MatchZy team-size
+  matches couldn't be tested without a live server.
+
 ### 🐛 CS2 Update / Disk Bloat — Critical Fix
 
 - **Stopped the updater creating a duplicate ~64 GB install.** The steamcmd update ran with

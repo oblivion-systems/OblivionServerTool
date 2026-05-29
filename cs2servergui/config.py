@@ -125,7 +125,10 @@ CS2_PANORAMA_THUMBS_SUBPATH = os.path.join(
 )
 
 GAME_MODES = [
-    "Competitive", "Casual", "Wingman", "3v3", "4v4", "1v1",
+    # Team matches (MatchZy-managed): one team vs one team at a fixed size.
+    "Competitive", "Casual", "Wingman", "3v3", "4v4", "5v5",
+    # Arena duels (K4-Arenas ladder): capped at 2-per-side by choice.
+    "1v1", "2v2",
     "Arms Race", "Demolition", "Deathmatch",
     "Retakes", "Jailbreak", "Practice", "Warcraft", "Zombie Escape",
 ]
@@ -135,12 +138,17 @@ MODE_SETTINGS: dict[str, dict[str, str]] = {
     "Competitive": {"game_type": "0", "game_mode": "1", "maxplayers": "10"},
     "Casual":      {"game_type": "0", "game_mode": "0", "maxplayers": "12"},
     "Wingman":     {"game_type": "0", "game_mode": "2", "maxplayers": "4"},
-    # Arena modes (K4-Arenas): maxplayers is a generous CEILING, not a target —
+    # Team matches (MatchZy): competitive ruleset; maxplayers caps total slots so
+    # the lobby self-limits to the team size (N-per-side → maxplayers 2N).
+    "3v3":         {"game_type": "0", "game_mode": "1", "maxplayers": "6"},
+    "4v4":         {"game_type": "0", "game_mode": "1", "maxplayers": "8"},
+    "5v5":         {"game_type": "0", "game_mode": "1", "maxplayers": "10"},
+    # Arena duels (K4-Arenas): maxplayers is a generous CEILING, not a target —
     # the plugin only builds arenas for players actually present, so one high cap
-    # fits any turnout (4 → 2 arenas, 12 → 6) without per-session tuning.
-    "3v3":         {"game_type": "0", "game_mode": "1", "maxplayers": "16"},
-    "4v4":         {"game_type": "0", "game_mode": "1", "maxplayers": "16"},
+    # fits any turnout (4 → 2 arenas, 12 → 6) without per-session tuning. Capped
+    # at 2-per-side by choice (1v1 = plugin default; 2v2 = generated round config).
     "1v1":         {"game_type": "0", "game_mode": "1", "maxplayers": "16"},
+    "2v2":         {"game_type": "0", "game_mode": "1", "maxplayers": "16"},
     "Arms Race":   {"game_type": "1", "game_mode": "0", "maxplayers": "16"},
     "Demolition":  {"game_type": "1", "game_mode": "1", "maxplayers": "10"},
     "Deathmatch":  {"game_type": "1", "game_mode": "2", "maxplayers": "20"},
@@ -172,7 +180,11 @@ MODE_MAPS: dict[str, list[str] | None] = {
                     "de_ancient", "de_anubis", "de_overpass"],
     "3v3":         OFFICIAL_MAPS,
     "4v4":         OFFICIAL_MAPS,
-    "1v1":         None,
+    "5v5":         OFFICIAL_MAPS,
+    # Arenas (K4-Arenas) auto-detect spawns on any map — official maps work out
+    # of the box; aim_/1v1 workshop maps can still be picked via the workshop tab.
+    "1v1":         OFFICIAL_MAPS,
+    "2v2":         OFFICIAL_MAPS,
     "Arms Race":   ["ar_shoots", "ar_baggage", "ar_dizzy"],
     "Demolition":  ["de_lake", "de_safehouse", "de_shortdust",
                     "de_stmarc", "de_bank", "de_sugarcane"],
@@ -197,7 +209,9 @@ MODE_WORKSHOP_SEARCH: dict[str, str] = {
     "Wingman":     "wingman 2v2",
     "3v3":         "3v3",
     "4v4":         "4v4",
+    "5v5":         "competitive 5v5",
     "1v1":         "1v1 aim",
+    "2v2":         "2v2 aim",
     "Arms Race":   "arms race ar_",
     "Demolition":  "demolition",
     "Deathmatch":  "deathmatch",
@@ -224,7 +238,9 @@ MODE_WORKSHOP_TAGS: dict[str, list[str]] = {
     "Wingman":     ["wingman"],
     "3v3":         ["classic", "competitive"],
     "4v4":         ["classic", "competitive"],
+    "5v5":         ["classic", "competitive"],
     "1v1":         ["aim", "1v1"],
+    "2v2":         ["aim", "2v2"],
     "Arms Race":   ["armsrace", "arms race"],
     "Demolition":  ["demolition"],
     "Deathmatch":  ["deathmatch"],
