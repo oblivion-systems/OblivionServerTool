@@ -328,6 +328,10 @@ function applyState(s) {
 
   // Live workshop download progress (per-MB bar)
   _renderDlProgress(s.dl_progress);
+
+  // RCON is local-only, so hide the palette's "Ctrl P · RCON only" hint for remote sessions.
+  const rconHint = el('palette-rcon-hint');
+  if (rconHint) rconHint.style.display = s.is_local ? '' : 'none';
 }
 
 /** Drive the workshop download bar from polled /api/state progress. */

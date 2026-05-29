@@ -229,7 +229,7 @@ MODE_WORKSHOP_TAGS: dict[str, list[str]] = {
     "Demolition":  ["demolition"],
     "Deathmatch":  ["deathmatch"],
     "Retakes":     ["retake", "classic", "competitive"],
-    "Jailbreak":   ["jailbreak", "jb"],
+    "Jailbreak":   ["jailbreak", "jb", "classic"],  # most jb_ maps are tagged Classic/Map, not jailbreak/jb
     "Practice":    ["classic", "competitive"],
     "Warcraft":        ["classic", "competitive", "casual"],
     "Zombie Escape":   ["zombie", "ze"],

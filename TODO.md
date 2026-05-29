@@ -68,8 +68,8 @@ deferred loose ends. Full prose in [CHANGELOG.md](CHANGELOG.md) → v0.9.1.*
 - [ ] **3 broken 0-byte workshop folders** — `233903603` (Awp India), `3326291211`
   (zm_dust2_rebuild), `3604289538` (AWP India). Re-pull (now self-heals via staged download) or delete.
 - [ ] **WebView2 accelerator keys** & **palette footer hint for remote** — see Phase 5.1 below.
-- [ ] **Jailbreak workshop tag filter** — offered to loosen it (jb maps are tagged Classic/Map,
-  not jailbreak/jb) by adding `classic`; not yet done.
+- [x] **Jailbreak workshop tag filter** — loosened: added `classic` to `MODE_WORKSHOP_TAGS["Jailbreak"]`
+  so jb_ maps (tagged Classic/Map) pass the filter.
 - [ ] **`.plugin-downloads/vrf/`** — Source2Viewer-CLI kept for future VPK extraction (gitignored).
 
 ---
@@ -227,8 +227,8 @@ Plugin-backed modes (verify deploy, verify markers, verify defining behaviour):
 - [ ] Remote web panel pass on a phone (responsive, touch targets, auth)
 - [ ] Theme/accent pass (dark/light/system) for visual regressions
 - [ ] Confirm every keybind and quick action works
-- [ ] **WebView2 accelerator keys** — F5/F12/Ctrl+R/Ctrl+P are owned by the Edge WebView2 host and JS `preventDefault` can't reliably suppress them, so binding those keys may trigger the host action (reload/devtools/print) instead. Disable browser accelerator keys at window creation in `main.py` (WebView2 `AreBrowserAcceleratorKeysEnabled=false` / pywebview equivalent) so configurable keybinds behave predictably on the desktop.
-- [ ] **Palette footer hint (remote)** — the ⌘K palette footer still shows "Ctrl P · RCON only" to remote sessions even though RCON is now local-gated; hide that hint for non-local sessions.
+- [ ] **WebView2 accelerator keys** — F5/F12/Ctrl+R/Ctrl+P are owned by the Edge WebView2 host and JS `preventDefault` can't reliably suppress them, so binding those keys may trigger the host action (reload/devtools/print) instead. *Deferred:* pywebview 5.x doesn't expose `AreBrowserAcceleratorKeysEnabled`; reaching the underlying CoreWebView2.Settings is fragile + needs desktop testing. Revisit at a desktop session (or just mark those keys reserved in the keybind UI).
+- [x] **Palette footer hint (remote)** — the ⌘K palette footer "Ctrl P · RCON only" hint is now hidden for non-local sessions (RCON is local-gated).
 
 ### 5.2 Final docs
 - [ ] README final sweep (features, requirements, getting started all accurate)
