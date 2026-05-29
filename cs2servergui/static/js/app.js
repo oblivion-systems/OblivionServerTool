@@ -304,11 +304,14 @@ function applyState(s) {
   el('sb-web-url').textContent = webUrl;
   el('sb-web-url').onclick = () => window.open(webUrl, '_blank');
 
-  // Update badges
+  // Update badges — toggle (not show-only), so they clear live after an update
+  // completes instead of lingering until the app is relaunched.
   const appBadge = el('app-update-badge');
   const cs2Badge = el('cs2-update-badge');
   if (s.app_update) { appBadge.textContent = `⬆ App ${s.app_version}`; appBadge.classList.remove('hidden'); }
+  else appBadge.classList.add('hidden');
   if (s.update_available) { cs2Badge.textContent = '⬆ CS2 Update'; cs2Badge.classList.remove('hidden'); }
+  else cs2Badge.classList.add('hidden');
 
   // Local uptime counter (client-side increments between polls)
   clearInterval(state._uptimeTimer);
