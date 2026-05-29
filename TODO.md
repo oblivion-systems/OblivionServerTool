@@ -85,6 +85,12 @@ deferred loose ends. Full prose in [CHANGELOG.md](CHANGELOG.md) → v0.9.1.*
 - [x] **Commit + release the batch** — shipped as v0.9.1 (committed, pushed, GitHub release).
 - [ ] **`-condebug` log growth** — `csgo/console.log` now grows across sessions; consider
   trimming/rotating, or make it a toggle.
+- [ ] **Restart-server-on-crash — verify / harden / surface.** A base mechanism already exists
+  (`auto_restart_on_crash` config + the `_watch` crash monitor in `start_monitor`, which restarts
+  up to 3×). TODO: confirm it actually fires on a real crash (both the Popen-tracked and
+  probe-reattached paths — see Phase 3.1), make sure the 3-attempt cap + backoff behave, surface
+  the toggle + "last restart" state clearly in the UI, and decide whether to auto-redeploy the
+  same map/mode on restart. (Raised 2026-05-29.)
 - [x] **Broken workshop folders cleaned (2026-05-29)** — removed empty `233903603` and four
   obsolete CS:GO-era `.bsp` maps (verified via re-download they were CS:GO-format, unloadable in
   CS2). `3326291211` / `3604289538` were healthy CS2 `.vpk` maps and left in place.
