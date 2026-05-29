@@ -20,8 +20,10 @@ without exposing full admin.
   guest/public allowlist; every other `/api/*` route is admin-only by default (new routes are
   locked down automatically). The login assigns `session["role"]`; the local desktop window is
   always admin.
-- The SPA hides admin-only UI for guests (Start/Stop, settings strip, Config & Players tabs) and
-  shows an "Admin only" notice on direct navigation; `/api/state` exposes `role`.
+- The SPA hides admin-only UI for guests (Start/Stop, settings strip, Config & Players tabs,
+  keybinds) and shows an "Admin only" notice on direct navigation; `/api/state` exposes `role`.
+- **Keybinds disabled for guests** — the global shortcut handler no-ops for guest sessions so a
+  friend can't trigger admin actions (stop/restart/bots) by keypress.
 - *Verified live through a Cloudflare tunnel:* guest → 403 on admin routes / 200 on allowed ones;
   admin → full access; wrong PIN → 401; guest UI correctly stripped down.
 
