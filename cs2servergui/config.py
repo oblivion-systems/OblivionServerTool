@@ -87,7 +87,12 @@ def update_paths(server_dir: str) -> None:
 RCON_HOST     = _lan_ip()
 RCON_PORT     = 27015
 RCON_PASSWORD = ""        # auto-generated at first run; stored in oblivion_config.json
-FLASK_PORT    = 5000
+# 5050, not 5000: port 5000 is a very common default (Flask demos, AirPlay on
+# macOS, and assorted CS applets like CS_GO_Arx_Applet) and collisions there make
+# the local panel unreachable on loopback. 5050 is far less contested.
+# TODO: make this user-configurable via oblivion_config.json (needs main.py to read
+# the port after load_config rather than importing the constant at module top).
+FLASK_PORT    = 5050
 ADMIN_PIN     = ""        # set at first run; stored in oblivion_config.json
 
 

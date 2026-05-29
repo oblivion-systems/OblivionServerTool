@@ -131,6 +131,15 @@ with no visual cue which would actually launch.
   when an update is detected** (`update_available`) as a cue — while staying a normal,
   always-clickable forced-update button when it isn't pulsing, so a mirror miss never hides it.
 
+### 🔌 Web Panel Port
+
+- **Default Flask port moved `5000` → `5050`.** Port 5000 is heavily contested (Flask demos,
+  macOS AirPlay, and CS applets like `CS_GO_Arx_Applet` that bind `127.0.0.1:5000`). A collision
+  there makes the desktop panel unreachable on loopback — every API call fails with "failed to
+  fetch" and in-app RCON breaks, even though the server itself is fine. 5050 is far less contested.
+  *(Takes effect on the next build / source run; update any tunnel or port-forward to 5050.)*
+  TODO: make the port user-configurable via `oblivion_config.json`.
+
 ### 🧹 Workshop Cleanup
 
 - Removed an empty (0-byte) broken workshop folder and four obsolete CS:GO-era `.bsp` maps

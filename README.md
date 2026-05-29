@@ -153,7 +153,7 @@ ISCC installer.iss
 | CS2 dedicated server | Can be installed by the tool if missing |
 | Steam account (dedicated) | For workshop downloads — **use a separate account**, not your personal one |
 | Port 27015 open (TCP + UDP) | For players to connect |
-| Port 5000 open (TCP, LAN only) | For the remote web panel |
+| Port 5050 open (TCP, LAN only) | For the remote web panel |
 
 > **Why a dedicated Steam account?**  
 > steamcmd signs into Steam to download workshop maps. If it uses your main account, it will disconnect your Steam desktop client. CS2 is free — create a second account at [store.steampowered.com](https://store.steampowered.com) and enter it under **Steam Account** in Config.
@@ -164,9 +164,9 @@ ISCC installer.iss
 
 ## Remote Web Panel
 
-The tool runs a local Flask server on port 5000. The same interface you see in the desktop window is accessible from any device on your network:
+The tool runs a local Flask server on port 5050. The same interface you see in the desktop window is accessible from any device on your network:
 
-1. Open `http://<server-LAN-ip>:5000` in any browser (the LAN IP is shown in the status bar)
+1. Open `http://<server-LAN-ip>:5050` in any browser (the LAN IP is shown in the status bar)
 2. Enter your admin PIN
 3. Control the server from your phone, tablet, or any browser on the LAN
 
@@ -186,7 +186,7 @@ Enforcement is fail-closed (an allowlist of guest-reachable routes; everything e
 ### Off-LAN access (optional)
 
 To let friends reach the panel over the internet, run a Cloudflare quick tunnel
-(`cloudflared tunnel --url http://localhost:5000`) and share the printed HTTPS URL + a PIN — no
+(`cloudflared tunnel --url http://localhost:5050`) and share the printed HTTPS URL + a PIN — no
 router changes, encrypted transport. See [TONIGHT.md](TONIGHT.md) for the full steps.
 
 ---
