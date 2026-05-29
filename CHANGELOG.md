@@ -107,7 +107,9 @@ with no visual cue which would actually launch.
   Previously the CS2 update was *only* reachable via the `⬆ CS2 Update` badge, which appears only
   when the mirror-based check (`api.steamcmd.net`, which can lag Valve) flags an update — leaving
   no way to force a steamcmd `app_update 730 validate` when the badge wasn't showing. The button
-  runs the same in-place update on demand (refuses while the server is running).
+  runs the same in-place update on demand (refuses while the server is running). It also **pulses
+  when an update is detected** (`update_available`) as a cue — while staying a normal,
+  always-clickable forced-update button when it isn't pulsing, so a mirror miss never hides it.
 
 ### 🧹 Workshop Cleanup
 
