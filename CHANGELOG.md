@@ -42,6 +42,11 @@ configured a team size (they ran the plugin's default, i.e. mostly 1v1).
   (same plugin as Practice) on the competitive ruleset, bounded by `maxplayers` 6 / 8 / 10.
 - **Mode list** gained `2v2` and `5v5`; `3v3`/`4v4` switched from arenas to MatchZy. The
   arena Use-bots toggle still applies to `1v1`/`2v2`.
+- **Arena ladder bots fixed** — arena modes now launch with `+bot_quota_mode normal`. K4-Arenas-Bots
+  reads that mode: `normal` adds exactly **one** bot to even an odd player count, and that bot joins
+  the 1v1 ladder like a player (pairings rotate P-vs-B / P-vs-P / B-vs-P). The default `fill` set
+  `bot_quota 2` — a second, unpaired bot that stuck onto a side as a **2v1**. Forcing `normal` at
+  launch prevents that.
 - ⚠️ *Needs in-game verification:* the generated 2v2 arena config and the MatchZy team-size
   matches couldn't be tested without a live server.
 
