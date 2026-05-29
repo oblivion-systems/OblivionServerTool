@@ -28,6 +28,15 @@
 remains is **in-game verification** of the items that couldn't be tested here, plus a few
 deferred loose ends. Full prose in [CHANGELOG.md](CHANGELOG.md) → v0.9.1.*
 
+### Post-v0.9.1 — committed + pushed, awaiting a v0.9.2 tag
+*Full prose in [CHANGELOG.md](CHANGELOG.md) → Unreleased.*
+- [x] **CS2 update no longer creates a 64 GB duplicate install** — dropped `+force_install_dir`;
+  steamcmd now updates the manifest-tracked `steamapps\common` install in place. Reclaimed ~64 GB.
+- [x] **Update badge self-clears (no relaunch) + verifies** the new buildid against the public build.
+- [x] **Update path hardened** — timeout on steamcmd.zip download; "still working" warnings re-arm.
+- [ ] **Cut the v0.9.2 release** — bump `APP_VERSION` → `0.9.2` in `config.py`, tag `v0.9.2`, push,
+  create the GitHub release. (Deferred until you decide to ship; harmless to sit on while private.)
+
 ### Shipped in v0.9.1 — confirmed in-game
 - [x] **Jailbreak crash fixed** — dropped CS2Fixes (`zombie`) from the Jailbreak mode; native
   AV from CS2Fixes + CSS Jailbreak conflict. *Confirmed in-game.*
@@ -65,8 +74,9 @@ deferred loose ends. Full prose in [CHANGELOG.md](CHANGELOG.md) → v0.9.1.*
 - [x] **Commit + release the batch** — shipped as v0.9.1 (committed, pushed, GitHub release).
 - [ ] **`-condebug` log growth** — `csgo/console.log` now grows across sessions; consider
   trimming/rotating, or make it a toggle.
-- [ ] **3 broken 0-byte workshop folders** — `233903603` (Awp India), `3326291211`
-  (zm_dust2_rebuild), `3604289538` (AWP India). Re-pull (now self-heals via staged download) or delete.
+- [x] **Broken workshop folders cleaned (2026-05-29)** — removed empty `233903603` and four
+  obsolete CS:GO-era `.bsp` maps (verified via re-download they were CS:GO-format, unloadable in
+  CS2). `3326291211` / `3604289538` were healthy CS2 `.vpk` maps and left in place.
 - [ ] **WebView2 accelerator keys** & **palette footer hint for remote** — see Phase 5.1 below.
 - [x] **Jailbreak workshop tag filter** — loosened: added `classic` to `MODE_WORKSHOP_TAGS["Jailbreak"]`
   so jb_ maps (tagged Classic/Map) pass the filter.

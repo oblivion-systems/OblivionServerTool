@@ -2,6 +2,36 @@
 
 ---
 
+## Unreleased
+*Post-v0.9.1 fixes (committed + pushed, not yet tagged). Bump `APP_VERSION` → `0.9.2`
+and tag `v0.9.2` when ready to cut a release.*
+
+### 🐛 CS2 Update / Disk Bloat — Critical Fix
+
+- **Stopped the updater creating a duplicate ~64 GB install.** The steamcmd update ran with
+  `+force_install_dir <CS2_SERVER_DIR>`. CS2's content root is a top-level `game/` folder, so
+  steamcmd unpacked the whole install into `D:\steamcmd\game\` — a full duplicate, separate from
+  the manifest-tracked `steamapps\common\…` install the server actually runs. Every update grew
+  that orphan and never touched the real files (server dir had ballooned to ~149 GB). Dropping
+  the flag lets steamcmd use its default library (the steamcmd dir) and update the real install
+  **in place** via the existing `appmanifest_730.acf`. Reclaimed ~64 GB.
+- **Update badge clears without a relaunch + self-verifies.** Both update badges now toggle on
+  state (previously show-only, so the "⬆ CS2 Update" badge lingered until relaunch). After a
+  successful update, `check_update` re-reads the updated `appmanifest` buildid and compares it to
+  the latest public build — confirming the update actually landed rather than optimistically
+  clearing the flag.
+- **Update path hardened.** steamcmd.zip download uses `urlopen(timeout=60)` + `copyfileobj` (a
+  stalled CDN can't hang the install thread); the "still working" silence warnings re-arm after
+  each output line so later quiet gaps still report.
+
+### 🧹 Workshop Cleanup
+
+- Removed an empty (0-byte) broken workshop folder and four obsolete CS:GO-era `.bsp` maps
+  (`de_bank`, `cs_militia`, `de_stmarc`, `gd_rialto`) — confirmed via re-download they were intact
+  but in the CS:GO format CS2 can't load. Disk free went ~16.5 GB → ~80 GB after the dedupe + this.
+
+---
+
 ## v0.9.1 — 2026-05-29
 
 A stability + features pass: Retakes rebuilt on B3none, the Jailbreak native crash fixed,
