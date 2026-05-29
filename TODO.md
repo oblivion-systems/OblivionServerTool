@@ -100,12 +100,12 @@ deferred loose ends. Full prose in [CHANGELOG.md](CHANGELOG.md) → v0.9.1.*
 - [ ] Confirm README feature list matches actual `web.py` routes (no phantom features)
 
 ### 1.2 Code/data integrity audit
-- [ ] Grep the whole tree for residual `CS2Retake` / `RetakesAllocator` / `retakes` plugin refs
-- [ ] Confirm `_PLUGIN_COPY_RULES` keys all have matching source dirs under `plugins/`
-- [ ] Confirm `_PLUGIN_CLEANUP_ITEMS` covers every path any plugin writes into `csgo/`
-- [ ] Confirm `_PLUGIN_VERIFY_FILES` marker files actually ship in each bundle
-- [ ] Sanity-check `MODE_SETTINGS` rulesets for all 14 modes (game_type/game_mode/maxplayers)
-- [ ] Confirm `_CSS_HOST_DLLS` filter list is still accurate vs. current CSS host
+- [x] Grep the whole tree for residual `CS2Retake` / SQLite.Interop refs — none in code (clean)
+- [x] Confirm `_PLUGIN_COPY_RULES` keys all have matching source dirs under `plugins/` (smoke test)
+- [ ] Confirm `_PLUGIN_CLEANUP_ITEMS` covers every path any plugin writes into `csgo/` — *needs a real deploy to enumerate; partial*
+- [x] Confirm `_PLUGIN_VERIFY_FILES` marker files actually ship in each bundle (smoke test)
+- [x] Sanity-check `MODE_SETTINGS` rulesets for all 14 modes — all present with game_type/game_mode/maxplayers
+- [ ] Confirm `_CSS_HOST_DLLS` filter list is still accurate vs. current CSS host — *runtime check, deferred*
 
 ### 1.3 Repo hygiene
 - [ ] Review uncommitted/untracked items from git status (`build_log.txt`, stray DLLs, `cfg/`, `data/`, `characters/`)
@@ -199,11 +199,12 @@ Plugin-backed modes (verify deploy, verify markers, verify defining behaviour):
 **Exit:** one command builds a release; an automated smoke run gates it.
 
 ### 4.1 Smoke / regression checks
-- [ ] Import all modules without side effects
-- [ ] Config load + save round-trip
-- [ ] Flask app boots and serves `/` + `/api/state`
-- [ ] Plugin table integrity test (every mode's plugins exist in copy/verify/cleanup/kind tables)
-- [ ] deploy/undeploy dry-run against a temp `csgo/` fixture
+> Harness: [`tests/smoke.py`](tests/smoke.py) — run `python tests/smoke.py` (config isolated to a temp file).
+- [x] Import all modules without side effects
+- [x] Config load + save round-trip (isolated temp config)
+- [x] Flask app boots and serves `/`; `/api/state` enforces auth
+- [x] Plugin table integrity test (every mode's plugins exist in copy/verify/kind tables + ship in the bundle)
+- [ ] deploy/undeploy dry-run against a temp `csgo/` fixture — *not yet (needs a temp csgo + path redirection)*
 
 ### 4.2 Build pipeline
 - [ ] `build.bat` produces a working `--onefile` exe
