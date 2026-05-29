@@ -79,6 +79,13 @@ with no visual cue which would actually launch.
   an empty selection now prompts "Select a map first" instead of failing silently.
 - ⚠️ *Frontend-only change; worth an eyeball in the running app to confirm the picker renders.*
 
+### 🎨 UI
+
+- **Sidebar no longer looks washed out** — its background was the *lightest* large surface in the
+  app (`bg-1 → bg-2`), reading as a pale slab next to the dark content. Re-graded it to fade
+  `bg-1 → bg-0` (into the base tone) and softened the inset edge glow, so the tab rail now sits in
+  the dark theme instead of floating above it.
+
 ### 🐛 CS2 Update / Disk Bloat — Critical Fix
 
 - **Stopped the updater creating a duplicate ~64 GB install.** The steamcmd update ran with
