@@ -1724,6 +1724,29 @@ class AppCore:
                     except Exception as exc:
                         self.log(f"[plugins] Could not remove {item}: {exc}")
 
+    def _apply_retakes_bots(self, csgo_dir: str) -> None:
+        """Honour the Use-bots toggle for Retakes by editing the deployed retakes.cfg.
+
+        The bundled cfg defaults to bot auto-fill (bots ON); each deploy copies that
+        fresh, so we only rewrite it when bots are OFF: bot_quota 0 + bot_kick = no
+        fill. (Deathmatch has no plugin bot-fill, so the toggle doesn't apply there.)
+        """
+        if self.bots_enabled:
+            return  # bundled default already = fill
+        cfg = os.path.join(csgo_dir, "cfg", "cs2-retakes", "retakes.cfg")
+        if not os.path.isfile(cfg):
+            return
+        try:
+            txt = open(cfg, encoding="utf-8").read()
+            txt = re.sub(r"(?m)^bot_quota\s+\S+", "bot_quota               0", txt)
+            txt = re.sub(r"(?m)^bot_quota_mode\s+\S+", "bot_quota_mode          normal", txt)
+            if not re.search(r"(?m)^bot_kick\b", txt):
+                txt = re.sub(r"(?m)^(bot_quota_mode.*)$", r"bot_kick\n\1", txt, count=1)
+            open(cfg, "w", encoding="utf-8", newline="\n").write(txt)
+            self.log("[plugins]   retakes: bots OFF — bot_quota 0 + bot_kick")
+        except Exception as exc:
+            self.log(f"[plugins]   retakes: could not apply bots toggle: {exc}")
+
     def deploy_plugins(self, mode: str) -> bool:
         """Deploy bundled plugins for *mode* into the CS2 server's csgo/ directory.
 
@@ -1844,6 +1867,10 @@ class AppCore:
         if "arenas" in new_plugins and not self.bots_enabled:
             shutil.rmtree(os.path.join(csgo_dir, "addons", "counterstrikesharp",
                                        "plugins", "K4-Arenas-Bots"), ignore_errors=True)
+
+        # Retakes follows the same Use-bots toggle (bot_quota in its cfg).
+        if "retakes_b3none" in new_plugins:
+            self._apply_retakes_bots(csgo_dir)
 
         total = sum(per_plugin_count.values())
         if any_failed:

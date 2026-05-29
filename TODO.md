@@ -58,10 +58,10 @@ deferred loose ends. Full prose in [CHANGELOG.md](CHANGELOG.md) → v0.9.1.*
   it fetches the public GitHub releases API (`APP_API_URL`) and links to the releases page,
   both of which 404 for users without repo access. On going public, verify the "⬆ App update"
   badge fires and the release download opens. (Repo is private for now, by choice.)
-- [ ] **"Use bots" toggle — extend beyond Arenas.** Built: arena ceiling 16 + global
-  `bots_enabled` setting (Config → Bots) that excludes K4-Arenas-Bots when off. Still to wire
-  the same toggle into **Retakes** (`bot_quota` in cs2-retakes/retakes.cfg) and **Deathmatch**
-  bot-fill so it's truly global, not arena-only.
+- [x] **"Use bots" toggle — global.** Gates Arenas (excludes K4-Arenas-Bots when off) and
+  Retakes (rewrites the deployed cs2-retakes.cfg to `bot_quota 0` + `bot_kick` when off).
+  Deathmatch has no plugin bot-fill in our bundle, so the toggle doesn't apply there (base
+  server bots only). Toggle lives in Config → Bots.
 - [x] **Commit + release the batch** — shipped as v0.9.1 (committed, pushed, GitHub release).
 - [ ] **`-condebug` log growth** — `csgo/console.log` now grows across sessions; consider
   trimming/rotating, or make it a toggle.
