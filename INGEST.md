@@ -49,7 +49,7 @@ each with a one-sentence summary. No code, no behavioural changes — reference 
 | `_CONFIG_FILE` | Absolute path to `oblivion_config.json`; under `%APPDATA%\Oblivion Server Tool\` when frozen, project root when dev. |
 | `OFFICIAL_MAPS` | List of 10 official CS2 competitive maps. |
 | `CS2_PANORAMA_THUMBS_SUBPATH` | Relative path from a CS2 install root to the 1080p map screenshot folder. |
-| `GAME_MODES` | Ordered list of all 14 supported game mode strings. |
+| `GAME_MODES` | Ordered list of all 16 supported game mode strings. |
 | `MODE_SETTINGS` | Maps mode name → `{game_type, game_mode, maxplayers}` — defines the CS2 ruleset per mode. |
 | `MODE_MAPS` | Maps mode name → allowed official map list (or `None` if workshop-only). |
 | `MODE_WORKSHOP_SEARCH` | Maps mode name → Steam Workshop search term string. |

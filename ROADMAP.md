@@ -66,7 +66,7 @@ The road to 1.0 is five phases. They are roughly sequential but Phase 1 and 2 ca
 ---
 
 ### Phase 2 — Verify Every Mode
-**Goal:** every one of the 14 game modes boots, deploys its plugins, and is playable on a
+**Goal:** every one of the 16 game modes boots, deploys its plugins, and is playable on a
 real CS2 server.
 
 - Stand up a clean local server and walk each mode: deploy → start → join → confirm the
@@ -77,7 +77,7 @@ real CS2 server.
   to vanilla (the `0xE0434352` CLR crash guard).
 - Verify hot-reload vs. restart-required logic fires correctly per `_PLUGIN_KIND`.
 
-**Exit criteria:** a checked-off matrix of all 14 modes, each confirmed working.
+**Exit criteria:** a checked-off matrix of all 16 modes, each confirmed working.
 
 ---
 

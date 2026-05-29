@@ -34,6 +34,9 @@ deferred loose ends. Full prose in [CHANGELOG.md](CHANGELOG.md) → v0.9.1.*
   steamcmd now updates the manifest-tracked `steamapps\common` install in place. Reclaimed ~64 GB.
 - [x] **Update badge self-clears (no relaunch) + verifies** the new buildid against the public build.
 - [x] **Update path hardened** — timeout on steamcmd.zip download; "still working" warnings re-arm.
+- [x] **Team-size modes reworked** — arenas capped at 1v1/2v2 (K4-Arenas; 2v2 via a generated
+  `round-settings` config), team matches added as MatchZy modes 3v3/4v4/5v5 (maxplayers 6/8/10).
+  Fixes the old gap where 3v3/4v4 were arenas that never set a team size. *(needs in-game verify)*
 - [ ] **Cut the v0.9.2 release** — bump `APP_VERSION` → `0.9.2` in `config.py`, tag `v0.9.2`, push,
   create the GitHub release. (Deferred until you decide to ship; harmless to sit on while private.)
 
@@ -114,7 +117,7 @@ deferred loose ends. Full prose in [CHANGELOG.md](CHANGELOG.md) → v0.9.1.*
 - [x] Confirm `_PLUGIN_COPY_RULES` keys all have matching source dirs under `plugins/` (smoke test)
 - [ ] Confirm `_PLUGIN_CLEANUP_ITEMS` covers every path any plugin writes into `csgo/` — *needs a real deploy to enumerate; partial*
 - [x] Confirm `_PLUGIN_VERIFY_FILES` marker files actually ship in each bundle (smoke test)
-- [x] Sanity-check `MODE_SETTINGS` rulesets for all 14 modes — all present with game_type/game_mode/maxplayers
+- [x] Sanity-check `MODE_SETTINGS` rulesets for all 16 modes — all present with game_type/game_mode/maxplayers
 - [ ] Confirm `_CSS_HOST_DLLS` filter list is still accurate vs. current CSS host — *runtime check, deferred*
 
 ### 1.3 Repo hygiene
@@ -125,7 +128,7 @@ deferred loose ends. Full prose in [CHANGELOG.md](CHANGELOG.md) → v0.9.1.*
 ---
 
 ## Phase 2 — Verify Every Mode ⬜
-**Exit:** all 14 modes confirmed working on a real server (matrix fully checked).
+**Exit:** all 16 modes confirmed working on a real server (matrix fully checked).
 
 > **Static side is green** (via [`tests/smoke.py`](tests/smoke.py)): every mode's plugins exist
 > across the copy/verify/kind tables and ship in the bundle, so deploys won't fail on missing
@@ -142,13 +145,13 @@ Vanilla modes (no managed plugins; verify `gameinfo.gi` is *unpatched*):
 - [ ] Competitive
 - [ ] Casual
 - [ ] Wingman
-- [ ] 3v3
-- [ ] 4v4
-- [ ] 1v1
 - [ ] Arms Race
 - [ ] Demolition
 
 Plugin-backed modes (verify deploy, verify markers, verify defining behaviour):
+- [ ] 1v1 — K4-Arenas; pure 1v1 ladder (plugin default rounds)
+- [ ] 2v2 — K4-Arenas; arenas run **2-per-side** (generated `round-settings`, TeamSize 2)
+- [ ] 3v3 / 4v4 / 5v5 — MatchZy team matches; lobby caps at maxplayers 6 / 8 / 10
 - [ ] Deathmatch — CS2Fixes (MetaMod); spawns work on the 4 supported maps
 - [ ] Retakes — B3none RetakesPlugin + RetakesAllocator; retake rounds form (bot fill), scramble after 3 T wins
 - [ ] Jailbreak — CSS Jailbreak plugin **only** (CS2Fixes removed — caused native crash); warden/prisoner ruleset
@@ -264,11 +267,10 @@ Plugin-backed modes (verify deploy, verify markers, verify defining behaviour):
 - [ ] **Map Veto / Match Setup tab** — full spec + open decisions in [VETO.md](VETO.md);
   prototype at `_prototypes/veto.html`. Self-contained Veto tab; needs server-side session +
   SSE for the captain links to work across devices. Resolve the 4 open decisions first.
-- [ ] **Arena team size per mode (3v3/4v4 actually 3v3/4v4).** Today 1v1/3v3/4v4 all deploy the
-  same "arenas" bundle and don't configure K4-Arenas' arena *team size*, so all three run the
-  plugin's default arena behaviour — only the player cap differed (now all 16). K4-Arenas
-  supports 2v2/3v3/etc., so the fix is to ship/generate a per-mode K4-Arenas config setting the
-  arena size (1/3/4 per side) when deploying each mode. Latent label/config gap, not a fault.
+- [x] **Arena team size per mode — RESOLVED (Unreleased).** Arenas are now capped at 1v1/2v2:
+  `1v1` uses the plugin's default (pure 1v1), `2v2` deploys a generated `round-settings` config
+  forcing TeamSize 2 (`_apply_arena_size`). The old 3v3/4v4 became MatchZy team matches instead
+  of arenas. (3v3+ *arenas* are intentionally not offered.)
 - [ ] Scheduled tasks (cron-style auto-restart, nightly map updates)
 - [ ] Server metrics / history dashboard
 - [ ] Multi-server management
