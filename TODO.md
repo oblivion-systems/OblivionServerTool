@@ -45,8 +45,32 @@ deferred loose ends. Full prose in [CHANGELOG.md](CHANGELOG.md) → v0.9.1.*
   `before_request` gate. Guest UI stripped down (incl. keybinds disabled). *(tunnel-verified)*
 - [x] **Remote-access docs** — Cloudflare quick-tunnel steps in [TONIGHT.md](TONIGHT.md)
   (cloudflared installed via winget); guest-PIN section for handing out limited access.
-- [ ] **Cut the v0.9.2 release** — bump `APP_VERSION` → `0.9.2` in `config.py`, tag `v0.9.2`, push,
-  create the GitHub release. (Deferred until you decide to ship; harmless to sit on while private.)
+- [x] **Workshop maps root-cause fix (2026-05-30)** — `from .config import RCON_HOST` in core.py
+  was binding the IP at import time, so `_resolve_rcon_host` updated `_config.RCON_HOST` but
+  the import-local name never changed and `_poll_rcon_ready` kept probing the stale IP.
+  Dropped the by-name import; all reads go through `_config.RCON_HOST` at call time.
+  `_post_launch_sanity_check` keeps the netstat-based auto-recovery as a safety net for
+  cs2.exe binding to an unexpected interface.
+- [x] **Warcraft v2 — menu + chat-broadcast dispatchers (2026-05-30)** — the v0.9.1 cooldown
+  helped but didn't stop the recv-queue-overflow when a single `!shop` hit a combat frame.
+  Two queues now drain 1 menu open / 100 ms and 5 chat broadcasts / 50 ms.
+  *Needs full-lobby live verification — Warcraft #29 below.*
+- [x] **20-bug app-wide audit sweep (2026-05-30)** — four parallel agents → 7 critical, 8
+  serious, 5 minor real bugs. All fixed.  Atomic `save_config` (lock+tmp+`os.replace`+fsync),
+  Stop-during-backoff via `Event.wait`, RCON multi-packet sentinel, `_lan_ip` 30 s cache,
+  `werkzeug.serving.make_server` to remove TOCTOU, `cancel_download` lock,
+  `server_broadcast` `;`-strip, `log_save` collision-proof filename, lockout dict GC, etc.
+- [x] **Resilience pass (2026-05-29/30)** — user-configurable Flask port, port-collision
+  survivor (only kills our own zombies), preflight checks, bundle `.example` validation,
+  exponential crash auto-restart with time-window reset.
+- [x] **Log drawer Copy + Save buttons** — `navigator.clipboard` with textarea fallback;
+  Save writes a timestamped + random-suffixed `oblivion_log_*.txt` to the config dir.
+- [x] **Code hygiene (2026-05-30)** — `_holder_of_port` deduplicated into
+  `cs2servergui/_netutils.py`, `\O` SyntaxWarning fixed, unused `RCON_HOST` import dropped
+  from `web.py`, legacy plugin scrubs removed from `_PLUGIN_CLEANUP_ITEMS`.
+- [ ] **Cut the v0.9.2 release** — bump `APP_VERSION` → `0.9.2` in `config.py`, tag `v0.9.2`,
+  push, create the GitHub release. *Blocked on: short live smoke session validating the new
+  hot-paths (Start, change map, mode swap, Stop) and one Warcraft lobby for v2 dispatchers.*
 
 ### Shipped in v0.9.1 — confirmed in-game
 - [x] **Jailbreak crash fixed** — dropped CS2Fixes (`zombie`) from the Jailbreak mode; native
@@ -85,12 +109,12 @@ deferred loose ends. Full prose in [CHANGELOG.md](CHANGELOG.md) → v0.9.1.*
 - [x] **Commit + release the batch** — shipped as v0.9.1 (committed, pushed, GitHub release).
 - [ ] **`-condebug` log growth** — `csgo/console.log` now grows across sessions; consider
   trimming/rotating, or make it a toggle.
-- [ ] **Restart-server-on-crash — verify / harden / surface.** A base mechanism already exists
-  (`auto_restart_on_crash` config + the `_watch` crash monitor in `start_monitor`, which restarts
-  up to 3×). TODO: confirm it actually fires on a real crash (both the Popen-tracked and
-  probe-reattached paths — see Phase 3.1), make sure the 3-attempt cap + backoff behave, surface
-  the toggle + "last restart" state clearly in the UI, and decide whether to auto-redeploy the
-  same map/mode on restart. (Raised 2026-05-29.)
+- [x] **Restart-server-on-crash — hardened (2026-05-30).** The post-friends-night resilience
+  pass replaced the fixed 5 s backoff with exponential (5 → 15 → 45 s), added a 5-minute
+  time-window reset so a long-stable session forgives the prior burst, and made the backoff
+  cancellable via `Event.wait()` so a user Stop during the delay is honoured. Still surfaces
+  via the `auto_restart_on_crash` config toggle; consider adding a UI badge for "last restart"
+  history if the cap-hit becomes a regular issue.
 - [x] **Broken workshop folders cleaned (2026-05-29)** — removed empty `233903603` and four
   obsolete CS:GO-era `.bsp` maps (verified via re-download they were CS:GO-format, unloadable in
   CS2). `3326291211` / `3604289538` were healthy CS2 `.vpk` maps and left in place.

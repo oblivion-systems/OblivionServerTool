@@ -1,29 +1,60 @@
 # ROADMAP — Oblivion Server Tool
 
-> The **plan**: how we get from where we are (v0.9.1) to a stable, fully tested
-> **v1.0.0** and beyond. This is intentionally rough — it sets direction and sequence,
-> not exact dates. The granular, checkable steps live in [TODO.md](TODO.md); the *why*
-> behind it all lives in [BIBLE.md](BIBLE.md).
+> The **plan**: how we get from where we are (v0.9.2 candidate) to a stable, fully
+> tested **v1.0.0** and beyond. This is intentionally rough — it sets direction and
+> sequence, not exact dates. The granular, checkable steps live in
+> [TODO.md](TODO.md); the *why* behind it all lives in [BIBLE.md](BIBLE.md).
 
 ---
 
-## Where We Are — v0.9.1 (current)
+## Where We Are — v0.9.2 (release candidate, tag pending live smoke)
 
-Core features are stable and the UI has been comprehensively redesigned (theming,
-keybinds, settings, workshop UX). Recent foundational work:
+Core features are stable.  Since v0.9.1 the focus has shifted from feature work to
+**correctness, observability, and resilience under real load**.
 
-- **Retakes rebuilt on B3none cs2-retakes + RetakesAllocator** — the abandoned CS2Retake
-  plugin was ripped out; an interim "MatchZy retakes" plan was dropped (MatchZy has no
-  retakes feature).
-- **Plugin bundles normalised** — every bundle now mirrors the `csgo/` layout, reducing
-  all copy rules to a uniform pattern.
-- **Codebase indexed** — full structural map captured in [INGEST.md](INGEST.md).
-- **Live-fire fixes** — Jailbreak native-crash fix, Warcraft Barbarian model precacher,
-  workshop download progress+verify, and command-filter automation (see
-  [CHANGELOG.md](CHANGELOG.md) → Unreleased and [TODO.md](TODO.md) → Pending / In-Flight).
+**Headline post-v0.9.1 work:**
 
-Known gap: a large batch of fixes is **uncommitted and partly unverified in-game**, and
-several modes have not been verified end-to-end on a live server.
+- **Workshop maps fix (the actual root cause)** — `from .config import RCON_HOST`
+  was binding the IP at import time inside `core.py`, so `_resolve_rcon_host`
+  updated `_config.RCON_HOST` but the import-local name never changed and
+  `_poll_rcon_ready` kept probing the stale IP forever.  Dropped the by-name import;
+  every read is now `_config.RCON_HOST` at call time.  A netstat-based auto-recovery
+  in `_post_launch_sanity_check` stays as a safety net for cs2.exe binding to an
+  unexpected interface (Hyper-V / Docker / VPN tap adapter).
+- **Warcraft menu + chat-broadcast dispatchers** — the v0.9.1 per-player cooldown
+  helped but didn't stop the recv-queue-overflow when a single `!shop` collided with
+  a combat-heavy frame.  Two new queues drain at 1 menu open / 100 ms and 5 chat
+  broadcasts / 50 ms, fanning bursts across multiple frames.  Audit follow-ups: kill
+  the new timers in `Unload`, hoist `WarcraftPlugin.Instance` into a local before
+  enqueue, re-resolve `WarcraftPlayer` from the slot controller at drain time so a
+  recycled player slot doesn't pop the previous occupant's profile.
+- **20-bug app-wide audit sweep** — four parallel review agents (core.py, web.py +
+  frontend, main.py + config.py + rcon.py, Warcraft patches) surfaced 7 critical +
+  8 serious + 5 minor real bugs.  All fixed.  Highlights: atomic `save_config`
+  (lock + tmp + `os.replace` + fsync), Stop-during-backoff via `Event.wait`,
+  `werkzeug.serving.make_server` to remove the port-bind TOCTOU, RCON multi-packet
+  sentinel for long `status` output, `cancel_download` lock, `_lan_ip` 30s cache,
+  `server_broadcast` semicolon stripping, log-save filename collision fix.
+- **Two-tier remote access** — guest role (maps + modes + workshop downloads only)
+  separate from admin (full control).  Brute-force lockout per-IP + global decay.
+- **Team-size modes** — `1v1`/`2v2` (K4-Arenas duels capped at 2-per-side),
+  `3v3`/`4v4`/`5v5` (MatchZy team matches bounded by maxplayers).  Arena ladder
+  bots forced to `bot_quota_mode normal` so they fill odd slots like players.
+- **Resilience pass** — user-configurable Flask port, port-collision survivor that
+  only kills our own zombies, preflight checks before Start, bundle-config
+  `.example` validation (caught the Zombie weapons.cfg bug), exponential 5→15→45s
+  crash auto-restart with 5-min time-window reset.
+- **Log drawer Copy + Save buttons** — robust clipboard with textarea fallback;
+  Save writes a timestamped+random-suffixed `oblivion_log_*.txt` to the config dir.
+- **Code hygiene** — `_holder_of_port` deduplicated into `cs2servergui/_netutils.py`,
+  unused imports removed, SyntaxWarning fixed, legacy plugin scrubs dropped.
+
+**Remaining gap to tag v0.9.2:**
+
+- ~30-minute live smoke session (Start, change maps, swap a mode, Stop, exit
+  cleanly) to validate the unverified hot paths from the sweep
+- One Warcraft session with 3-4 players to validate v2 dispatchers under real load
+- `APP_VERSION` bump to `"0.9.2"` in `config.py`
 
 ---
 

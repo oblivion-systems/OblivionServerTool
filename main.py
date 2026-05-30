@@ -1,4 +1,4 @@
-"""
+r"""
 main.py — Oblivion Server Tool entry point.
 
 Run:   python main.py
@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import os
 import secrets
-import socket
 import subprocess
 import sys
 import threading
@@ -40,43 +39,11 @@ def _enable_high_dpi() -> None:
 _OUR_PROCESS_NAMES = {"oblivionservertool.exe", "python.exe", "pythonw.exe"}
 
 
-def _port_in_use(port: int) -> bool:
-    """Return True if something is already listening on localhost:port."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.settimeout(0.3)
-        return s.connect_ex(("127.0.0.1", port)) == 0
-
-
-def _holder_of_port(port: int) -> tuple[int, str] | None:
-    """Return (pid, image_name_lower) of the process LISTENING on the port, or None.
-
-    Looks at both 127.0.0.1:<port> and 0.0.0.0:<port> matches.  Used to decide
-    whether a port collision is our own zombie (safe to kill) or someone else's
-    app (must fall back to a different port instead of murdering it).
-    """
-    try:
-        net = subprocess.run(
-            ["netstat", "-ano"], capture_output=True, text=True, timeout=5,
-        )
-        for line in net.stdout.splitlines():
-            cols = line.split()
-            # Proto  LocalAddress  ForeignAddress  State  PID
-            if len(cols) >= 5 and f":{port}" in cols[1] and cols[3] == "LISTENING":
-                pid = cols[4]
-                if not (pid.isdigit() and int(pid) > 0):
-                    continue
-                # Resolve PID -> image name
-                tl = subprocess.run(
-                    ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
-                    capture_output=True, text=True, timeout=5,
-                )
-                first = tl.stdout.splitlines()[0] if tl.stdout.strip() else ""
-                if first.startswith('"'):
-                    name = first.split('","', 1)[0].strip('"').lower()
-                    return int(pid), name
-    except Exception as exc:
-        print(f"[startup] _holder_of_port({port}) failed: {exc}")
-    return None
+# Port/process helpers live in cs2servergui/_netutils.py — single source of
+# truth for both this module (Flask port collisions) and core.py (CS2 port
+# conflict detection in _preflight_checks / _post_launch_sanity_check).
+from cs2servergui._netutils import port_in_use as _port_in_use
+from cs2servergui._netutils import holder_of_port as _holder_of_port
 
 
 def _kill_zombie_instance(port: int) -> bool:

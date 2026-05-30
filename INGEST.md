@@ -5,15 +5,18 @@ each with a one-sentence summary. No code, no behavioural changes — reference 
 
 ---
 
-## `main.py` (217 lines)
+## `main.py` (270 lines)
 
 | Symbol | Summary |
 |--------|---------|
 | `_enable_high_dpi()` | Makes the process per-monitor DPI-aware on Windows before any UI is created. |
-| `_port_in_use(port)` | Returns `True` if something is already listening on `127.0.0.1:port`. |
-| `_kill_zombie_instance(port)` | If the Flask port is held by a previous instance (zombie Edge/pywebview process), finds the PID via `netstat` and `taskkill`s it, then waits for release. |
+| `_port_in_use` (alias) | Re-exported from `cs2servergui._netutils.port_in_use` — single source of truth for the port-in-use TCP probe. |
+| `_holder_of_port` (alias) | Re-exported from `cs2servergui._netutils.holder_of_port` — netstat+tasklist lookup of the PID listening on a port. |
+| `_kill_zombie_instance(port)` | If the Flask port is held by a previous instance (zombie Edge/pywebview process), finds the PID via `_holder_of_port` and `taskkill`s it (only if the image name is one of ours), then waits for release. |
+| `_pick_free_port(start, count)` | Returns the first free port in `[start, start+count)`, or `None` if all are taken. |
 | `_wait_for_flask(port, timeout)` | Polls `/api/ping` until Flask accepts connections or the timeout expires. |
-| `main()` | Bootstrap: builds `AppCore`, sets a one-time `startup_token`, starts the crash monitor, probes for an existing server, kills any zombie, launches Flask in a daemon thread, fires update/IP checks, opens the pywebview window at the `/auth/auto` URL, then `os._exit(0)` on close. |
+| `_select_flask_port(configured)` | Kills our own zombie on `configured` if any, returns it if free; otherwise falls back to the first free port in `[configured+1, configured+4)`. |
+| `main()` | Bootstrap: builds `AppCore`, sets a one-time `startup_token`, starts the crash monitor, probes for an existing server, picks a Flask port via `_select_flask_port`, binds via `werkzeug.serving.make_server` in the main thread (no TOCTOU), starts `serve_forever` in a daemon thread, fires update/IP checks, opens the pywebview window at the `/auth/auto` URL, calls `core.save_config()` synchronously on close, then `os._exit(0)`. |
 | `if __name__ == "__main__":` | Calls `main()`. |
 
 ---
@@ -23,6 +26,17 @@ each with a one-sentence summary. No code, no behavioural changes — reference 
 | Symbol | Summary |
 |--------|---------|
 | *(module)* | Package marker — single comment line, no exports. |
+
+---
+
+## `cs2servergui/_netutils.py` (98 lines)
+
+| Symbol | Summary |
+|--------|---------|
+| `_default_log(msg)` | Fallback logger (`print`) for callers that don't provide one — used by `main.py`'s startup path before `AppCore.log` exists. |
+| `port_in_use(port, host, timeout)` | Returns `True` if something is already listening on `host:port` (TCP connect probe). |
+| `listeners_on_port(port, log)` | Returns every `(bound_address, pid, image_name_lower)` tuple listening on `port` — walks `netstat -ano` and resolves PIDs via `tasklist /FI`. Multiple entries returned when the port is bound to multiple addresses (IPv4 + IPv6, or explicit 0.0.0.0 + ::). |
+| `holder_of_port(port, log)` | Thin wrapper over `listeners_on_port` that returns the first listener as `(pid, name)` or `None`. |
 
 ---
 
@@ -161,7 +175,31 @@ each with a one-sentence summary. No code, no behavioural changes — reference 
 
 ---
 
-## `cs2servergui/core.py` (3143 lines)
+## `cs2servergui/core.py` (3619 lines)
+
+> **Drift note (2026-05-30):** the file grew by ~470 lines since this section
+> was first generated. Notable additions in the v0.9.2 candidate that aren't
+> yet enumerated below:
+>   - `AppCore._resolve_rcon_host()` — refreshes `_config.RCON_HOST` and
+>     `self.rcon.host` from the live LAN IP on every server start / attach.
+>   - `AppCore._preflight_checks(map, mode, is_workshop)` — runs before
+>     `deploy_plugins()`; blocks Start on missing CS2, foreign port-27015
+>     holder, or missing plugin bundle folders.
+>   - `AppCore._post_launch_sanity_check()` — background thread that catches
+>     immediate `cs2.exe` death AND enumerates `netstat` listeners on 27015
+>     to switch `self.rcon.host` to the actual bind address, then force-fires
+>     the workshop trigger.
+>   - `AppCore._list_dedicated_pids()` — PowerShell `Get-CimInstance` first,
+>     `wmic` fallback (deprecated/removed on Win 11 24H2).
+>   - `AppCore._holder_of_port` / `._listeners_on_port` — thin wrappers over
+>     `cs2servergui._netutils` so the AppCore logger picks up netstat output.
+>   - `AppCore._validate_bundle_configs(deployed, csgo_dir)` — warns when a
+>     plugin ships `*.example` without an active counterpart (Zombie
+>     weapons.cfg bug class).
+>   - Lock additions: `_config_save_lock` (atomic `save_config`), `_stop_event`
+>     (cancellable crash-restart backoff).
+> 
+> Existing entries below remain accurate for the unchanged majority.
 
 ### Module-level constants & helpers
 

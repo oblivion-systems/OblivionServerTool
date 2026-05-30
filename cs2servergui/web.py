@@ -28,7 +28,11 @@ from flask import (Flask, Response, abort, jsonify, redirect,
                    render_template, request, send_file)
 
 from . import config as _config
-from .config import (FLASK_PORT, GAME_MODES, OFFICIAL_MAPS, RCON_HOST,
+# RCON_HOST intentionally NOT imported by name — it's mutated by AppCore.
+# _resolve_rcon_host() at runtime; binding the import-time value here would
+# go stale exactly like the bug we fixed in core.py.  Read _config.RCON_HOST
+# at call time if ever needed (today no remaining web.py path needs it).
+from .config import (FLASK_PORT, GAME_MODES, OFFICIAL_MAPS,
                      RCON_PORT, MODE_MAPS, load_workshop)
 from .core import AppCore
 
