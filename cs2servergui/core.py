@@ -352,10 +352,6 @@ _PLUGIN_CLEANUP_ITEMS: dict[str, list[str]] = {
     "practice": [
         os.path.join("addons", "counterstrikesharp", "plugins", "MatchZy"),
         os.path.join("cfg", "MatchZy"),
-        # Legacy scrub: older builds deployed this for the (defunct) MatchZy
-        # retakes mode.  We no longer ship it; keep the entry so existing installs
-        # get the orphaned file removed on the next mode switch.
-        os.path.join("cfg", "retakes.cfg"),
     ],
     "jailbreak": [
         os.path.join("addons", "counterstrikesharp", "plugins", "Jailbreak"),
@@ -364,15 +360,6 @@ _PLUGIN_CLEANUP_ITEMS: dict[str, list[str]] = {
         os.path.join("addons", "counterstrikesharp", "plugins", "WarcraftPlugin"),
         os.path.join("addons", "counterstrikesharp", "plugins", "ModelPrecacher"),
         os.path.join("addons", "counterstrikesharp", "configs", "plugins", "WarcraftPlugin"),
-        # Legacy scrubs: earlier attempts shipped loose Barbarian model files
-        # here (and a wrong ctm_st6 variant).  Loose models don't fix precache,
-        # so we no longer deploy any characters/ files; keep these entries so
-        # installs that still carry them get the orphans removed on the next
-        # mode switch.  These paths only ever held our own files, never stock
-        # game assets, so removing them is safe.
-        os.path.join("characters", "models", "tm_phoenix_heavy"),
-        os.path.join("characters", "models", "ctm_heavy"),
-        os.path.join("characters", "models", "ctm_st6", "ctm_st6_variantn.vmdl_c"),
     ],
     "zombie_ze": [
         os.path.join("addons", "multiaddonmanager"),
@@ -864,59 +851,17 @@ class AppCore:
                      "stale `cs2.exe -dedicated` (if any) WILL NOT be killed at pre-launch.")
         return pids
 
+    # Port-holder enumeration lives in cs2servergui._netutils as plain
+    # module-level functions.  We expose them as instance methods so the
+    # caller can use `self._holder_of_port(...)` / `self._listeners_on_port(...)`
+    # without importing _netutils, and they get the AppCore logger for free.
     def _holder_of_port(self, port: int) -> tuple[int, str] | None:
-        """Return (pid, image_name_lower) of the process LISTENING on `port`,
-        or None if nothing is listening.
-
-        Backwards-compatible thin wrapper around _listeners_on_port that picks
-        the first listener.  For diagnostic logging that wants every binding,
-        use _listeners_on_port directly.
-        """
-        listeners = self._listeners_on_port(port)
-        if not listeners:
-            return None
-        _, pid, name = listeners[0]
-        return pid, name
+        from ._netutils import holder_of_port
+        return holder_of_port(port, log=self.log)
 
     def _listeners_on_port(self, port: int) -> list[tuple[str, int, str]]:
-        """Return every (bound_address, pid, image_name_lower) listening on `port`.
-
-        Critical for diagnosing the workshop-fails-because-RCON-times-out bug:
-        if cs2.exe binds RCON to a specific interface (Hyper-V switch IP, VPN
-        tap, etc.) instead of 0.0.0.0, both 127.0.0.1 and the primary LAN IP
-        return ECONNREFUSED while netstat shows the port is "held".  Logging
-        every listener lets the operator see the actual bind address and probe
-        that directly.
-        """
-        listeners: list[tuple[str, int, str]] = []
-        try:
-            net = subprocess.run(
-                ["netstat", "-ano"], capture_output=True, text=True, timeout=5,
-            )
-            for line in net.stdout.splitlines():
-                cols = line.split()
-                # Format: Proto  LocalAddress  ForeignAddress  State  PID
-                if len(cols) < 5 or cols[3] != "LISTENING":
-                    continue
-                addr = cols[1]
-                # Match strictly on ":<port>" at the END of the LocalAddress so
-                # we don't accidentally match e.g. ":270150" or ":270159".
-                if not addr.endswith(f":{port}"):
-                    continue
-                pid_s = cols[4]
-                if not (pid_s.isdigit() and int(pid_s) > 0):
-                    continue
-                tl = subprocess.run(
-                    ["tasklist", "/FI", f"PID eq {pid_s}", "/FO", "CSV", "/NH"],
-                    capture_output=True, text=True, timeout=5,
-                )
-                first = tl.stdout.splitlines()[0] if tl.stdout.strip() else ""
-                name = first.split('","', 1)[0].strip('"').lower() \
-                    if first.startswith('"') else "?"
-                listeners.append((addr, int(pid_s), name))
-        except Exception as exc:
-            self.log(f"[!] Port listener lookup failed: {exc}")
-        return listeners
+        from ._netutils import listeners_on_port
+        return listeners_on_port(port, log=self.log)
 
     def _resolve_rcon_host(self) -> None:
         """Re-resolve the primary LAN IP and update self.rcon.host accordingly.

@@ -6,6 +6,36 @@
 *Post-v0.9.1 fixes (committed + pushed, not yet tagged). Bump `APP_VERSION` → `0.9.2`
 and tag `v0.9.2` when ready to cut a release.*
 
+### 🧹 Cleanup Pass — Dedup, Dead Code, Stale Markers
+
+Small follow-up sweep with no behaviour changes — pure code hygiene:
+
+- **`cs2servergui/_netutils.py` (NEW)** — single source of truth for the Windows
+  port/process helpers (`port_in_use`, `holder_of_port`, `listeners_on_port`).
+  Previously `_holder_of_port` had two near-identical implementations: one
+  module-level in `main.py` for Flask port collisions, one as an `AppCore` method
+  in `core.py` for CS2 port-conflict detection.  Both call sites now import from
+  `_netutils`; `core.AppCore._holder_of_port` / `._listeners_on_port` stay as thin
+  instance-method wrappers that pass `self.log` so the AppCore logger gets the
+  diagnostic output.
+- **`main.py:5` raw-string fix** — the build-output path in the module docstring
+  used `dist\OblivionServerTool.exe` which triggered Python 3.12+
+  `SyntaxWarning: invalid escape sequence '\O'` on every import.  Module docstring
+  is now an r-string.  Zero warnings on import.
+- **Dead `RCON_HOST` import removed from `web.py`** — the 20-bug sweep dropped
+  every reader of the name but left the import.  Now gone, with a comment noting
+  why future readers should always use `_config.RCON_HOST` at call time.
+- **3 legacy plugin scrubs removed from `_PLUGIN_CLEANUP_ITEMS`** — `cfg/retakes.cfg`
+  from the defunct MatchZy-retakes era, plus three `characters/models/`
+  Barbarian-model paths from an earlier failed precache attempt.  All were "remove
+  if leftover from an older install" entries that no current install carries.
+- **Stale TODO closed** — the "verify auto-restart fires on a real crash" line is
+  now obsolete: the post-friends-night resilience pass replaced the fixed 5 s
+  backoff with exponential (5 → 15 → 45 s) + 5-min time-window reset + `Event.wait`-
+  cancellable sleep so a Stop during the backoff is honoured.
+- **Unused `socket` import removed from `main.py`** — `_port_in_use` moved to
+  `_netutils` so `main.py` no longer needs its own socket import.
+
 ### 🛠️ Workshop Maps Root-Cause Fix + 20-Bug Audit Sweep
 
 The workshop-map-loads-as-dust2 saga ended with an embarrassingly small root cause:

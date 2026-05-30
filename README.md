@@ -3,7 +3,10 @@
 A desktop application for managing a **Counter-Strike 2 dedicated server** on Windows.  
 Built with Python + Flask + pywebview (Edge WebView2). Ships as a single `.exe` with an optional installer.
 
-> **Status: v0.9.1 — work in progress.** Core features are stable; expect rough edges.
+> **Status: v0.9.2 candidate — work in progress.** Core features are stable. Post-v0.9.1
+> shipped a remote-guest role, split team-size modes (1v1 / 2v2 / 3v3 / 4v4 / 5v5), Warcraft
+> menu/chat dispatchers (recv-queue-overflow fix), a 20-bug audit sweep, and the workshop-maps
+> root-cause fix. Tag-ready after a live smoke test.
 
 ---
 
@@ -59,6 +62,14 @@ Vanilla modes (Competitive, Casual, Wingman, etc.) run with no managed plugins a
 - **Command-filter automation** — auto-detects maps that need `-disable_workshop_command_filtering` (from the Steam description) and applies the launch flag only for those, with a per-map override + Scan button
 - **Paste button** — paste a full Steam Workshop URL; the field strips non-numeric characters automatically
 
+### Remote Access
+- **Local pywebview window** + **remote web panel** are the same Flask SPA
+- **Two-tier access**: admin PIN unlocks everything; optional **guest PIN** gives friends
+  limited remote (change map, change mode, download workshop maps — no Start/Stop, no config,
+  no logs, no bans)
+- **PIN brute-force protection**: per-IP lockout after 5 fails + global decay backoff
+- **Cloudflare quick tunnel** documented in `TONIGHT.md` runbook for one-night-only HTTPS access
+
 ### Player Management
 - Live **player list** with names and ping
 - **Kick** or **ban** any player directly from the list
@@ -67,7 +78,8 @@ Vanilla modes (Competitive, Casual, Wingman, etc.) run with no managed plugins a
 - Auto-refresh every 10 seconds
 
 ### Quick Actions
-- **Broadcast a message** to all connected players
+- **Broadcast a message** to all connected players — RCON command-separator (`;`) injection
+  defanged, length-capped at 200 chars
 - **Friendly fire** toggle
 - **Restart round** / **End warmup**
 - **Pause** / **Unpause** match
@@ -140,7 +152,7 @@ build.bat
 # Optional: build the installer (requires Inno Setup)
 # https://jrsoftware.org/isinfo.php
 ISCC installer.iss
-# Output: dist\OblivionServerToolSetup-v0.9.1.exe
+# Output: dist\OblivionServerToolSetup-v<version>.exe
 ```
 
 ---
