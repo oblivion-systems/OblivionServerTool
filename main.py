@@ -184,28 +184,40 @@ def main() -> None:
     core.probe_existing_server()
 
     # ── Pick a Flask port (survive collisions) ───────────────────────────────
-    port = _select_flask_port(_config.FLASK_PORT)
-    if port is None:
+    # Try _select_flask_port → make_server bind in the main thread.  If a
+    # foreign process grabs the port between check and bind (TOCTOU), the
+    # make_server call raises OSError; we retry once with a fresh port
+    # selection.  Binding here (not inside the thread) makes the failure
+    # synchronous and recoverable, instead of a silent "did not start in 10s".
+    flask_app = create_flask(core)
+    from werkzeug.serving import make_server
+    server = None
+    port   = None
+    for attempt in range(3):
+        port = _select_flask_port(_config.FLASK_PORT)
+        if port is None:
+            sys.exit(1)
+        try:
+            server = make_server("0.0.0.0", port, flask_app, threaded=True)
+            break
+        except OSError as exc:
+            print(f"[startup] Bind to port {port} lost the race: {exc} — retry {attempt + 1}/3")
+            server = None
+            time.sleep(0.5)
+    if server is None:
+        print(f"[!] Could not bind any port in the {_config.FLASK_PORT}+0..3 range. Exiting.")
         sys.exit(1)
     core.log(f"Remote web panel → http://localhost:{port}")
 
-    # ── Start Flask ───────────────────────────────────────────────────────────
-    flask_app = create_flask(core)
-
     flask_thread = threading.Thread(
-        target=lambda: flask_app.run(
-            host="0.0.0.0",
-            port=port,
-            use_reloader=False,
-            threaded=True,
-        ),
+        target=server.serve_forever,
         daemon=True,
         name="flask",
     )
     flask_thread.start()
 
     if not _wait_for_flask(port, timeout=10.0):
-        print(f"[!] Flask did not start on port {port} within 10 s — exiting.")
+        print(f"[!] Flask did not respond on port {port} within 10 s — exiting.")
         sys.exit(1)
 
     # Background tasks (same as before, minus the GUI-specific ones)
@@ -267,6 +279,17 @@ def main() -> None:
         http_server  = False,            # we already have Flask
         icon         = _ico_path if os.path.isfile(_ico_path) else None,
     )
+
+    # Flush any in-flight config changes BEFORE os._exit — without this, a
+    # toggle the user changed seconds before closing the window can be lost
+    # because os._exit bypasses atexit handlers and threading shutdown.
+    # Worse, if a background save was mid-write at exit, the file is left
+    # truncated and _load_config silently treats it as empty {} on next launch,
+    # resetting every setting and regenerating the RCON password.
+    try:
+        core.save_config()
+    except Exception as exc:
+        print(f"[shutdown] Final save_config failed: {exc}")
 
     # Force-exit so that Edge WebView2 child processes and any pywebview-internal
     # non-daemon threads are fully cleaned up.  Without this the Python process

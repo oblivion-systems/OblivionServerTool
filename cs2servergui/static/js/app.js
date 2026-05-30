@@ -35,7 +35,32 @@ function toast(msg, color = 'var(--accent)') {
 }
 
 function copyText(text, label = 'Copied') {
-  navigator.clipboard.writeText(text).then(() => toast(`${label} copied`));
+  // Try the modern clipboard API first; fall back to a hidden textarea +
+  // execCommand('copy') if it throws or isn't available (older WebView2 builds
+  // and HTTP origins both break the modern API silently).
+  const fallback = () => {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      if (ok) toast(`${label} copied`);
+      else toast(`${label} copy failed — use Save instead`, 'var(--bad)');
+    } catch (e) {
+      toast(`${label} copy failed: ${e.message}`, 'var(--bad)');
+    }
+  };
+  if (!navigator.clipboard || !navigator.clipboard.writeText) {
+    fallback();
+    return;
+  }
+  navigator.clipboard.writeText(text)
+    .then(() => toast(`${label} copied`))
+    .catch(fallback);
 }
 
 function fmtUptime(secs) {
@@ -481,6 +506,14 @@ function startSSE() {
     if (_sseRetries++ < _SSE_MAX_RETRIES) setTimeout(startSSE, 5000);
   };
 }
+
+// Close the SSE on page unload (Ctrl+R, window close) so the browser GC
+// doesn't have to clean up a dangling EventSource on the old window — the
+// server-side queue also stops receiving for the closed client immediately
+// instead of waiting for the next keepalive cycle to notice.
+window.addEventListener('beforeunload', () => {
+  try { if (logEs) logEs.close(); } catch (_) {}
+});
 
 async function loadLogHistory() {
   try {
@@ -1943,13 +1976,16 @@ pages['config'] = async function() {
           <div class="flex-col gap-8">
             <div class="field"><label>Admin PIN (4+ digits, full web-panel access)</label>
               <input class="input" id="cfg-pin" type="password"
-                     value="${esc(cfg.admin_pin || '')}" maxlength="8"></div>
+                     value="" maxlength="8"
+                     placeholder="${cfg.admin_pin ? '(unchanged — leave blank to keep)' : '(set a PIN)'}"></div>
             <div class="field"><label>Guest PIN (optional — limited remote access: maps, modes &amp; workshop downloads only. Blank = off)</label>
               <input class="input" id="cfg-guest-pin" type="password"
-                     value="${esc(cfg.guest_pin || '')}" maxlength="8" placeholder="(disabled)"></div>
+                     value="" maxlength="8"
+                     placeholder="${cfg.guest_pin ? '(unchanged — leave blank to keep, type DISABLE to remove)' : '(disabled)'}"></div>
             <div class="field"><label>RCON Password (auto-generated, change if needed)</label>
               <input class="input" id="cfg-rcon-pw" type="password"
-                     value="${esc(cfg.rcon_password || '')}"></div>
+                     value=""
+                     placeholder="${cfg.rcon_password ? '(unchanged — leave blank to keep)' : '(none set)'}"></div>
           </div>
           <button class="btn btn-accent btn-full mt-16" id="cfg-security-save">Save Security Settings</button>
         </div>
@@ -2048,11 +2084,25 @@ pages['config'] = async function() {
 
   const secSaveBtn = el('cfg-security-save');   // only rendered for local sessions
   if (secSaveBtn) secSaveBtn.addEventListener('click', async () => {
-    const data = {
-      admin_pin:     el('cfg-pin').value,
-      guest_pin:     el('cfg-guest-pin').value.trim(),
-      rcon_password: el('cfg-rcon-pw').value,
-    };
+    // Only POST fields the user actually filled in.  The inputs render BLANK
+    // (with a placeholder showing current status) so the operator sees an
+    // explicit "leave blank to keep" rather than the round-trip pattern that
+    // silently truncated long PINs via maxlength="8" and round-tripped the
+    // raw RCON secret on every save.
+    const data = {};
+    const adminVal = el('cfg-pin').value;
+    const guestVal = el('cfg-guest-pin').value.trim();
+    const rconVal  = el('cfg-rcon-pw').value;
+    if (adminVal) data.admin_pin = adminVal;
+    // Guest PIN convention: "DISABLE" sentinel clears it; any other non-empty
+    // sets it; empty = no change.
+    if (guestVal === 'DISABLE') data.guest_pin = '';
+    else if (guestVal)          data.guest_pin = guestVal;
+    if (rconVal)  data.rcon_password = rconVal;
+    if (Object.keys(data).length === 0) {
+      toast('Nothing to change (all fields blank)', 'var(--sub)');
+      return;
+    }
     try { await api.setConfig(data); toast('Security settings saved'); }
     catch (e) { toast(e.message, 'var(--red)'); }
   });
@@ -2557,7 +2607,15 @@ pages['appearance'] = function() {
 
 /* ══════════════════════════════════════════════════════════════ INIT */
 
+// Idempotency guard — init() is bound to DOMContentLoaded both here and at
+// the bottom of the file (the shell-modules block at ~line 3108).  Both
+// listeners fire once today so no real bug, but any future "re-login without
+// page reload" or other re-entry path would double every keydown handler
+// and SSE subscription.  This flag closes that door cheaply.
+let _initialised = false;
 async function init() {
+  if (_initialised) return;
+  _initialised = true;
   // Apply saved appearance settings before anything renders
   loadAppSettings();
 
@@ -2660,7 +2718,42 @@ window.LogDrawer = {
   init() {
     const bar = el('log-drawer-bar');
     if (!bar) return;
-    bar.addEventListener('click', () => this.toggle());
+    bar.addEventListener('click', e => {
+      // Clicks on Copy/Save (or any explicit button inside the bar) must NOT
+      // toggle the drawer — they have their own handlers below.
+      if (e.target.closest('button')) return;
+      this.toggle();
+    });
+
+    // Copy: pull the full server-side history (not just what's in the SSE
+    // buffer), join with newlines, push to clipboard. Falls back to a textarea
+    // if navigator.clipboard isn't available (see copyText).
+    const copyBtn = el('log-drawer-copy');
+    if (copyBtn) copyBtn.addEventListener('click', async e => {
+      e.stopPropagation();
+      try {
+        const lines = await api.logHistory();
+        copyText((lines || []).join('\n'), 'Log');
+      } catch (err) {
+        // Fall back to whatever the client has buffered.
+        copyText(logLines.join('\n'), 'Log');
+      }
+    });
+
+    // Save: ask the server to write the log to a known file and report the path.
+    const saveBtn = el('log-drawer-save');
+    if (saveBtn) saveBtn.addEventListener('click', async e => {
+      e.stopPropagation();
+      try {
+        const r = await api.logSave();
+        // Show the filename in the toast; the full path is logged via the
+        // [log] line so the user can find it from the log itself.
+        const fname = (r.path || '').split(/[\\/]/).pop() || 'log file';
+        toast(`Saved → ${fname}`, 'var(--ok)');
+      } catch (err) {
+        toast(`Save failed: ${err.message}`, 'var(--bad)');
+      }
+    });
 
     // Backtick to toggle (skipped when typing)
     document.addEventListener('keydown', e => {
@@ -2766,7 +2859,12 @@ window.ConnectPopover = {
     else             { pubK.textContent = 'Public · GSLT not set';  pubK.className = 'cp-k';   }
 
     const warn = el('cp-warn');
-    if (!s.sv_password) {
+    // /api/state doesn't expose the raw sv_password (would leak the secret to
+    // any guest polling state).  It DOES expose `sv_password_set: bool` —
+    // read that instead.  Before this fix, `s.sv_password` was always
+    // undefined and the warning displayed on every poll regardless of the
+    // actual configured password.
+    if (!s.sv_password_set) {
       warn.classList.remove('hidden');
       el('cp-warn-l').textContent = 'No password set · anyone with the IP can join.';
       el('cp-warn-a').onclick = () => { this.hide(); navigate('config'); };

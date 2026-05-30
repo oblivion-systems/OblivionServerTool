@@ -109,5 +109,6 @@ const api = (() => {
 
     // ── Log ───────────────────────────────────────────────────────────────
     logHistory: ()      => get('/api/log/history'),
+    logSave:    ()      => post('/api/log/save'),
   };
 })();

@@ -38,7 +38,9 @@ from .core import AppCore
 # interpolated into an RCON command line must be format-validated first.
 _MAP_NAME_RE = re.compile(r"^[A-Za-z0-9_]+$")   # official map names
 _DIGITS_RE   = re.compile(r"^[0-9]+$")          # workshop IDs, userids
-_STEAMID_RE  = re.compile(r"^[A-Za-z0-9:\[\]_]+$")  # STEAM_/[U:..]/765... forms
+_STEAMID_RE  = re.compile(r"^[A-Za-z0-9:\[\]_]{1,64}$")  # length-capped STEAM_/[U:..]/765... forms
+_NAME_MAX_LEN = 64                              # cap on player names sent to RCON
+_BROADCAST_MAX_LEN = 200                        # cap on say/broadcast bodies
 
 
 # ── Session store ──────────────────────────────────────────────────────────────
@@ -82,15 +84,23 @@ def _clear_session(token: str) -> None:
 
 _MAX_ATTEMPTS  = 5
 _LOCKOUT_SECS  = 300
-_attempts:      dict[str, dict] = {}   # ip → {count, until}
+_ATTEMPT_TTL_SECS = 600        # garbage-collect attempts older than this
+_attempts:      dict[str, dict] = {}   # ip → {count, until, last}
 _attempts_lock  = threading.Lock()
+
+# Atomic compare-and-clear lock for /auth/auto's single-use startup token.
+_startup_token_lock = threading.Lock()
 
 
 def _check_lockout(ip: str) -> int:
     now = time.time()
     with _attempts_lock:
+        # GC: both stale-locked entries AND any entry whose last activity is
+        # past the TTL.  Without the TTL prune, a slow drip of distinct-IP
+        # failures (each below _MAX_ATTEMPTS) leaves the dict growing forever.
         stale = [k for k, r in _attempts.items()
-                 if r["count"] >= _MAX_ATTEMPTS and r["until"] <= now]
+                 if (r["count"] >= _MAX_ATTEMPTS and r["until"] <= now)
+                 or (r.get("last", 0.0) and now - r["last"] > _ATTEMPT_TTL_SECS)]
         for k in stale:
             del _attempts[k]
         rec = _attempts.get(ip)
@@ -104,8 +114,9 @@ def _check_lockout(ip: str) -> int:
 
 def _record_fail(ip: str) -> None:
     with _attempts_lock:
-        rec = _attempts.setdefault(ip, {"count": 0, "until": 0.0})
+        rec = _attempts.setdefault(ip, {"count": 0, "until": 0.0, "last": 0.0})
         rec["count"] += 1
+        rec["last"]   = time.time()    # touch for the TTL prune above
         if rec["count"] >= _MAX_ATTEMPTS:
             rec["until"] = time.time() + _LOCKOUT_SECS
 
@@ -245,8 +256,15 @@ def create_flask(core: AppCore) -> Flask:
         if (request.remote_addr or "") not in ("127.0.0.1", "::1"):
             return redirect("/")
         token = request.args.get("token", "")
-        if token and core.startup_token and secrets.compare_digest(token, core.startup_token):
-            core.startup_token = ""    # invalidate immediately — single-use
+        # Atomic compare-and-clear: two simultaneous loopback hits could both
+        # pass compare_digest before either ran the clear, minting two local
+        # sessions instead of one.  The lock collapses that race.
+        with _startup_token_lock:
+            ok = bool(token and core.startup_token
+                      and secrets.compare_digest(token, core.startup_token))
+            if ok:
+                core.startup_token = ""    # invalidate immediately — single-use
+        if ok:
             session_token = _create_session("127.0.0.1", is_local=True, role="admin")
             core.log("Local window authenticated (auto-auth)")
             resp = redirect("/")
@@ -333,10 +351,19 @@ def create_flask(core: AppCore) -> Flask:
             "app_update":         core.app_update_available,
             "app_version":        core.app_latest_version,
             "public_ip":          core.public_ip,
-            "lan_ip":             RCON_HOST,
+            # `lan_ip` is the live primary LAN IP for the Connect popover
+            # ("share this IP with friends to join").  Refreshed every call so
+            # a network change is reflected without restarting the app.
+            # flask_port reads from _config so a port-collision fallback at
+            # startup is mirrored back to the UI.
+            "lan_ip":             _config._lan_ip(),
             "rcon_port":          RCON_PORT,
-            "flask_port":         FLASK_PORT,
+            "flask_port":         _config.FLASK_PORT,
             "is_local":           is_local,
+            # Boolean instead of the raw value so a guest can see "password
+            # protected? yes/no" for the Connect popover without leaking the
+            # password itself.  The ConnectPopover UI reads this.
+            "sv_password_set":    bool(core.sv_password),
             "dl_active":          core._active_dl_proc is not None,
             "dl_progress":        core._dl_progress or None,
         })
@@ -407,7 +434,16 @@ def create_flask(core: AppCore) -> Flask:
         msg = (request.get_json() or {}).get("message", "").strip()
         if not msg:
             return jsonify({"error": "Empty message"}), 400
-        msg = msg.replace("\r", " ").replace("\n", " ")   # block RCON line injection
+        # Defang RCON command injection: newlines AND semicolons are both
+        # statement separators on the Source 2 console, so `hello;sv_password x`
+        # would otherwise be two commands.  Cap length too — RCON has no
+        # legitimate use for a 1 MB chat broadcast.
+        msg = (msg.replace("\r", " ")
+                  .replace("\n", " ")
+                  .replace(";",  ",")
+                  .replace("`",  "'"))     # backtick = command-sub in some shells
+        if len(msg) > _BROADCAST_MAX_LEN:
+            msg = msg[:_BROADCAST_MAX_LEN]
         core.server_say(msg)
         return jsonify({"ok": True})
 
@@ -494,8 +530,8 @@ def create_flask(core: AppCore) -> Flask:
             return jsonify({"error": "Server is not running"}), 400
         d      = request.get_json() or {}
         userid = str(d.get("userid", "")).strip()
-        name   = str(d.get("name",   "")).strip()
-        if not _DIGITS_RE.match(userid):
+        name   = str(d.get("name",   "")).strip()[:_NAME_MAX_LEN]   # cap before use
+        if not _DIGITS_RE.match(userid) or len(userid) > 10:
             return jsonify({"error": "Invalid userid"}), 400
         core.kick_player(userid, name)
         return jsonify({"ok": True})
@@ -708,6 +744,14 @@ def create_flask(core: AppCore) -> Flask:
                 "error": "Steam credentials required",
                 "needs_steam": True,
             }), 400
+        # Reject concurrent downloads — depotdl_download spawns a thread per
+        # call and overwrites core._active_dl_proc, so two simultaneous clicks
+        # (or two guests) would orphan the first process; cancel_download
+        # would only kill the latest and the staging dirs would collide.
+        if core._active_dl_proc is not None:
+            return jsonify({
+                "error": "A download is already in progress — cancel it first or wait.",
+            }), 409
         core.depotdl_download(
             wid,
             on_done=lambda ok: core.log(
@@ -822,8 +866,14 @@ def create_flask(core: AppCore) -> Flask:
 
     @app.route("/api/setup/status")
     @require_auth
+    @require_local   # leaks `pin_is_default` to guests otherwise — a remote
+                     # guest learning the admin PIN is still "1234" is half a
+                     # PIN brute-force away from full admin.
     def setup_status():
-        """Return whether first-run setup is still needed."""
+        """Return whether first-run setup is still needed.
+
+        Local-only: the first-run wizard only ever runs in the pywebview window.
+        """
         return jsonify({
             "needs_setup":     core.needs_setup,
             "server_dir_set":  bool(core.server_dir),
@@ -933,6 +983,44 @@ def create_flask(core: AppCore) -> Flask:
     @require_auth
     def log_history():
         return jsonify(core.get_log())
+
+    @app.route("/api/log/save", methods=["POST"])
+    @require_auth
+    @require_local   # writes to the user's local config dir — never remote
+    def log_save():
+        """Dump the in-memory log buffer to a timestamped file in the user's
+        config directory so the operator can open / share it without needing
+        clipboard access (Edge WebView2 clipboard occasionally fails silently).
+
+        Local-only: remote guests/admins could otherwise spam saves to fill
+        the host's disk.  Filename includes a 6-hex random suffix so two saves
+        in the same second don't silently overwrite each other.
+        """
+        import os
+        import time as _time
+        # Refuse empty saves — produces a misleading 0-byte file that the
+        # operator then has to debug ("where's my log?").
+        lines = core.get_log()
+        if not lines:
+            return jsonify({"error": "Log buffer is empty — nothing to save."}), 400
+        cfg_dir = os.path.dirname(_config._CONFIG_FILE) or "."
+        try:
+            os.makedirs(cfg_dir, exist_ok=True)
+        except Exception:
+            pass
+        # %Y%m%d_%H%M%S resolution is 1 second; bolt on 6 random hex so two
+        # near-simultaneous saves never collide and silently overwrite.
+        fname = _time.strftime("oblivion_log_%Y%m%d_%H%M%S_") + secrets.token_hex(3) + ".txt"
+        path  = os.path.join(cfg_dir, fname)
+        try:
+            # Snapshot `lines` (taken above) — don't re-fetch inside the with
+            # block so the file size matches the count we'll log.
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write("\n".join(lines))
+        except Exception as exc:
+            return jsonify({"error": str(exc)}), 500
+        core.log(f"[log] Saved {len(lines)} lines → {path}")
+        return jsonify({"ok": True, "path": path})
 
     @app.route("/api/log/stream")
     @require_auth
