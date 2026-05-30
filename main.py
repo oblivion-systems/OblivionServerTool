@@ -37,6 +37,9 @@ def _enable_high_dpi() -> None:
         pass
 
 
+_OUR_PROCESS_NAMES = {"oblivionservertool.exe", "python.exe", "pythonw.exe"}
+
+
 def _port_in_use(port: int) -> bool:
     """Return True if something is already listening on localhost:port."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -44,45 +47,77 @@ def _port_in_use(port: int) -> bool:
         return s.connect_ex(("127.0.0.1", port)) == 0
 
 
-def _kill_zombie_instance(port: int) -> None:
-    """Kill any previous app instance that is still holding our Flask port.
+def _holder_of_port(port: int) -> tuple[int, str] | None:
+    """Return (pid, image_name_lower) of the process LISTENING on the port, or None.
 
-    When pywebview's Edge WebView2 runtime leaves non-daemon threads alive,
-    the Python process does not exit on window close.  The zombie holds
-    port 5000, making re-launches silently fail (Flask can't bind, the new
-    AppCore is never started, the window loads the zombie's stale state).
-
-    This runs before Flask starts.  If the port is already in use we find
-    the owning PID via netstat and taskkill it, then wait for the port to
-    be released.
+    Looks at both 127.0.0.1:<port> and 0.0.0.0:<port> matches.  Used to decide
+    whether a port collision is our own zombie (safe to kill) or someone else's
+    app (must fall back to a different port instead of murdering it).
     """
-    if not _port_in_use(port):
-        return
-    print(f"[startup] Port {port} already in use — killing zombie instance…")
     try:
-        result = subprocess.run(
-            ["netstat", "-ano"],
-            capture_output=True, text=True, timeout=5,
+        net = subprocess.run(
+            ["netstat", "-ano"], capture_output=True, text=True, timeout=5,
         )
-        for line in result.stdout.splitlines():
+        for line in net.stdout.splitlines():
             cols = line.split()
-            # Format: Proto  LocalAddress  ForeignAddress  State  PID
+            # Proto  LocalAddress  ForeignAddress  State  PID
             if len(cols) >= 5 and f":{port}" in cols[1] and cols[3] == "LISTENING":
                 pid = cols[4]
-                if pid.isdigit() and int(pid) > 0:
-                    subprocess.run(
-                        ["taskkill", "/F", "/PID", pid],
-                        capture_output=True, timeout=5,
-                    )
-                    print(f"[startup] Killed PID {pid}")
-                    # Wait up to 3 s for the port to be released
-                    for _ in range(15):
-                        time.sleep(0.2)
-                        if not _port_in_use(port):
-                            break
-                    break
+                if not (pid.isdigit() and int(pid) > 0):
+                    continue
+                # Resolve PID -> image name
+                tl = subprocess.run(
+                    ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                first = tl.stdout.splitlines()[0] if tl.stdout.strip() else ""
+                if first.startswith('"'):
+                    name = first.split('","', 1)[0].strip('"').lower()
+                    return int(pid), name
+    except Exception as exc:
+        print(f"[startup] _holder_of_port({port}) failed: {exc}")
+    return None
+
+
+def _kill_zombie_instance(port: int) -> bool:
+    """Kill a prior Oblivion process holding our Flask port. Returns True on kill.
+
+    pywebview's Edge WebView2 runtime occasionally leaves non-daemon threads alive
+    so the Python process survives window close.  The zombie holds our port,
+    making re-launches silently fail.  Only processes whose image matches our own
+    (OblivionServerTool.exe / python.exe) are killed — anything else (e.g.
+    CS_GO_Arx_Applet) is left alone and the caller falls back to a different port.
+    """
+    holder = _holder_of_port(port)
+    if not holder:
+        return False
+    pid, name = holder
+    if name not in _OUR_PROCESS_NAMES:
+        print(f"[startup] Port {port} held by '{name}' (PID {pid}) — not ours, leaving it alone")
+        return False
+    print(f"[startup] Port {port} held by our own '{name}' (PID {pid}) — killing zombie…")
+    try:
+        subprocess.run(["taskkill", "/F", "/PID", str(pid)],
+                       capture_output=True, timeout=5)
+        for _ in range(15):
+            time.sleep(0.2)
+            if not _port_in_use(port):
+                print(f"[startup] Killed PID {pid} — port {port} free")
+                return True
     except Exception as exc:
         print(f"[startup] Could not kill zombie: {exc}")
+    return False
+
+
+def _pick_free_port(start: int, count: int = 4) -> int | None:
+    """Try `start`, `start+1`, … `start+count-1`. Return the first that's free.
+
+    Survives port collisions with foreign apps (the CS_GO_Arx_Applet case).
+    """
+    for p in range(start, start + count):
+        if not _port_in_use(p):
+            return p
+    return None
 
 
 def _wait_for_flask(port: int, timeout: float = 10.0) -> bool:
@@ -101,16 +136,43 @@ def _wait_for_flask(port: int, timeout: float = 10.0) -> bool:
 
 _enable_high_dpi()
 
-from cs2servergui.config import FLASK_PORT, APP_VERSION
+from cs2servergui import config as _config
+from cs2servergui.config import APP_VERSION
 from cs2servergui.core   import AppCore
 from cs2servergui.web    import create_flask
+
+
+def _select_flask_port(configured: int) -> int | None:
+    """Pick a port for Flask: configured if free (or holding our zombie),
+    otherwise the next free port in [configured+1..configured+3].
+
+    Returns None if nothing in that range is free.  Updates _config.FLASK_PORT
+    so the rest of the app (status bar, tunnel hints, etc.) sees the chosen port.
+    """
+    # If our own zombie is squatting the configured port, kill it and take it.
+    _kill_zombie_instance(configured)
+    if not _port_in_use(configured):
+        _config.FLASK_PORT = configured
+        return configured
+    # Held by a foreign app — log who, fall back to a nearby port.
+    holder = _holder_of_port(configured)
+    if holder:
+        pid, name = holder
+        print(f"[startup] Port {configured} held by '{name}' (PID {pid}) — falling back…")
+    chosen = _pick_free_port(configured + 1, count=3)
+    if chosen is None:
+        print(f"[!] No free port in {configured}–{configured + 3}. "
+              f"Close whatever's on {configured} or change flask_port in oblivion_config.json.")
+        return None
+    print(f"[startup] Flask will bind to fallback port {chosen} instead of {configured}")
+    _config.FLASK_PORT = chosen
+    return chosen
 
 
 def main() -> None:
     # ── Bootstrap AppCore ─────────────────────────────────────────────────────
     core = AppCore()
     core.log(f"Oblivion Server Tool v{APP_VERSION}")
-    core.log(f"Remote web panel → http://localhost:{FLASK_PORT}")
 
     # One-time token for pywebview's auto-auth URL — invalidated on first use
     core.startup_token = secrets.token_hex(32)
@@ -121,10 +183,11 @@ def main() -> None:
     # Probe for an already-running server before the UI opens
     core.probe_existing_server()
 
-    # ── Kill any zombie instance before binding the port ─────────────────────
-    # If the previous session's Python/Edge process didn't exit cleanly it may
-    # still hold our Flask port, causing the new Flask thread to silently fail.
-    _kill_zombie_instance(FLASK_PORT)
+    # ── Pick a Flask port (survive collisions) ───────────────────────────────
+    port = _select_flask_port(_config.FLASK_PORT)
+    if port is None:
+        sys.exit(1)
+    core.log(f"Remote web panel → http://localhost:{port}")
 
     # ── Start Flask ───────────────────────────────────────────────────────────
     flask_app = create_flask(core)
@@ -132,7 +195,7 @@ def main() -> None:
     flask_thread = threading.Thread(
         target=lambda: flask_app.run(
             host="0.0.0.0",
-            port=FLASK_PORT,
+            port=port,
             use_reloader=False,
             threaded=True,
         ),
@@ -141,8 +204,8 @@ def main() -> None:
     )
     flask_thread.start()
 
-    if not _wait_for_flask(FLASK_PORT, timeout=10.0):
-        print(f"[!] Flask did not start on port {FLASK_PORT} within 10 s — exiting.")
+    if not _wait_for_flask(port, timeout=10.0):
+        print(f"[!] Flask did not start on port {port} within 10 s — exiting.")
         sys.exit(1)
 
     # Background tasks (same as before, minus the GUI-specific ones)
@@ -164,7 +227,7 @@ def main() -> None:
             "[!] pywebview is not installed.\n"
             "    Run:  pip install pywebview\n"
             "    Or open the web panel manually at "
-            f"http://localhost:{FLASK_PORT}"
+            f"http://localhost:{port}"
         )
         # Fall back to keeping Flask alive so the remote web panel still works
         try:
@@ -174,7 +237,7 @@ def main() -> None:
         return
 
     auto_url = (
-        f"http://127.0.0.1:{FLASK_PORT}/auth/auto"
+        f"http://127.0.0.1:{port}/auth/auto"
         f"?token={core.startup_token}"
     )
 

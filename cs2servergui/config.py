@@ -82,20 +82,6 @@ def update_paths(server_dir: str) -> None:
                                    "game", "csgo", "addons")
 
 
-# ── Network ────────────────────────────────────────────────────────────────────
-
-RCON_HOST     = _lan_ip()
-RCON_PORT     = 27015
-RCON_PASSWORD = ""        # auto-generated at first run; stored in oblivion_config.json
-# 5050, not 5000: port 5000 is a very common default (Flask demos, AirPlay on
-# macOS, and assorted CS applets like CS_GO_Arx_Applet) and collisions there make
-# the local panel unreachable on loopback. 5050 is far less contested.
-# TODO: make this user-configurable via oblivion_config.json (needs main.py to read
-# the port after load_config rather than importing the constant at module top).
-FLASK_PORT    = 5050
-ADMIN_PIN     = ""        # set at first run; stored in oblivion_config.json
-
-
 # ── Config file ────────────────────────────────────────────────────────────────
 # Frozen (installed): %APPDATA%\Oblivion Server Tool\  — always user-writable,
 #   survives upgrades, and is never inside the read-only Program Files directory.
@@ -111,6 +97,37 @@ else:
     _APP_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 _CONFIG_FILE = os.path.join(_APP_DIR, "oblivion_config.json")
+
+
+def _load_int_from_config(key: str, default: int) -> int:
+    """Read a single integer setting from oblivion_config.json at import time.
+
+    Used so module-level constants (FLASK_PORT) can reflect the user's saved value
+    *before* main.py imports them at the top of the file.  Any error (file absent,
+    malformed JSON, missing/invalid key) silently falls back to the default — this
+    must never block startup, since the config file is auto-created on first run.
+    """
+    try:
+        import json
+        with open(_CONFIG_FILE, encoding="utf-8") as fh:
+            v = json.load(fh).get(key, default)
+        return int(v) if 1 <= int(v) <= 65535 else default
+    except Exception:
+        return default
+
+
+# ── Network ────────────────────────────────────────────────────────────────────
+
+RCON_HOST     = _lan_ip()
+RCON_PORT     = 27015
+RCON_PASSWORD = ""        # auto-generated at first run; stored in oblivion_config.json
+# 5050 default, but read from oblivion_config.json so the user can move it
+# without a rebuild if anything (CS_GO_Arx_Applet, AirPlay, another Flask app)
+# claims the port.  See _load_int_from_config above.  Port-collision fallback
+# at bind time may push the *actual* port higher; main.py reports that back
+# via _config.FLASK_PORT = <chosen> after Flask successfully binds.
+FLASK_PORT    = _load_int_from_config("flask_port", 5050)
+ADMIN_PIN     = ""        # set at first run; stored in oblivion_config.json
 
 
 # ── Game data ──────────────────────────────────────────────────────────────────
