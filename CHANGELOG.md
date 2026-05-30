@@ -2,9 +2,7 @@
 
 ---
 
-## Unreleased
-*Post-v0.9.1 fixes (committed + pushed, not yet tagged). Bump `APP_VERSION` → `0.9.2`
-and tag `v0.9.2` when ready to cut a release.*
+## v0.9.2 — 2026-05-30
 
 ### 🧹 Cleanup Pass — Dedup, Dead Code, Stale Markers
 
