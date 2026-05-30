@@ -161,6 +161,41 @@ open does async DB loads + HUD broadcasts → main-thread pressure → can't dra
   when an update is detected** (`update_available`) as a cue — while staying a normal,
   always-clickable forced-update button when it isn't pulsing, so a mirror miss never hides it.
 
+### 🛡️ Resilience — Redundancies After Friends-Night Burns
+
+A batch of small hardenings to address the failure modes from the live session: a foreign app
+squatting our Flask port broke the desktop panel, the server died mid-mode-switch, and the
+silent missing-config bug (zombie weapons whitelist) wasn't caught until a friend reported
+empty hands. The fixes are all defensive — none of them change normal-path behaviour.
+
+- **User-configurable Flask port** — `flask_port` is now a first-class field in
+  `oblivion_config.json` (default `5050`). Resolves the prior TODO; config and main both honour it.
+- **Port-collision survivor on Flask bind.** Identifies the holder of the configured port via
+  `netstat -ano` + `tasklist`: if it's our own zombie (`OblivionServerTool.exe` / `python.exe`),
+  it's killed; if it's foreign (CS_GO_Arx_Applet, etc.), it's left alone and Flask falls back to
+  the next free port in `[configured+1..configured+3]`. The chosen port is logged and propagated
+  via `_config.FLASK_PORT` so the status bar / tunnel hints reflect reality.
+- **RCON_HOST re-resolved on every server attach/start.** `config.py` resolves the LAN IP once
+  at import — so a DHCP change after the app boots left RCON pointed at a stale IP. The new
+  `_resolve_rcon_host()` runs at the top of `start_server` and `probe_existing_server`, refreshes
+  `_config.RCON_HOST`, and patches the live `RCONClient` instance.
+- **Pre-flight checks before Start.** New `_preflight_checks()` runs before `deploy_plugins()`:
+  blocks if CS2 isn't installed, port `27015` is held by a non-CS2 process, or the bundle's
+  plugin source folders are missing for the chosen mode. Soft-warns if a workshop map is
+  selected but Steam credentials aren't saved, or DepotDownloader is missing. Every finding is
+  logged with a one-line fix hint.
+- **Bundle config validation on deploy.** Walks each deployed plugin's bundle folder for any
+  `*.example` files and warns when the implied active file is absent from both the bundle and
+  the live `csgo/` tree. Catches the class of bug we hit with Zombie's `weapons.cfg` — shipped
+  `weapons.cfg.example`, no active file → plugin loaded with no whitelist → gun pickup
+  silently broken.
+- **Crash auto-restart hardening.** Exponential backoff between attempts (`5 s → 15 s → 45 s`)
+  so a persistent boot-loop config bug isn't hammered, and a **time-window reset**: if the
+  server stayed up for 5+ minutes since the last crash, the consecutive-failure counter is
+  forgiven. Previously a session that auto-restarted twice over hours would refuse the third
+  recovery because the counter only reset on a clean stop. End-state messaging now points at
+  log-checking and explicitly says the counter resets on manual Start.
+
 ### 🔌 Web Panel Port
 
 - **Default Flask port moved `5000` → `5050`.** Port 5000 is heavily contested (Flask demos,
@@ -168,7 +203,6 @@ open does async DB loads + HUD broadcasts → main-thread pressure → can't dra
   there makes the desktop panel unreachable on loopback — every API call fails with "failed to
   fetch" and in-app RCON breaks, even though the server itself is fine. 5050 is far less contested.
   *(Takes effect on the next build / source run; update any tunnel or port-forward to 5050.)*
-  TODO: make the port user-configurable via `oblivion_config.json`.
 
 ### 🧹 Workshop Cleanup
 

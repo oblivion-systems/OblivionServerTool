@@ -405,6 +405,10 @@ class AppCore:
 
         # RCONClient created with empty password; updated after _load_config()
         # so the runtime-configured password (not the config.py default) is used.
+        # NB: host is re-resolved via _resolve_rcon_host() on every server start /
+        # attach — config.py's RCON_HOST is computed once at import time and goes
+        # stale if the LAN IP changes (network blip during boot → 127.0.0.1 fallback
+        # → all RCON fails for the whole session even after the network recovers).
         self.rcon = RCONClient(RCON_HOST, RCON_PORT, "")
 
         self._log_buf  = collections.deque(maxlen=300)
@@ -443,6 +447,8 @@ class AppCore:
         self.admin_pin:     str = ""   # PIN for the web panel (full admin access)
         self.guest_pin:     str = ""   # optional PIN for the limited guest role
                                        # (maps/modes/workshop downloads); "" = off
+        self.flask_port:    int = 5050 # user-overridable in oblivion_config.json;
+                                       # config.py reads it at import time
 
         # One-time token set by main.py so the local pywebview window can
         # auto-authenticate without entering the PIN.  Cleared after first use.
@@ -594,6 +600,10 @@ class AppCore:
         self.admin_pin = cfg.get("admin_pin", "1234")
         # Guest PIN: optional limited-access PIN; empty string disables guest login.
         self.guest_pin = cfg.get("guest_pin", "")
+        # Flask port: persisted for the round-trip (config.py reads this same key
+        # at module-import time so main.py's `from config import FLASK_PORT` sees
+        # the user's value before Flask binds).
+        self.flask_port = int(cfg.get("flask_port", 5050))
 
         # ── Steam credentials ──────────────────────────────────────────────
         self.steam_username = cfg.get("steam_username", "")
@@ -643,6 +653,7 @@ class AppCore:
                 "rcon_password":         self.rcon_password,
                 "admin_pin":             self.admin_pin,
                 "guest_pin":             self.guest_pin,
+                "flask_port":            self.flask_port,
                 "steam_username":        self.steam_username,
                 "steam_password":        steam_pw_stored,
                 "steam_session_active":  self.steam_session_active,
@@ -749,8 +760,97 @@ class AppCore:
             self.log(f"[pre-launch] ✗ Could not create dota/gameinfo.gi: {exc}")
             self.log("[pre-launch]   Create it manually — see README or docs.")
 
+    def _resolve_rcon_host(self) -> None:
+        """Re-resolve the LAN IP and update RCON_HOST + the live RCON client.
+
+        Belt-and-braces against the stale-host bug: config.py's RCON_HOST is
+        computed once at module import time.  If the app starts during a network
+        blip _lan_ip() falls back to 127.0.0.1 and stays there for the whole
+        session — every RCON command then fails with ConnectionRefused even
+        after the network recovers.  Re-resolving on every server start /
+        attach makes the host current at the moment we actually need it.
+        """
+        try:
+            fresh = _config._lan_ip()
+        except Exception as exc:
+            self.log(f"[rcon] could not re-resolve LAN IP: {exc}")
+            return
+        if fresh != _config.RCON_HOST:
+            self.log(f"[rcon] LAN IP changed {_config.RCON_HOST} → {fresh} (re-resolving)")
+            _config.RCON_HOST = fresh
+        if self.rcon.host != fresh:
+            self.rcon.host = fresh
+
+    def _preflight_checks(self, map_name: str, mode: str,
+                          is_workshop: bool) -> bool:
+        """Pre-flight: validate prerequisites before we light up cs2.exe.
+
+        Logs every finding so the operator sees *why* a Start was blocked or what
+        looks dodgy.  Returns False on any HARD failure (server would not boot
+        cleanly).  Soft warnings still return True.
+
+        Hard failures:
+        - Port 27015 already held by a non-cs2.exe process (binding will fail).
+        - CS2 not installed (CS2_PATH missing).
+        - Mode's plugin source folders missing from the bundle.
+
+        Soft warnings:
+        - Workshop map but no Steam credentials saved.
+        - DepotDownloader missing (auto-downloads on first workshop dl, but warn).
+        - gameinfo.gi missing MetaMod patch for a plugin mode that needs it.
+        """
+        ok = True
+
+        # ── CS2 install present ──────────────────────────────────────────────
+        if not os.path.isfile(_config.CS2_PATH):
+            self.log(f"[preflight] ✗ CS2 not installed: {_config.CS2_PATH}")
+            self.log("[preflight]   → Config → Server Installation → Install / Reinstall")
+            ok = False
+
+        # ── Port 27015 conflict ──────────────────────────────────────────────
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(0.3)
+                if s.connect_ex(("127.0.0.1", RCON_PORT)) == 0:
+                    # Held by SOMETHING. Check if it's our existing cs2.exe
+                    # (which the pre-launch cleanup will taskkill) or foreign.
+                    tl = subprocess.run(
+                        ["tasklist", "/FI", "IMAGENAME eq cs2.exe", "/NH", "/FO", "CSV"],
+                        capture_output=True, text=True, timeout=5,
+                    )
+                    if "cs2.exe" not in tl.stdout.lower():
+                        self.log(f"[preflight] ✗ Port {RCON_PORT} held by a non-CS2 process")
+                        self.log(f"[preflight]   → close whatever is on {RCON_PORT} (run `netstat -ano | findstr :{RCON_PORT}`)")
+                        ok = False
+        except Exception as exc:
+            self.log(f"[preflight] ⚠  Port check failed: {exc}")
+
+        # ── Plugin source folders present in the bundle ─────────────────────
+        needed = _MODE_PLUGIN_NAMES.get(mode, [])
+        for name in needed:
+            src = os.path.join(_PLUGINS_BASE, name)
+            if not os.path.isdir(src):
+                self.log(f"[preflight] ✗ Plugin '{name}' missing from bundle: {src}")
+                ok = False
+
+        # ── Soft warnings ────────────────────────────────────────────────────
+        if is_workshop and not (self.steam_username and self.steam_password):
+            self.log("[preflight] ⚠  Workshop map but Steam credentials not saved — "
+                     "downloads/refreshes won't work")
+        if not os.path.isfile(_config.DEPOTDL_PATH):
+            self.log(f"[preflight] ⚠  DepotDownloader missing: {_config.DEPOTDL_PATH} "
+                     "(will auto-download on first workshop request)")
+        return ok
+
     def start_server(self, map_name: str, mode: str,
                      is_workshop: bool = False) -> None:
+        # ── Pre-flight checks (port, install, bundle, creds) ─────────────────
+        if not self._preflight_checks(map_name, mode, is_workshop):
+            self.log("[!] Pre-flight checks failed — fix the issues above and try again.")
+            return
+        # Refresh the LAN IP so RCON connects to the right interface (see
+        # _resolve_rcon_host).
+        self._resolve_rcon_host()
         # Deploy plugins synchronously before launching cs2.exe so files are in
         # place when the engine initialises MetaMod / CounterStrikeSharp.
         self.deploy_plugins(mode)
@@ -987,6 +1087,9 @@ class AppCore:
     def probe_existing_server(self) -> None:
         """Detect a CS2 server that was already running when the GUI launched.
 
+        Refreshes RCON_HOST first (see _resolve_rcon_host) so the probe uses
+        the current LAN IP, not whatever config.py resolved at import time.
+
         Workflow:
           1. tasklist — fast OS check; bail immediately if cs2.exe isn't there.
           2. RCON status — confirm it's our server and pull the current map.
@@ -995,6 +1098,8 @@ class AppCore:
         Runs on a daemon thread so it never blocks the UI.
         """
         def _do() -> None:
+            # Refresh the LAN IP before RCON polls (see _resolve_rcon_host).
+            self._resolve_rcon_host()
             # ── 1. OS process check ───────────────────────────────────────────
             try:
                 res = subprocess.run(
@@ -1640,6 +1745,50 @@ class AppCore:
         return [rel for rel in expected
                 if not os.path.exists(os.path.join(csgo, rel))]
 
+    def _validate_bundle_configs(self, deployed: list[str], csgo_dir: str) -> None:
+        """Warn when a plugin ships only a *.example config without an active copy.
+
+        Background: the Zombie weapons whitelist (`configs/zm/weapons.cfg`) was
+        only present as `weapons.cfg.example` in the bundle, so the plugin
+        loaded with NO weapons allowed and gun pickup silently broke. This
+        sweep walks each deployed plugin's bundle folder, finds every
+        ``*.example``/``*.example.<ext>`` file, computes the active path it
+        implies, and warns if the active file exists in neither the bundle
+        nor the live csgo/ tree.
+
+        Warning-only — does not block startup or fail the deploy.
+        """
+        for name in deployed:
+            src_base = os.path.join(_PLUGINS_BASE, name)
+            if not os.path.isdir(src_base):
+                continue
+            for root, _dirs, files in os.walk(src_base):
+                for fname in files:
+                    lower = fname.lower()
+                    # Match ".example" or ".example.<ext>" anywhere in the name.
+                    if ".example" not in lower:
+                        continue
+                    # Compute the active filename: strip the ".example" segment.
+                    parts = fname.split(".")
+                    try:
+                        idx = [p.lower() for p in parts].index("example")
+                    except ValueError:
+                        continue
+                    active_name = ".".join(parts[:idx] + parts[idx + 1:])
+                    if not active_name:
+                        continue
+                    # Check the bundle first, then the live deploy target.
+                    bundle_active = os.path.join(root, active_name)
+                    rel = os.path.relpath(root, src_base)
+                    live_active = os.path.join(csgo_dir, rel, active_name) \
+                        if rel != "." else os.path.join(csgo_dir, active_name)
+                    if os.path.isfile(bundle_active) or os.path.isfile(live_active):
+                        continue
+                    rel_disp = os.path.relpath(
+                        os.path.join(root, active_name), src_base)
+                    self.log(f"[plugins] ⚠  {name}: '{rel_disp}' is missing "
+                             f"(only '{fname}' shipped) — plugin may run with defaults")
+
     def _verify_deployment(self, new_plugins: list[str]) -> bool:
         """Run post-deploy diagnostics; log results; return True if all OK."""
         if not new_plugins:
@@ -2043,6 +2192,12 @@ class AppCore:
         if actually_needs_metamod and self._gameinfo_has_metamod() is False:
             self.log("[plugins] gameinfo.gi missing MetaMod search path — patching…")
             self._patch_gameinfo()
+
+        # ── 3b. Validate bundled plugin configs ───────────────────────────────
+        # Catches the Zombie-weapons.cfg bug (and similar): a *.example file
+        # shipped without an active counterpart, so the plugin silently runs
+        # with no whitelist.  Warning-only — does not block startup.
+        self._validate_bundle_configs(actually_deployed, csgo_dir)
 
         # ── 4. Verify deployment actually produced a working install ─────────
         verified_ok = self._verify_deployment(new_plugins)
@@ -3014,12 +3169,35 @@ class AppCore:
         If auto_restart_on_crash is True the server is automatically restarted
         with the last known map / mode (up to 3 consecutive attempts).
         """
-        _MAX_RESTARTS = 3
-        _restart_count = 0
+        _MAX_RESTARTS         = 3
+        _STABLE_RESET_SECONDS = 300   # 5 min stable → forgive prior crash burst
+        _BACKOFFS             = (5, 15, 45)   # exponential restart delay
+        _restart_count    = 0
+        _last_crash_mono  = 0.0
 
         def _handle_crash(exit_code: int | None = None) -> None:
-            """Shared teardown + optional auto-restart logic."""
-            nonlocal _restart_count
+            """Shared teardown + optional auto-restart logic.
+
+            Restart counter is forgiving: if the previous crash was more than
+            ``_STABLE_RESET_SECONDS`` ago (i.e. the server ran cleanly for
+            5+ minutes after the last auto-restart), the counter resets so a
+            long-running session can absorb a fresh burst of failures without
+            being locked out by ancient history.
+
+            Backoff between attempts is exponential (5 s → 15 s → 45 s) so a
+            persistent boot-loop config bug isn't hammered, and the operator
+            has a chance to intervene before the limit is hit.
+            """
+            nonlocal _restart_count, _last_crash_mono
+            now = time.monotonic()
+            if _restart_count and (now - _last_crash_mono) > _STABLE_RESET_SECONDS:
+                self.log(
+                    f"[monitor] Server was stable for "
+                    f"{int(now - _last_crash_mono)} s — resetting restart counter."
+                )
+                _restart_count = 0
+            _last_crash_mono = now
+
             with self._lifecycle_lock:
                 self.proc          = None
                 self.running       = False
@@ -3040,12 +3218,13 @@ class AppCore:
                 self.on_state_change()
 
             if self.auto_restart_on_crash and _restart_count < _MAX_RESTARTS:
+                delay = _BACKOFFS[min(_restart_count, len(_BACKOFFS) - 1)]
                 _restart_count += 1
                 self.log(
                     f"[!] Auto-restart #{_restart_count}/{_MAX_RESTARTS} "
-                    f"in 5 s…"
+                    f"in {delay} s…"
                 )
-                time.sleep(5)
+                time.sleep(delay)
                 self.log(
                     f"[!] Restarting server — "
                     f"map: {self.current_map}  mode: {self.current_mode}"
@@ -3055,8 +3234,11 @@ class AppCore:
                                   is_workshop=wk)
             elif _restart_count >= _MAX_RESTARTS:
                 self.log(
-                    "[!] Auto-restart limit reached — "
-                    "manual intervention required."
+                    f"[!] Auto-restart limit reached "
+                    f"({_MAX_RESTARTS} consecutive failures). "
+                    "Check the recent server log for the root cause "
+                    "(missing plugin, port conflict, bad map, etc.) "
+                    "before starting again. Counter resets after a manual Start."
                 )
                 _restart_count = 0
 
