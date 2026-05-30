@@ -117,6 +117,19 @@ with no visual cue which would actually launch.
   `playerclass.jsonc` (the latter fixes zombies having no custom model), for both `zm/` and `zr/`.
   *Confirmed cause in-game; takes effect on map reload (CS2Fixes loads these at level init).*
 
+### 🧙 Warcraft — Chat-Command Cooldown (recv-queue-overflow mitigation)
+
+Last night's Warcraft session under a full lobby choked: `recv queue overflow 100 messages
+already queued` for every client, `Long frame (FreezePeriod): 55ms`, `thread starvation`, and
+clients timing out — driven by rapid `!class` / `!skills` / `!shop` / `!commands` spam (each menu
+open does async DB loads + HUD broadcasts → main-thread pressure → can't drain incoming packets).
+
+- Patched **NightFuryPrime/CS2-Warcraft-Plugin v4.1.1** at the single choke point —
+  `AddUniqueCommand` now wraps every chat command with a **1.5 s per-player cooldown** (silent
+  throttle; bots/console bypass). One contained change covers every command the plugin registers.
+- Built against the same toolchain as the upstream (.NET 8 / CSS 1.0.368) — bundled patched
+  `WarcraftPlugin.dll` ships in `plugins/warcraft/`.
+
 ### 🐛 CS2 Update / Disk Bloat — Critical Fix
 
 - **Stopped the updater creating a duplicate ~64 GB install.** The steamcmd update ran with
