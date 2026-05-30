@@ -1817,21 +1817,22 @@ class AppCore:
 
         ts = team_size
         # Identical guns for both sides each round (explicit weapon, no preference).
+        # Classic 1v1 ladder rotation — rifles (AK + M4 for variety), AWP, Scout,
+        # pistol, Deagle, knife. SMG and shotgun are intentionally OMITTED: in a
+        # 1v1 arena they feel out of place vs the skill-based rifle/sniper/pistol
+        # progression players expect.
         rounds = [
             {"TranslationName": "k4.rounds.rifle",   "TeamSize": ts,
              "PrimaryWeapon": "weapon_ak47",  "SecondaryWeapon": "weapon_deagle",
+             "Armor": True, "Helmet": True},
+            {"TranslationName": "k4.rounds.rifle",   "TeamSize": ts,
+             "PrimaryWeapon": "weapon_m4a1",  "SecondaryWeapon": "weapon_deagle",
              "Armor": True, "Helmet": True},
             {"TranslationName": "k4.rounds.awp",     "TeamSize": ts,
              "PrimaryWeapon": "weapon_awp",   "SecondaryWeapon": "weapon_deagle",
              "Armor": True, "Helmet": True},
             {"TranslationName": "k4.rounds.scout",   "TeamSize": ts,
              "PrimaryWeapon": "weapon_ssg08", "SecondaryWeapon": "weapon_deagle",
-             "Armor": True, "Helmet": True},
-            {"TranslationName": "k4.rounds.smg",     "TeamSize": ts,
-             "PrimaryWeapon": "weapon_mp9",   "SecondaryWeapon": "weapon_deagle",
-             "Armor": True, "Helmet": True},
-            {"TranslationName": "k4.rounds.shotgun", "TeamSize": ts,
-             "PrimaryWeapon": "weapon_nova",  "SecondaryWeapon": "weapon_deagle",
              "Armor": True, "Helmet": True},
             {"TranslationName": "k4.rounds.pistol",  "TeamSize": ts,
              "SecondaryWeapon": "weapon_usp_silencer",

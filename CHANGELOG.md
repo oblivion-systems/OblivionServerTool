@@ -48,9 +48,12 @@ configured a team size (they ran the plugin's default, i.e. mostly 1v1).
   `bot_quota 2` — a second, unpaired bot that stuck onto a side as a **2v1**. Forcing `normal` at
   launch prevents that.
 - **Identical guns per duel** — both arena modes (1v1 + 2v2) now generate an explicit-weapon
-  round rotation so **both players get the exact same gun** each round (AK / AWP / Scout / SMG /
-  Nova / pistol / Deagle / knife). The plugin default uses per-player weapon *preferences*, which
-  could hand opponents different guns within a category (AK vs M4); preferences are now disabled.
+  round rotation so **both players get the exact same gun** each round. The plugin default uses
+  per-player weapon *preferences*, which could hand opponents different guns within a category
+  (AK vs M4); preferences are now disabled.
+- **Rotation tightened to the classic 1v1 ladder set** — AK / M4 / AWP / Scout / Pistol (USP) /
+  Deagle / Knife. The earlier SMG (MP9) and Shotgun (Nova) rounds were dropped — they felt out of
+  place in a skill-based 1v1 ladder.
 - ⚠️ *Needs in-game verification:* the generated 2v2 arena config and the MatchZy team-size
   matches couldn't be tested without a live server.
 
