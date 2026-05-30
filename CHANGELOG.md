@@ -6,6 +6,133 @@
 *Post-v0.9.1 fixes (committed + pushed, not yet tagged). Bump `APP_VERSION` → `0.9.2`
 and tag `v0.9.2` when ready to cut a release.*
 
+### 🛠️ Workshop Maps Root-Cause Fix + 20-Bug Audit Sweep
+
+The workshop-map-loads-as-dust2 saga ended with an embarrassingly small root cause:
+`from cs2servergui.config import RCON_HOST` was binding the LAN IP **at module import time**
+inside `core.py`. `_resolve_rcon_host()` was diligently updating `_config.RCON_HOST` on every
+server start, but the import-bound `RCON_HOST` name in `core.py` never updated — so
+`_poll_rcon_ready`'s probe socket kept dialling the stale IP forever. A boot-time network
+blip or any later DHCP/VPN/adapter change would silently break workshop maps for the rest
+of the session. Now `_config.RCON_HOST` is read at call time everywhere; the netstat-based
+auto-recovery from earlier in the day becomes a pure safety net instead of the primary path.
+
+A parallel four-agent app-wide bug hunt (core.py, web.py + frontend, main.py + config.py +
+rcon.py, Warcraft plugin) surfaced **20 actionable findings** — 7 critical, 8 serious,
+5 minor — all landed in this release.
+
+**Critical (7)**
+- `core.py` import-bound `RCON_HOST` (above) — the actual root cause of the workshop bug.
+- `save_config()` was non-atomic: two concurrent saves (Flask is threaded) could interleave,
+  and a power-loss mid-write left a truncated file that `_load_config` silently treated as
+  `{}` on the next launch — wiping every persisted setting + regenerating the RCON password.
+  Now lock-guarded, tmp-write + `os.replace` + `fsync`.
+- `os._exit(0)` at window close bypassed every pending save. Settings changed seconds before
+  shutdown were lost. Now `core.save_config()` runs synchronously before the exit.
+- Multiple lifecycle-state mutations outside `_lifecycle_lock` (`boot_state`/`running`/
+  `current_map` in `probe_existing_server`, `_poll_rcon_ready` 90s timeout, `change_map`,
+  `_post_launch_sanity_check`) could race a concurrent `stop_server` and leave inconsistent
+  state. `_poll_rcon_ready` also read `self.proc` twice — `AttributeError` if cleared between
+  reads. All wrapped now; `proc` snapshotted once.
+- Stop pressed during the 5/15/45 s crash-restart backoff was silently ignored (the sleep
+  ran to completion and respawned anyway). Replaced with `Event.wait()` so Stop cancels.
+- `/api/workshop/download` had no concurrency check — two clicks spawned two `steamcmd`
+  processes, orphaning the first and colliding on the staging dir. Now returns 409 when busy.
+- `/api/server/broadcast` blocked `\r\n` but not `;` — CS2's console treats `;` as a command
+  separator, so a `hello;sv_password pwn;quit` broadcast ran arbitrary RCON. Now stripped
+  and capped at 200 chars.
+
+**Serious (8)**
+- `_post_launch_sanity_check` used a stale `proc` snapshot — could force-fire
+  `host_workshop_map` on a server that was just stopped. Re-checks `running` after each sleep.
+- `cancel_download` read `_active_dl_proc` without the download lock — a click between
+  "worker finished" and "next started" could kill the new download. Snapshot+clear under lock.
+- `rcon.py:execute_retry` only retried `ConnectionRefusedError` + `TimeoutError` — a flapping
+  network produces `ConnectionResetError` / `OSError(WinError 10054)`, which were re-raised
+  immediately. Widened to `(TimeoutError, OSError)` plus `ConnectionError` minus "auth failed".
+- `rcon.py:execute` never handled Source RCON's multi-packet response trick (any body >4 KB
+  splits across multiple packets, terminated by an empty-body sentinel). Long `status` /
+  `cvarlist` output was silently truncated at the first 4 KB. Now sends a sentinel after
+  the real command and concatenates every fragment until the sentinel id comes back.
+- `config.py:_lan_ip()` did a fresh UDP `socket()` + `connect("8.8.8.8:80")` on every
+  `/api/state` poll (every 2 s × connected clients) — wasted syscalls + a hard dependency
+  on a route to 8.8.8.8 existing for the LAN IP to resolve, which serialised every state poll
+  behind a wedged VPN/Hyper-V adapter. Now cached 30 s + 0.5 s socket timeout. `AppCore.
+  _resolve_rcon_host` calls with `force_refresh=True` so server starts still see live values.
+- `main.py` had a TOCTOU between `_pick_free_port()` and `flask_app.run()` — Flask binds
+  inside its background thread, so a foreign process grabbing the port in those ~ms surfaced
+  as a misleading "did not start in 10s" timeout. Now uses `werkzeug.serving.make_server`
+  to bind synchronously in the main thread and retries up to 3 times on race-loss.
+- `_fix_metamod_dll_nesting` used `shutil.copy2 + rmtree` — a failed rmtree left the DLL
+  at BOTH the nested and parent paths, and MetaMod would load the wrong one. Now uses
+  `shutil.move` (pre-removing any existing dst on Windows).
+- `/api/log/save` used `%Y%m%d_%H%M%S` filenames — two saves in the same second silently
+  truncated each other (opened with `"w"`); no `@require_local` so guests could spam saves
+  to fill the host's disk; no empty-buffer guard. All three fixed: 6-hex random suffix,
+  local-only, 400 on empty buffer.
+
+**Minor (5)**
+- `_STEAMID_RE` had no length anchor — a 1 MB string passed validation. Capped to 64 chars
+  plus a dedicated `_NAME_MAX_LEN` cap on `players_kick` `name`.
+- Per-IP `_attempts` auth-failure dict had no GC for entries below `_MAX_ATTEMPTS` — slow
+  distributed brute force could grow the dict forever. Added `_ATTEMPT_TTL_SECS` prune.
+- `/auth/auto` startup-token compare-and-clear was non-atomic — two simultaneous loopback
+  hits could both pass `compare_digest` and mint two local sessions. Now lock-guarded.
+- `/api/setup/status` was guest-accessible — leaked `pin_is_default` to remote guests.
+  Now `@require_local` (the first-run wizard only ever shows in the local pywebview window).
+- `_last_crash_mono` wasn't reset when the auto-restart cap was hit — the next crash would
+  hit the stable-reset branch with a stale timestamp and log a misleading "stable for X s".
+
+### 🧙 Warcraft — Menu & Chat-Broadcast Dispatchers v2
+
+After the v1 per-player chat-command cooldown shipped, a live retest (2026-05-30, Casual +
+Warcraft, 13 humans+bots on `de_cache`) showed the bug still happened: a single `!shop`
+during a combat-heavy frame produced `recv queue overflow 100` on every connected client
+plus `SteamNetworkingSockets lock held for 263 ms ... thread starvation`. The cooldown
+stopped rapid spam from the same player but didn't address two collisions in the same tick.
+
+- **Menu-open dispatcher**: every `!class` / `!skills` / `!shop` (and the programmatic
+  `SkillsMenu.Show` at round-start after a level-up and after `!reset`) now enqueues through
+  `WarcraftPlugin.EnqueueMenuOpen`. A 0.1 s repeat timer drains **one** queued open per tick,
+  so ten concurrent opens fan out across ~1 second of frames instead of stacking onto one.
+- **Chat-broadcast dispatcher**: `AbilityBenefitAnnouncer.SendRoundSummary` (called for every
+  human at round start, ~5 `PrintToChat` per player) routes each broadcast through
+  `EnqueueChatBroadcast`. A 0.05 s repeat timer drains 5 per tick — round-end bursts of 50+
+  `PrintToChat` smooth across half a second.
+- **Audit follow-ups** (from a parallel agent review of the patches):
+  - `Unload` now kills the new timers and clears the queues. Hot-reload could otherwise leave
+    the old timers firing into a disposed instance with the new instance's queues never drained.
+  - `AbilityBenefitAnnouncer.SendRoundSummary` hoists `WarcraftPlugin.Instance` to a local
+    at enqueue time — a hot-reload between enqueue and drain could otherwise route the burst
+    into a different (or null) plugin instance's queue.
+  - The three deferred `SkillsMenu.Show` sites (recursive reopen, round-start auto-open,
+    `!reset` follow-up) re-resolve the WarcraftPlayer via the slot's controller at drain
+    time. If a player disconnected and a new player took the same slot in the 100 ms drain
+    window, the original profile would otherwise pop for the new occupant.
+  - Both timers re-armed in `OnMapStartHandler` (`STOP_ON_MAPCHANGE` kills them at map end)
+    and queues cleared in `OnMapEndHandler` so they can't accumulate stale lambdas.
+- Built against the upstream toolchain (.NET 8 / CSS 1.0.368) — patched `WarcraftPlugin.dll`
+  bundled in `cs2servergui/plugins/warcraft/`.
+
+### 🛟 Log Drawer — Copy + Save Buttons
+
+The in-app log drawer had no way to extract the buffer — operators were screen-grabbing log
+panels to share diagnostic output. Added two buttons to the drawer bar:
+- **Copy** uses `navigator.clipboard.writeText` with a hidden-textarea + `execCommand('copy')`
+  fallback for environments where WebView2 silently rejects clipboard writes.
+- **Save** posts to a new `/api/log/save` endpoint that writes a timestamped
+  `oblivion_log_YYYYMMDD_HHMMSS_<6 hex>.txt` to the config directory (next to
+  `oblivion_config.json`) and surfaces the path via toast + log line.
+
+### 🔌 RCON Host — Stop Pinning to LAN IP at Import
+
+Belt-and-braces follow-up to the workshop-maps fix. `_resolve_rcon_host()` re-resolves
+`_config._lan_ip(force_refresh=True)` and updates `self.rcon.host` on every server start /
+attach. Plus the post-launch sanity check (added earlier) keeps its netstat-based recovery
+that switches `self.rcon.host` to whichever bind address actually answers — handles CS2
+binding to an unexpected interface (VirtualBox / Hyper-V / Docker / VPN tap adapter that
+sorts ahead of the primary LAN NIC in Windows' route table).
+
 ### 🔐 Two-Tier Remote Access — Guest vs Admin
 
 The remote panel now has an optional **guest role** so you can hand friends limited control
@@ -117,18 +244,30 @@ with no visual cue which would actually launch.
   `playerclass.jsonc` (the latter fixes zombies having no custom model), for both `zm/` and `zr/`.
   *Confirmed cause in-game; takes effect on map reload (CS2Fixes loads these at level init).*
 
-### 🧙 Warcraft — Chat-Command Cooldown (recv-queue-overflow mitigation)
+### 🧙 Warcraft — Menu & Chat-Broadcast Dispatchers (recv-queue-overflow root-cause fix)
 
-Last night's Warcraft session under a full lobby choked: `recv queue overflow 100 messages
+Friends-night Warcraft session under a full lobby choked: `recv queue overflow 100 messages
 already queued` for every client, `Long frame (FreezePeriod): 55ms`, `thread starvation`, and
-clients timing out — driven by rapid `!class` / `!skills` / `!shop` / `!commands` spam (each menu
-open does async DB loads + HUD broadcasts → main-thread pressure → can't drain incoming packets).
+clients timing out — driven by `!class` / `!skills` / `!shop` / `!commands` (each menu open does
+DB loads + HUD/WORLD_TEXT broadcasts → main-thread pressure → can't drain incoming packets).
+Live retest (2026-05-30, `de_cache` with 13 humans+bots) showed the per-player cooldown helped
+but didn't eliminate the bug: a single `!shop` during a combat-heavy frame still produced
+`recv queue overflow` on every connected client.
 
-- Patched **NightFuryPrime/CS2-Warcraft-Plugin v4.1.1** at the single choke point —
-  `AddUniqueCommand` now wraps every chat command with a **1.5 s per-player cooldown** (silent
-  throttle; bots/console bypass). One contained change covers every command the plugin registers.
+- **Per-player chat-command cooldown** (already in v4.1.1+patch1): `AddUniqueCommand` wraps every
+  chat command with a 1.5 s per-(player, command) cooldown; bots/console bypass. Stops rapid
+  spam from the same player but doesn't prevent collisions across players.
+- **Menu-open dispatcher (NEW)**: every `!class` / `!skills` / `!shop` (plus the programmatic
+  `SkillsMenu.Show` auto-opens at round-start after a level-up and after `!reset`) enqueues
+  through `WarcraftPlugin.EnqueueMenuOpen` instead of running inline. A 0.1 s repeat timer
+  drains one queued open per tick, so ten concurrent opens fan out across roughly one second
+  of frames instead of all hitting the engine on one tick.
+- **Chat-broadcast dispatcher (NEW)**: `AbilityBenefitAnnouncer.SendRoundSummary` (called for
+  every human at round start, ~5 PrintToChat per player) now routes each broadcast through
+  `WarcraftPlugin.EnqueueChatBroadcast`. A 0.05 s repeat timer drains 5 broadcasts per tick
+  (100/sec capacity), smoothing the round-end burst across half a second of frames.
 - Built against the same toolchain as the upstream (.NET 8 / CSS 1.0.368) — bundled patched
-  `WarcraftPlugin.dll` ships in `plugins/warcraft/`.
+  `WarcraftPlugin.dll` ships in `cs2servergui/plugins/warcraft/`.
 
 ### 🐛 CS2 Update / Disk Bloat — Critical Fix
 

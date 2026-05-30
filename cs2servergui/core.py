@@ -29,7 +29,13 @@ from .config import (
     CS2_APP_ID,
     DEPOTDL_RELEASE_URL,
     OFFICIAL_MAPS,
-    RCON_HOST, RCON_PORT, RCON_PASSWORD,
+    # RCON_HOST is INTENTIONALLY NOT imported by name — _resolve_rcon_host
+    # rebinds _config.RCON_HOST on every server start, but a `from .config
+    # import RCON_HOST` would capture the import-time value forever in this
+    # module's namespace, leaving _poll_rcon_ready (and any other reader) on
+    # the stale IP after a DHCP change or VPN/adapter shuffle.  Always read
+    # `_config.RCON_HOST` at call time.
+    RCON_PORT, RCON_PASSWORD,
     MODE_SETTINGS, _DEFAULT_MODE,
     _CONFIG_FILE,
     APP_VERSION, APP_API_URL, APP_RELEASES_URL,
@@ -409,7 +415,7 @@ class AppCore:
         # attach — config.py's RCON_HOST is computed once at import time and goes
         # stale if the LAN IP changes (network blip during boot → 127.0.0.1 fallback
         # → all RCON fails for the whole session even after the network recovers).
-        self.rcon = RCONClient(RCON_HOST, RCON_PORT, "")
+        self.rcon = RCONClient(_config.RCON_HOST, RCON_PORT, "")
 
         self._log_buf  = collections.deque(maxlen=300)
         self._log_lock = threading.Lock()
@@ -426,6 +432,17 @@ class AppCore:
         # "is it still running?" check and its "mark ready" write. Held only for
         # the brief state mutations, never across blocking I/O.
         self._lifecycle_lock = threading.RLock()
+
+        # Serialises save_config() against concurrent callers (Flask is
+        # threaded; the auto-save thread + a user Save click can race) and is
+        # held across the tmp-write + os.replace so the swap is atomic.
+        self._config_save_lock = threading.Lock()
+
+        # Signal raised by stop_server / Unload paths to break a sleep inside
+        # the crash auto-restart backoff (5s → 15s → 45s) instead of forcing
+        # the operator to wait for the timer to tick down.  Set during stop,
+        # cleared at the top of every fresh start_server.
+        self._stop_event = threading.Event()
 
         self.update_available:      bool = False
         self.app_update_available:  bool = False
@@ -670,8 +687,22 @@ class AppCore:
                 "cmdfilter_auto":        self._cmdfilter_auto,
                 "cmdfilter_override":    self._cmdfilter_override,
             }
-            with open(_CONFIG_FILE, "w", encoding="utf-8") as f:
-                json.dump(cfg, f, indent=2)
+            # Atomic write: serialize via _config_save_lock so concurrent
+            # save_config calls don't interleave (Flask is threaded), and use
+            # tmp+os.replace so a power-loss / crash mid-write can't leave a
+            # truncated file that _load_config would then silently treat as
+            # `{}` — wiping every persisted setting and regenerating the RCON
+            # password on the next launch.
+            with self._config_save_lock:
+                tmp = _CONFIG_FILE + ".tmp"
+                with open(tmp, "w", encoding="utf-8") as f:
+                    json.dump(cfg, f, indent=2)
+                    f.flush()
+                    try:
+                        os.fsync(f.fileno())   # durability against power loss
+                    except OSError:
+                        pass                   # not all FS support fsync
+                os.replace(tmp, _CONFIG_FILE)
             self.log(f"Config saved  ({_CONFIG_FILE})")
         except Exception as exc:
             self.log(f"Config save failed: {exc}")
@@ -702,18 +733,25 @@ class AppCore:
 
         self.log("[pre-launch] Detected MetaMod bin/win64/win64/ nesting — fixing…")
         moved = 0
+        # shutil.move (not copy2+rmtree) so a failed remove can't leave the
+        # DLL at BOTH paths, which would let MetaMod load the wrong one and
+        # silently break plugin discovery on the next launch.
         for fname in dlls:
             src = os.path.join(nested, fname)
             dst = os.path.join(mm_bin, fname)
             try:
-                shutil.copy2(src, dst)
+                # Pre-remove any existing copy at dst — shutil.move on Windows
+                # raises if the destination exists and refuses to overwrite.
+                if os.path.isfile(dst):
+                    os.remove(dst)
+                shutil.move(src, dst)
                 moved += 1
             except Exception as exc:
                 self.log(f"[pre-launch]   ✗ Could not move {fname}: {exc}")
         try:
             shutil.rmtree(nested)
         except Exception as exc:
-            self.log(f"[pre-launch]   ✗ Could not remove nested dir: {exc}")
+            self.log(f"[pre-launch]   ✗ Could not remove nested dir (DLLs already moved): {exc}")
         self.log(f"[pre-launch] ✓ Moved {moved} DLL(s) to correct path — MetaMod will now load")
 
     def _ensure_dota_gameinfo(self) -> None:
@@ -760,18 +798,141 @@ class AppCore:
             self.log(f"[pre-launch] ✗ Could not create dota/gameinfo.gi: {exc}")
             self.log("[pre-launch]   Create it manually — see README or docs.")
 
-    def _resolve_rcon_host(self) -> None:
-        """Re-resolve the LAN IP and update RCON_HOST + the live RCON client.
+    def _list_dedicated_pids(self) -> list[int]:
+        """Return PIDs of cs2.exe processes whose command line contains `-dedicated`.
 
-        Belt-and-braces against the stale-host bug: config.py's RCON_HOST is
-        computed once at module import time.  If the app starts during a network
-        blip _lan_ip() falls back to 127.0.0.1 and stays there for the whole
-        session — every RCON command then fails with ConnectionRefused even
-        after the network recovers.  Re-resolving on every server start /
-        attach makes the host current at the moment we actually need it.
+        Used by the pre-launch cleanup to kill stale dedicated servers that
+        survived a previous crash and would otherwise hold port 27015.  Uses
+        PowerShell's Get-CimInstance first (works on every Windows 10/11 build
+        including 24H2 where wmic was removed), falls back to wmic for older
+        systems.  Skips the user's CS2 game client (no `-dedicated` arg).
+        """
+        pids: list[int] = []
+
+        # Strategy 1 — PowerShell Get-CimInstance.  One-line script: filter
+        # processes named cs2.exe whose CommandLine mentions -dedicated, print PIDs.
+        ps_cmd = (
+            "Get-CimInstance Win32_Process -Filter \"Name='cs2.exe'\" | "
+            "Where-Object { $_.CommandLine -like '*-dedicated*' } | "
+            "Select-Object -ExpandProperty ProcessId"
+        )
+        ps_failed = False
+        try:
+            ps = subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
+                capture_output=True, text=True, timeout=8,
+                # CREATE_NO_WINDOW so the brief PS spawn doesn't flash a console.
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            if ps.returncode == 0:
+                for line in ps.stdout.splitlines():
+                    s = line.strip()
+                    if s.isdigit():
+                        pids.append(int(s))
+                return pids   # success path — even an empty list is valid
+            ps_failed = True
+        except Exception as exc:
+            ps_failed = True
+            self.log(f"[!] PowerShell process enumeration failed: {exc} — trying wmic")
+
+        # Strategy 2 — wmic fallback (deprecated; missing on Win 11 24H2).
+        wmic_failed = False
+        try:
+            res = subprocess.run(
+                ["wmic", "process", "where", "name='cs2.exe'",
+                 "get", "ProcessId,CommandLine", "/format:csv"],
+                capture_output=True, text=True, timeout=5,
+            )
+            for line in res.stdout.splitlines():
+                if "-dedicated" in line.lower():
+                    parts = line.strip().split(",")
+                    pid = parts[-1].strip()
+                    if pid.isdigit():
+                        pids.append(int(pid))
+        except FileNotFoundError:
+            wmic_failed = True
+            self.log("[!] Neither PowerShell nor wmic available — cannot identify "
+                     "stale dedicated cs2.exe.  Manually close any running "
+                     "dedicated server before starting.")
+        except Exception as exc:
+            wmic_failed = True
+            self.log(f"[!] wmic process enumeration failed: {exc}")
+        # If BOTH strategies failed and we found nothing, the operator gets
+        # zero context for why a stale server can't be killed.  Log it loudly.
+        if ps_failed and wmic_failed and not pids:
+            self.log("[!] Both PowerShell and wmic process enumeration failed — "
+                     "stale `cs2.exe -dedicated` (if any) WILL NOT be killed at pre-launch.")
+        return pids
+
+    def _holder_of_port(self, port: int) -> tuple[int, str] | None:
+        """Return (pid, image_name_lower) of the process LISTENING on `port`,
+        or None if nothing is listening.
+
+        Backwards-compatible thin wrapper around _listeners_on_port that picks
+        the first listener.  For diagnostic logging that wants every binding,
+        use _listeners_on_port directly.
+        """
+        listeners = self._listeners_on_port(port)
+        if not listeners:
+            return None
+        _, pid, name = listeners[0]
+        return pid, name
+
+    def _listeners_on_port(self, port: int) -> list[tuple[str, int, str]]:
+        """Return every (bound_address, pid, image_name_lower) listening on `port`.
+
+        Critical for diagnosing the workshop-fails-because-RCON-times-out bug:
+        if cs2.exe binds RCON to a specific interface (Hyper-V switch IP, VPN
+        tap, etc.) instead of 0.0.0.0, both 127.0.0.1 and the primary LAN IP
+        return ECONNREFUSED while netstat shows the port is "held".  Logging
+        every listener lets the operator see the actual bind address and probe
+        that directly.
+        """
+        listeners: list[tuple[str, int, str]] = []
+        try:
+            net = subprocess.run(
+                ["netstat", "-ano"], capture_output=True, text=True, timeout=5,
+            )
+            for line in net.stdout.splitlines():
+                cols = line.split()
+                # Format: Proto  LocalAddress  ForeignAddress  State  PID
+                if len(cols) < 5 or cols[3] != "LISTENING":
+                    continue
+                addr = cols[1]
+                # Match strictly on ":<port>" at the END of the LocalAddress so
+                # we don't accidentally match e.g. ":270150" or ":270159".
+                if not addr.endswith(f":{port}"):
+                    continue
+                pid_s = cols[4]
+                if not (pid_s.isdigit() and int(pid_s) > 0):
+                    continue
+                tl = subprocess.run(
+                    ["tasklist", "/FI", f"PID eq {pid_s}", "/FO", "CSV", "/NH"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                first = tl.stdout.splitlines()[0] if tl.stdout.strip() else ""
+                name = first.split('","', 1)[0].strip('"').lower() \
+                    if first.startswith('"') else "?"
+                listeners.append((addr, int(pid_s), name))
+        except Exception as exc:
+            self.log(f"[!] Port listener lookup failed: {exc}")
+        return listeners
+
+    def _resolve_rcon_host(self) -> None:
+        """Re-resolve the primary LAN IP and update self.rcon.host accordingly.
+
+        CS2 binds its RCON listener to the LAN IP (not loopback), so we need
+        to track which IP the OS would route through.  Refreshing on every
+        server start / attach handles DHCP changes, adapter add/remove, and
+        the case where the app started before the network was fully up
+        (`_lan_ip()` would have returned 127.0.0.1 then).  If the LAN IP turns
+        out to be unreachable too, _post_launch_sanity_check will discover the
+        actual bind address via netstat and override self.rcon.host.
         """
         try:
-            fresh = _config._lan_ip()
+            # force_refresh bypasses the 30s state-poll cache — we genuinely
+            # need the live value at server start time.
+            fresh = _config._lan_ip(force_refresh=True)
         except Exception as exc:
             self.log(f"[rcon] could not re-resolve LAN IP: {exc}")
             return
@@ -779,6 +940,7 @@ class AppCore:
             self.log(f"[rcon] LAN IP changed {_config.RCON_HOST} → {fresh} (re-resolving)")
             _config.RCON_HOST = fresh
         if self.rcon.host != fresh:
+            self.log(f"[rcon] updating self.rcon.host {self.rcon.host} → {fresh}")
             self.rcon.host = fresh
 
     def _preflight_checks(self, map_name: str, mode: str,
@@ -844,6 +1006,11 @@ class AppCore:
 
     def start_server(self, map_name: str, mode: str,
                      is_workshop: bool = False) -> None:
+        # Clear the stop signal — a previous stop_server may have set it to
+        # break a crash-restart backoff sleep.  Without resetting here, the
+        # NEXT crash backoff would short-circuit immediately and the operator
+        # would lose the cooldown that's supposed to throttle a boot loop.
+        self._stop_event.clear()
         # ── Pre-flight checks (port, install, bundle, creds) ─────────────────
         if not self._preflight_checks(map_name, mode, is_workshop):
             self.log("[!] Pre-flight checks failed — fix the issues above and try again.")
@@ -886,29 +1053,32 @@ class AppCore:
         # exits within seconds before RCON ever opens.  Kill it proactively.
         # IMPORTANT: only kill processes launched with -dedicated so we never
         # accidentally close the user's CS2 game client (also named cs2.exe).
-        try:
-            res = subprocess.run(
-                ["wmic", "process", "where", "name='cs2.exe'",
-                 "get", "ProcessId,CommandLine", "/format:csv"],
-                capture_output=True, text=True, timeout=5,
-            )
+        stale_pids = self._list_dedicated_pids()
+        if stale_pids:
+            self.log(f"[!] Found {len(stale_pids)} lingering dedicated cs2.exe "
+                     f"(PIDs: {', '.join(map(str, stale_pids))}) — killing…")
             killed = 0
-            for line in res.stdout.splitlines():
-                if "-dedicated" in line.lower():
-                    # Extract PID — last comma-separated field on CSV rows
-                    parts = line.strip().split(",")
-                    pid = parts[-1].strip()
-                    if pid.isdigit():
-                        subprocess.run(
-                            ["taskkill", "/F", "/PID", pid],
-                            capture_output=True, timeout=5,
-                        )
-                        killed += 1
+            for pid in stale_pids:
+                try:
+                    subprocess.run(["taskkill", "/F", "/PID", str(pid)],
+                                   capture_output=True, timeout=5)
+                    killed += 1
+                except Exception as exc:
+                    self.log(f"[!]   Could not kill PID {pid}: {exc}")
             if killed:
                 time.sleep(1.5)   # give the OS a moment to release port 27015
                 self.log(f"[!] Killed {killed} lingering dedicated cs2.exe — proceeding with fresh start")
-        except Exception as exc:
-            self.log(f"[!] Pre-launch process check failed: {exc}")
+
+        # ── Final port check: who (if anyone) holds 27015 right now? ─────────
+        # If the port is held by a non-cs2 process, the bind below will fail
+        # silently and RCON never comes up.  Surface the holder in the log so
+        # the operator can act, rather than spending 90s on "RCON not reachable".
+        holder = self._holder_of_port(RCON_PORT)
+        if holder:
+            self.log(f"[!] Port {RCON_PORT} still held after cleanup: "
+                     f"PID {holder[0]} ({holder[1]}). "
+                     f"Server bind will fail. Close that process and retry.")
+
 
         cmd  = [
             _config.CS2_PATH, "-dedicated",
@@ -971,10 +1141,121 @@ class AppCore:
             self.log("  Server password set")
         if self.gslt_token:
             self.log("  GSLT token set (+sv_setsteamaccount)")
-        self.log(f"Polling RCON at {RCON_HOST}:{RCON_PORT} — waiting for server…")
+        self.log(f"Polling RCON at {_config.RCON_HOST}:{RCON_PORT} — waiting for server…")
         if self.on_state_change:
             self.on_state_change()
         threading.Thread(target=self._poll_rcon_ready, daemon=True).start()
+        threading.Thread(target=self._post_launch_sanity_check, daemon=True).start()
+
+    def _post_launch_sanity_check(self) -> None:
+        """Run shortly after Popen — catch immediate cs2.exe death and surface
+        WHO is holding 27015 if the port doesn't open within 8 s.
+
+        The default RCON probe waits 90 s before logging anything actionable.
+        That's far too late when the real failure is "another process holds
+        27015" or "cs2.exe exited code 1 in the first second".  This runs on
+        its own thread so it never blocks anything else.
+        """
+        proc = self.proc
+        if proc is None:
+            return
+        # 1. Did cs2.exe survive the first 3 s? Process-death within seconds
+        #    almost always means a missing file, bad arg, or port-bind failure
+        #    — not a slow boot.
+        time.sleep(3)
+        # Re-check running — a user Stop in the first 3 s makes the rest of
+        # this function useless (would force-fire host_workshop_map on a
+        # server that's about to die).
+        if not self.running:
+            return
+        if proc.poll() is not None:
+            self.log(f"[!] cs2.exe exited within 3 s (code {proc.returncode}). "
+                     "Open csgo\\console.log for the engine's reason.")
+            return
+        # 2. Watch for port 27015 to come up over the next ~8 s.  If it never
+        #    does, identify the holder so the operator sees the conflict.
+        for _ in range(8):
+            time.sleep(1)
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.settimeout(0.5)
+                    if s.connect_ex(("127.0.0.1", RCON_PORT)) == 0:
+                        return   # listener up — _poll_rcon_ready will take it from here
+            except Exception:
+                pass
+        # Port still not listening on loopback after ~11 s total.  Diagnose:
+        # enumerate every listener for the port and probe each bind address.
+        # If we find one that's reachable, switch self.rcon.host to it so RCON
+        # commands (and the workshop trigger) start working without a restart.
+        listeners = self._listeners_on_port(RCON_PORT)
+        if not listeners:
+            self.log(f"[!] Port {RCON_PORT} not opening — nothing listening yet. "
+                     "cs2.exe may still be initialising, or it failed to bind silently. "
+                     "Open csgo\\console.log for clues.")
+            return
+        # Log every listener so the operator can see exactly what's bound where.
+        for addr, pid, name in listeners:
+            self.log(f"[!] Port {RCON_PORT}: {addr} held by {name} (PID {pid})")
+        # Try each distinct host portion (the bit before the final ':<port>')
+        # for a reachable TCP listener.  IPv6 forms like [::]:27015 → "::"
+        # and [::1]:27015 → "::1"; IPv4 0.0.0.0:27015 → "0.0.0.0".
+        tried: set[str] = set()
+        for addr, _pid, _name in listeners:
+            host = addr.rsplit(":", 1)[0].strip("[]")
+            # 0.0.0.0 and [::] are wildcards — map to loopback for probing.
+            probe_host = "127.0.0.1" if host in ("0.0.0.0", "::") else host
+            if probe_host in tried:
+                continue
+            tried.add(probe_host)
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.settimeout(1.0)
+                    if s.connect_ex((probe_host, RCON_PORT)) == 0:
+                        self.log(f"[!] RCON reachable on {probe_host}:{RCON_PORT} — "
+                                 f"switching self.rcon.host to it for this session.")
+                        self.rcon.host = probe_host
+                        # Promote to "ready" — the regular RCON poll is still
+                        # banging on the wrong host and would take 90 s to fall
+                        # through to its timeout branch.  Atomic flip mirrors
+                        # the same pattern _poll_rcon_ready uses to avoid
+                        # racing a concurrent stop_server().
+                        with self._lifecycle_lock:
+                            if self.running and self.boot_state == "booting":
+                                self.boot_state    = "ready"
+                                self._uptime_start = time.time()
+                                became_ready = True
+                            else:
+                                became_ready = False
+                        if became_ready:
+                            self.log("Server ready — RCON is responding (via recovery)")
+                            if self.on_state_change:
+                                self.on_state_change()
+                        # Force-fire workshop trigger now if still pending.
+                        # Re-check running once more — if a Stop fired during
+                        # the lifecycle-lock window above, don't issue the
+                        # host_workshop_map to a server that's terminating.
+                        if not self.running:
+                            return
+                        wk = self._pending_workshop_map
+                        if wk:
+                            self._pending_workshop_map = None
+                            try:
+                                self.rcon.execute_retry(f"host_workshop_map {wk}")
+                                # Lock around current_map mutation — _poll_rcon_ready
+                                # may also be writing this field after its own RCON
+                                # success.
+                                with self._lifecycle_lock:
+                                    self.current_map = wk
+                                self.log(f"[workshop] Workshop map {wk} loaded via "
+                                         f"recovered host {probe_host} ✓")
+                            except Exception as exc:
+                                self.log(f"[workshop] Recovered-host load failed: {exc}")
+                        return
+            except Exception as exc:
+                self.log(f"[!]   probe {probe_host}:{RCON_PORT} → {exc}")
+        self.log(f"[!] No reachable RCON address found among the {len(listeners)} "
+                 "listener(s).  Likely Windows Firewall blocking loopback/LAN "
+                 "to the bind interface, or RCON listener silently failed.")
 
     def stop_server(self) -> None:
         # Flip lifecycle state to "stopped" synchronously, then do the actual
@@ -999,6 +1280,10 @@ class AppCore:
             self.boot_state    = "offline"
             self.player_count  = 0
             self._uptime_start = None
+        # Wake any crash-restart backoff sleeping on `_stop_event` so a
+        # user-initiated Stop during a 5/15/45s delay cancels the restart
+        # instead of being silently overridden by the timer firing later.
+        self._stop_event.set()
         if self.on_state_change:
             self.on_state_change()
 
@@ -1121,8 +1406,15 @@ class AppCore:
                 return
 
             # ── 3. Mark as running and parse current map + mode ──────────────
-            self.running    = True
-            self.boot_state = "ready"
+            # All lifecycle mutations under the lock so a concurrent stop_server
+            # (which sets running=False / boot_state=offline) can't interleave
+            # between these two writes and leave us in {running=True,
+            # boot_state=offline}.  Also stamp _uptime_start so the UI shows a
+            # non-zero uptime for the reattached server.
+            with self._lifecycle_lock:
+                self.running       = True
+                self.boot_state    = "ready"
+                self._uptime_start = time.time()
 
             map_m = re.search(r"^map\s*:\s*(\S+)", out,
                               re.MULTILINE | re.IGNORECASE)
@@ -1152,19 +1444,44 @@ class AppCore:
         last_log = 0.0
         while self.running and self.boot_state == "booting":
             elapsed = time.time() - start
-            if elapsed >= 90 and self.proc and self.proc.poll() is None:
-                self.boot_state = "ready"
+            # Snapshot proc once — a concurrent stop_server clears self.proc to
+            # None between the two reads below, which would AttributeError on
+            # the .poll() call.  Snapshot keeps the timeout branch consistent.
+            proc_snap = self.proc
+            if elapsed >= 90 and proc_snap is not None and proc_snap.poll() is None:
+                with self._lifecycle_lock:
+                    # Recheck running under the lock — a stop_server racing
+                    # the timeout would otherwise revive `boot_state=ready`
+                    # for a server that was just shut down.
+                    if not self.running or self.boot_state != "booting":
+                        return
+                    self.boot_state    = "ready"
+                    self._uptime_start = time.time()
                 self.log(
                     "Server marked ONLINE after 90 s "
                     "(RCON TCP unreachable — check Windows Firewall for port 27015)"
                 )
+                # Best-effort: even though probe.connect timed out, RCON may
+                # still answer on a different path (loopback vs LAN IP edge
+                # cases).  If we have a pending workshop map, TRY to load it
+                # via RCON anyway — silent failure is better than silently
+                # leaving the server on the de_dust2 placeholder.
+                wk = self._pending_workshop_map
+                if wk:
+                    self._pending_workshop_map = None
+                    try:
+                        self.rcon.execute_retry(f"host_workshop_map {wk}")
+                        self.current_map = wk
+                        self.log(f"[workshop] Workshop map {wk} loaded via fallback ✓")
+                    except Exception as exc:
+                        self.log(f"[workshop] Fallback auto-load failed: {exc}")
                 if self.on_state_change:
                     self.on_state_change()
                 return
             try:
                 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
                     probe.settimeout(2)
-                    probe.connect((RCON_HOST, RCON_PORT))
+                    probe.connect((_config.RCON_HOST, RCON_PORT))
             except Exception:
                 now = time.time()
                 if now - last_log >= 30:
@@ -1214,9 +1531,16 @@ class AppCore:
     def change_map(self, map_name: str, mode: str,
                    is_workshop: bool = False, caller: str = "local") -> None:
         def _do() -> None:
-            mode_changed     = (mode != self.current_mode)
+            # Snapshot lifecycle state under the lock so a concurrent stop_server
+            # can't flip running=False between the check and _restart_into
+            # (which would kick off a restart against a server the operator
+            # just shut down).
+            with self._lifecycle_lock:
+                running_snap = self.running
+                current_mode_snap = self.current_mode
+            mode_changed     = (mode != current_mode_snap)
             new_managed      = _MODE_PLUGIN_NAMES.get(mode, [])
-            old_managed      = _MODE_PLUGIN_NAMES.get(self.current_mode, [])
+            old_managed      = _MODE_PLUGIN_NAMES.get(current_mode_snap, [])
             plugins_involved = bool(new_managed or old_managed)
 
             # A mode change that adds/removes/swaps plugins is done as a clean
@@ -1225,8 +1549,8 @@ class AppCore:
             # plugins can't reload alongside the new ones, and MetaMod modes load
             # at boot.  Same-mode map changes and vanilla↔vanilla switches (no
             # plugins on either side) stay live below.
-            if mode_changed and plugins_involved and self.running:
-                self.log(f"[{caller}] Mode change {self.current_mode} → {mode}: "
+            if mode_changed and plugins_involved and running_snap:
+                self.log(f"[{caller}] Mode change {current_mode_snap} → {mode}: "
                          "restarting for a clean plugin swap…")
                 self._restart_into(map_name, mode, is_workshop, caller)
                 return
@@ -2354,14 +2678,21 @@ class AppCore:
 
     def cancel_download(self) -> None:
         """Kill the currently running steamcmd download process, if any."""
-        proc = self._active_dl_proc
-        if proc is None:
-            self.log("No download in progress")
-            return
+        # Snapshot AND clear under the lock so two near-simultaneous Cancel
+        # clicks can't both grab the same proc, and so a click between
+        # "worker finished" and "next download started" doesn't kill the
+        # NEW download.  The worker thread's finally block re-clears
+        # _active_dl_proc under the same lock.
+        with self._dl_lock:
+            proc = self._active_dl_proc
+            if proc is None:
+                self.log("No download in progress")
+                return
+            # Clear progress + the proc handle here so a state poll can't
+            # briefly re-show the bar before the worker's finally runs.
+            self._dl_progress    = {}
+            self._active_dl_proc = None
         self.log("Cancelling download — terminating steamcmd…")
-        # Clear progress now so a state poll can't briefly re-show the bar
-        # before the worker thread's finally block clears it.
-        self._dl_progress = {}
         try:
             proc.terminate()
             proc.wait(timeout=5)
@@ -3224,7 +3555,13 @@ class AppCore:
                     f"[!] Auto-restart #{_restart_count}/{_MAX_RESTARTS} "
                     f"in {delay} s…"
                 )
-                time.sleep(delay)
+                # Event.wait so a user Stop during the backoff cancels the
+                # restart immediately instead of being silently queued behind
+                # the sleep.  Returns True if Stop was requested.
+                if self._stop_event.wait(timeout=delay):
+                    self.log("[!] Auto-restart cancelled — Stop requested during backoff.")
+                    _restart_count = 0
+                    return
                 self.log(
                     f"[!] Restarting server — "
                     f"map: {self.current_map}  mode: {self.current_mode}"
@@ -3240,7 +3577,10 @@ class AppCore:
                     "(missing plugin, port conflict, bad map, etc.) "
                     "before starting again. Counter resets after a manual Start."
                 )
-                _restart_count = 0
+                _restart_count   = 0
+                _last_crash_mono = 0.0   # don't let next crash hit the stable-
+                                         # reset branch with this stale value
+                                         # (would log a misleading "stable" line)
 
         def _watch() -> None:
             nonlocal _restart_count

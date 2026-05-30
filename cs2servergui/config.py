@@ -14,19 +14,43 @@ import sys
 
 # ── LAN IP helper ──────────────────────────────────────────────────────────────
 
-def _lan_ip() -> str:
-    """Return the machine's primary LAN IP.
+# Cache for _lan_ip() — the primary LAN IP rarely changes within a session
+# but is queried on every /api/state poll (every 2s × connected clients), and
+# each call does a fresh UDP socket + connect() that can stall on a flapping
+# VPN/virtual adapter.  30-second TTL is more than fine for an IP that
+# basically never changes; AppCore._resolve_rcon_host can force-refresh by
+# calling _lan_ip(force_refresh=True) on every server start/attach.
+_LAN_IP_CACHE: dict[str, object] = {"value": "", "ts": 0.0}
+_LAN_IP_TTL_SECS = 30.0
+
+
+def _lan_ip(force_refresh: bool = False) -> str:
+    """Return the machine's primary LAN IP (cached, 30 s TTL).
 
     CS2 dedicated server binds its RCON TCP socket to the LAN IP, not
     127.0.0.1.  Opening a UDP socket toward an external host (no data sent)
     asks the OS which source IP it would route through.
+
+    Cached because /api/state polls this every 2 s per client; without the
+    cache, a Hyper-V/Docker/VPN tap adapter flapping briefly serialises every
+    state poll behind a routing-table lookup.  Pass force_refresh=True from
+    code paths that genuinely need the live value (e.g. server start).
     """
+    import time as _time
+    if not force_refresh:
+        cached = _LAN_IP_CACHE.get("value", "")
+        if cached and (_time.monotonic() - float(_LAN_IP_CACHE["ts"])) < _LAN_IP_TTL_SECS:
+            return str(cached)
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.settimeout(0.5)  # don't hang for >500 ms on a wedged adapter
             s.connect(("8.8.8.8", 80))
-            return s.getsockname()[0]
+            value = s.getsockname()[0]
     except Exception:
-        return "127.0.0.1"
+        value = "127.0.0.1"
+    _LAN_IP_CACHE["value"] = value
+    _LAN_IP_CACHE["ts"]    = _time.monotonic()
+    return value
 
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
@@ -118,6 +142,15 @@ def _load_int_from_config(key: str, default: int) -> int:
 
 # ── Network ────────────────────────────────────────────────────────────────────
 
+# RCON_HOST is the default address for LOCAL RCON connections (this app → its
+# own dedicated server).  Despite intuition, CS2 binds RCON to the primary LAN
+# adapter, NOT 0.0.0.0 — verified 2026-05-30 on a clean install (post-VirtualBox-
+# uninstall, no virtual NICs) where netstat showed `192.168.0.103:27015 LISTENING`
+# and `127.0.0.1:27015` was refused.  So the LAN IP is the right initial choice.
+# If `_lan_ip()` returns 127.0.0.1 (no internet / DHCP blip) or the LAN IP turns
+# out to be unreachable (Hyper-V/Docker/VPN adapter shuffles the routes),
+# AppCore._post_launch_sanity_check enumerates the actual bind address via
+# netstat and switches `self.rcon.host` automatically.
 RCON_HOST     = _lan_ip()
 RCON_PORT     = 27015
 RCON_PASSWORD = ""        # auto-generated at first run; stored in oblivion_config.json

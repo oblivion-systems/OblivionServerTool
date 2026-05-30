@@ -1949,6 +1949,14 @@ body.compact #content        { padding: 14px 16px; }
   letter-spacing: 0.08em; margin-left: auto;
 }
 .log-drawer-meta.hidden { display: none; }
+.log-drawer-btn {
+  font-family: var(--font-mono); font-size: 10px; padding: 2px 8px;
+  border: 1px solid var(--line-1); border-radius: 3px;
+  background: var(--bg-1); color: var(--text-2); cursor: pointer;
+  letter-spacing: 0.04em;
+}
+.log-drawer-btn:hover { background: var(--bg-2); color: var(--text-1); border-color: var(--line-2); }
+.log-drawer-btn:active { background: var(--bg-0); }
 .log-drawer-key {
   font-family: var(--font-mono); font-size: 9px; padding: 2px 5px;
   border: 1px solid var(--line-1); color: var(--text-3);
