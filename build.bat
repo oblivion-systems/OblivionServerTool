@@ -13,6 +13,7 @@ echo [2/3] Building executable...
 pyinstaller ^
   --onefile ^
   --windowed ^
+  --noconfirm ^
   --name "OblivionServerTool" ^
   --icon "emblem.ico" ^
   --collect-all flask ^
@@ -29,6 +30,7 @@ pyinstaller ^
   --hidden-import cs2servergui.rcon ^
   --hidden-import cs2servergui.core ^
   --hidden-import cs2servergui.web ^
+  --hidden-import cs2servergui._netutils ^
   --add-data "emblem.ico;." ^
   --add-data "cs2servergui/plugins;cs2servergui/plugins" ^
   --add-data "cs2servergui/templates;cs2servergui/templates" ^

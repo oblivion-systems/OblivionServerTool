@@ -1,3 +1,8 @@
 flask>=3.0.0
+# Pinned explicitly because main.py imports `werkzeug.serving.make_server`
+# directly (since v0.9.2) rather than going through Flask's app.run().  Flask
+# pulls werkzeug in transitively, but pinning here keeps the build stable if
+# Flask ever swaps its server backend.
+werkzeug>=3.0.0
 pywebview>=5.0
 keyring>=25.0.0
