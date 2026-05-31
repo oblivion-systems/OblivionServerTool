@@ -2,6 +2,29 @@
 
 ---
 
+## Unreleased
+*Post-v0.9.2 polish. Will fold into v0.9.3 when there's a meaningful change worth tagging.*
+
+### 📦 Installer / Build Hardening
+
+Defensive packaging tweaks — no behaviour change to the running app:
+
+- **`build.bat`**: added `cs2servergui._netutils` to `--hidden-import` (the
+  module is imported lazily inside `core.py` methods; without an explicit
+  entry, PyInstaller's static analyser only finds it via `main.py`'s top-
+  level alias re-export, which could break under future refactoring).
+  Also added `--noconfirm` so the PyInstaller build never blocks on the
+  existing-output prompt.
+- **`requirements.txt`**: pinned `werkzeug>=3.0.0` explicitly. Comes in
+  transitively via Flask today but `main.py` imports `werkzeug.serving
+  .make_server` directly since v0.9.2 — pinning here makes the build
+  stable if Flask ever swaps its server backend.
+- **`installer.iss`**: documented WebView2 bootstrapper activation
+  (download `MicrosoftEdgeWebview2Setup.exe`, place in repo root,
+  uncomment 2 lines) with a clear note that Win10 needs it.  Also added
+  explicit `IconFilename:` to the Start Menu + Desktop shortcuts so the
+  emblem.ico shows even before Windows' shell-icon cache warms.
+
 ## v0.9.2 — 2026-05-30
 
 ### 🧹 Cleanup Pass — Dedup, Dead Code, Stale Markers
