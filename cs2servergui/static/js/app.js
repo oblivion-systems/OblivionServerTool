@@ -2524,6 +2524,8 @@ function _renderVetoFinale(root, sess) {
   const readyA = !!sess.ready_a;
   const readyB = !!sess.ready_b;
   const bothReady = !!sess.both_ready;
+  // v0.10.2: connect details for the admin's preview of what captains see
+  const conn = sess.match_connect;
   // ── Day 5: cinematic entry only the first time we land on finale ─────
   // SSE pings on the same state would otherwise re-trigger the confetti
   // and decider zoom every few seconds — once is exactly enough.
@@ -2556,6 +2558,14 @@ function _renderVetoFinale(root, sess) {
           </div>
         `).join('')}
       </div>
+      ${conn ? `
+      <div class="veto-captain-connect" style="margin-bottom:18px">
+        <div class="veto-connect-label">What captains see — server connect:</div>
+        <div class="veto-connect-cmd">${esc(conn.command)}</div>
+        <div class="veto-connect-actions">
+          <button class="btn btn-ghost btn-sm" id="veto-admin-copy-cmd">📋 Copy</button>
+        </div>
+      </div>` : ''}
       <div class="veto-ready-row">
         <div class="veto-ready-slot ${readyA ? 'ready' : ''}">
           <div class="veto-ready-team">${esc(sess.team_a_name)}</div>
@@ -2626,6 +2636,13 @@ function _renderVetoFinale(root, sess) {
     }
   });
 
+  // v0.10.2 admin-side copy of the connect command (preview of what
+  // captains see; also useful if the admin needs to paste it themselves)
+  const adminCopyBtn = el('veto-admin-copy-cmd');
+  if (adminCopyBtn && conn) {
+    adminCopyBtn.addEventListener('click', () => copyText(conn.command, 'Connect command'));
+  }
+
   // Admin can ack-on-behalf by clicking a team's ready slot.  Toggles
   // that team's ready flag (so re-clicking un-acks too — useful if you
   // misclicked).  The API has team-spoof protection for captains; admins
@@ -2659,6 +2676,12 @@ function _renderVetoFinaleCaptain(root, sess) {
   const otherReady = myTeam === 'A' ? sess.ready_b : sess.ready_a;
   const otherName  = myTeam === 'A' ? sess.team_b_name : sess.team_a_name;
   const myName     = myTeam === 'A' ? sess.team_a_name : sess.team_b_name;
+  // v0.10.2: match connect details surfaced at finale state so captains
+  // can copy the connect command into their team's Discord without
+  // pestering the operator.  Backend exposes this only at finale/complete
+  // states (security: the token IS the credential; captains are already
+  // authorised to know the game-server password).
+  const conn = sess.match_connect;
   root.innerHTML = `
     <div class="veto-stage veto-finale">
       <div class="veto-finale-title">${esc(sess.mode)} &middot; LOCKED IN</div>
@@ -2672,6 +2695,28 @@ function _renderVetoFinaleCaptain(root, sess) {
         `).join('')}
       </div>
 
+      ${conn ? `
+      <div class="veto-captain-connect">
+        <div class="veto-connect-label">Server connect — share with your team:</div>
+        <div class="veto-connect-cmd">${esc(conn.command)}</div>
+        <div class="veto-connect-actions">
+          <button class="btn btn-accent" id="veto-cap-copy-cmd"
+                  style="min-height:44px;padding:10px 18px">
+            📋 Copy connect command
+          </button>
+          <button class="btn btn-ghost" id="veto-cap-copy-team-invite"
+                  style="min-height:44px;padding:10px 18px"
+                  title="Pre-formatted message to drop in your team's Discord">
+            📋 Copy team invite
+          </button>
+        </div>
+        <div class="veto-connect-hint">
+          ${conn.password_set
+            ? 'Server is password-protected. The command above includes the password.'
+            : 'Server has no password — anyone with the IP can join. Share carefully.'}
+        </div>
+      </div>` : ''}
+
       <div class="veto-captain-ready-block">
         <div class="veto-captain-opponent">
           <strong>${esc(otherName)}</strong>:
@@ -2681,7 +2726,7 @@ function _renderVetoFinaleCaptain(root, sess) {
         </div>
         <button class="btn ${myReady ? 'btn-ghost' : 'btn-accent'}"
                 id="veto-cap-ready-btn"
-                style="font-size:14px;padding:14px 32px;margin-top:14px">
+                style="font-size:14px;padding:14px 32px;margin-top:14px;min-height:48px">
           ${myReady ? '✓ READY — click to un-ready' : `READY UP (${esc(myName)})`}
         </button>
         <div style="margin-top:14px;font-family:var(--font-mono);font-size:11px;color:var(--text-4)">
@@ -2698,6 +2743,25 @@ function _renderVetoFinaleCaptain(root, sess) {
       toast(myReady ? 'Un-readied' : 'Ready! Waiting for opponent / operator.');
     } catch (err) { toast(err.message, 'var(--bad)'); }
   });
+  if (conn) {
+    el('veto-cap-copy-cmd').addEventListener('click', () => {
+      copyText(conn.command, 'Connect command');
+    });
+    el('veto-cap-copy-team-invite').addEventListener('click', () => {
+      // Pre-formatted block for the captain's own team Discord channel.
+      // Includes the mode + maplist so teammates know what's about to be
+      // played; useful when 5+ people need the same info at once.
+      const mapList = maps.map((m, i) => m === decider
+        ? `  • ${m} (decider)`
+        : `  • Map ${i+1}: ${m}`).join('\n');
+      const text =
+        `🎮 ${myName} — match incoming!\n` +
+        `Mode: ${sess.mode}\n` +
+        `Maps:\n${mapList}\n\n` +
+        `Connect:\n${conn.command}`;
+      copyText(text, 'Team invite');
+    });
+  }
 }
 
 /* ── Complete ──────────────────────────────────────────────────────────── */
@@ -3513,11 +3577,73 @@ pages['appearance'] = function() {
 // page reload" or other re-entry path would double every keydown handler
 // and SSE subscription.  This flag closes that door cheaply.
 let _initialised = false;
+
+// v0.10.2 — Hamburger drawer for the sidebar on phones.  Activates only
+// when the .veto-stage CSS @media query has put the sidebar in slide-out
+// position (below 640px).  On desktop the button is display:none so the
+// listener never fires there.
+function _wireMobileHamburger() {
+  const btn = el('hamburger');
+  const sidebar = el('sidebar');
+  if (!btn || !sidebar) return;
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    sidebar.classList.toggle('is-open');
+  });
+  // Tap anywhere else (including the dim backdrop) closes the drawer
+  document.addEventListener('click', (e) => {
+    if (!sidebar.classList.contains('is-open')) return;
+    if (sidebar.contains(e.target) || btn.contains(e.target)) return;
+    sidebar.classList.remove('is-open');
+  });
+  // Closing the drawer when a nav item is tapped (so the user lands on
+  // the page and sees their content, not the drawer over it)
+  sidebar.querySelectorAll('.nav-item').forEach(item => {
+    item.addEventListener('click', () => sidebar.classList.remove('is-open'));
+  });
+  // Hashchange (nav arrived from elsewhere) also closes
+  window.addEventListener('hashchange', () => sidebar.classList.remove('is-open'));
+}
+
+// v0.10.2 — When a phone screen locks then unlocks 60s+ later, the log
+// SSE has long since exhausted its 12-retry budget AND the veto SSE has
+// also gone dark.  Without this handler, the user sees a stale UI and
+// the only fix is a full page reload.  This re-arms both streams on
+// `visibilitychange` (phone wake) and `online` (network restored).
+function _wireMobileSSEReconnect() {
+  const recover = () => {
+    if (document.visibilityState !== 'visible') return;
+    // Log stream — reset the retry counter and re-subscribe.  Defensive:
+    // these globals may not exist depending on init order.
+    try {
+      if (typeof _sseRetries !== 'undefined') {
+        // Best-effort: reset retries + re-subscribe.  startSSE is
+        // idempotent because it closes the existing connection first.
+        _sseRetries = 0;       // eslint-disable-line no-undef
+      }
+      if (typeof startSSE === 'function') startSSE();
+    } catch (_) {}
+    // Veto stream — only re-subscribe if user is on the veto tab right now
+    // (otherwise the SSE cleanup on hashchange-away has already torn it
+    // down and we'd be creating a leak by re-opening here)
+    try {
+      if (currentPage === 'veto' && typeof _vetoSubscribe === 'function') {
+        _vetoSubscribe();
+      }
+    } catch (_) {}
+  };
+  document.addEventListener('visibilitychange', recover);
+  window.addEventListener('online', recover);
+}
+
 async function init() {
   if (_initialised) return;
   _initialised = true;
   // Apply saved appearance settings before anything renders
   loadAppSettings();
+  // v0.10.2 — mobile wiring
+  _wireMobileHamburger();
+  _wireMobileSSEReconnect();
 
   // Load static game data
   try {
@@ -3781,7 +3907,16 @@ window.ConnectPopover = {
     const btn = el('hdr-connect-btn');
     pop.classList.remove('hidden');
     const r = btn.getBoundingClientRect();
-    pop.style.left = Math.max(8, r.left) + 'px';
+    // v0.10.2 — clamp the popover's left edge so it can't overflow the
+    // right side of the viewport on narrow phones (was hard-pinned to
+    // r.left which on a 375px iPhone pushed it ~100-200px off-screen).
+    // Measure the popover's actual width AFTER making it visible, then
+    // clamp left = max(8, min(r.left, vw - popWidth - 8)).
+    const vw = document.documentElement.clientWidth;
+    const popWidth = Math.min(pop.offsetWidth || 380, vw - 16);
+    const leftMax = vw - popWidth - 8;
+    const left = Math.max(8, Math.min(r.left, leftMax));
+    pop.style.left = left + 'px';
     pop.style.right = 'auto';
     pop.style.margin = '0';
   },

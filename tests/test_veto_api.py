@@ -839,6 +839,80 @@ def t_public_share_url_can_be_cleared():
 t('public_share_url: blank value clears it', t_public_share_url_can_be_cleared)
 
 
+def t_finale_mode_precheck_rejects_non_matchzy_mode():
+    """v0.10.2: /api/veto/finale with load_match=True refuses if the server
+    is on a non-MatchZy mode (1v1 Arena / Warcraft / Zombie Escape / etc.)
+    — would otherwise silently fire matchzy_loadmatch which plays the wrong
+    ruleset.  Should 409 with a precheck payload listing the expected modes."""
+    ac, app, c = _new_app()
+    _login(c)
+    _drive_to_finale(c, app)
+    ac.running = True
+    ac.current_mode = "Warcraft"     # not a MatchZy mode
+    calls = []
+    class _RecRCON:
+        def execute(self, cmd): calls.append(cmd); return ""
+    ac.rcon = _RecRCON()
+    r = c.post('/api/veto/finale', json={'load_match': True})
+    body = r.get_json()
+    return (r.status_code == 409
+            and body.get('precheck', {}).get('ok') is False
+            and body['precheck']['current_mode'] == 'Warcraft'
+            and 'expected_one_of' in body['precheck']
+            and len(calls) == 0), \
+           f'status={r.status_code} body={body} calls={calls}'
+t('finale: mode pre-flight refuses non-MatchZy mode (Warcraft) → 409', t_finale_mode_precheck_rejects_non_matchzy_mode)
+
+
+def t_finale_mode_precheck_accepts_matchzy_modes():
+    """The pre-flight should accept all five MatchZy-managed modes."""
+    for mode in ("Competitive", "3v3", "4v4", "5v5", "Practice"):
+        ac, app, c = _new_app()
+        _login(c)
+        _drive_to_finale(c, app)
+        ac.running = True
+        ac.current_mode = mode
+        ac.rcon = type('M', (), {'execute': lambda self, cmd: "ok"})()
+        r = c.post('/api/veto/finale', json={'load_match': True})
+        body = r.get_json()
+        if r.status_code != 200:
+            return False, f'mode={mode} status={r.status_code} body={body}'
+        if not body.get('matchzy', {}).get('precheck', {}).get('ok'):
+            return False, f'mode={mode} precheck not OK in success path: {body}'
+    return True, ''
+t('finale: mode pre-flight accepts all MatchZy modes (3v3 4v4 5v5 Practice Competitive)', t_finale_mode_precheck_accepts_matchzy_modes)
+
+
+def t_finale_mode_precheck_force_bypasses():
+    """`force: true` in the body should bypass the mode pre-flight — escape
+    hatch for the rare case where the operator manually deployed MatchZy."""
+    ac, app, c = _new_app()
+    _login(c)
+    _drive_to_finale(c, app)
+    ac.running = True
+    ac.current_mode = "Aim 1v1"     # not a MatchZy mode
+    ac.rcon = type('M', (), {'execute': lambda self, cmd: "ok"})()
+    r = c.post('/api/veto/finale', json={'load_match': True, 'force': True})
+    body = r.get_json()
+    return (r.status_code == 200
+            and body.get('matchzy', {}).get('loaded') is True
+            and body['matchzy']['precheck'].get('forced') is True), f'body={body}'
+t('finale: force=true bypasses mode pre-flight', t_finale_mode_precheck_force_bypasses)
+
+
+def t_finale_mode_precheck_skipped_when_load_match_false():
+    """`load_match=false` writes the config but skips both the RCON call AND
+    the mode pre-flight — operator is previewing, not firing."""
+    ac, app, c = _new_app()
+    _login(c)
+    _drive_to_finale(c, app)
+    ac.running = True
+    ac.current_mode = "Aim 1v1"     # not a MatchZy mode
+    r = c.post('/api/veto/finale', json={'load_match': False})
+    return r.status_code == 200, f'status={r.status_code} body={r.get_data(as_text=True)[:200]!r}'
+t('finale: load_match=false skips mode pre-flight (preview mode)', t_finale_mode_precheck_skipped_when_load_match_false)
+
+
 def t_finale_load_match_false_skips_rcon():
     ac, app, c = _new_app()
     _login(c)
