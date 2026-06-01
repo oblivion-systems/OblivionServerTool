@@ -80,7 +80,7 @@ deferred loose ends. Full prose in [CHANGELOG.md](CHANGELOG.md) → v0.9.1.*
   lock, the `_stop_event` edge-window cancel race, and the Warcraft `ReferenceEquals` → SteamID
   equality fix in three deferred-menu sites.
 
-### Currently shipping — v0.10.2 (online-primary polish phase, Mon → Thu, ships Thursday)
+### Shipped — v0.10.2 (online-primary polish phase, released 2026-06-01)
 
 **Audit-driven release.**  Five agents audited the tool against online-primary use
 (mobile responsiveness, online workflow gaps, feature integrations, pre-v0.10.0 surface,

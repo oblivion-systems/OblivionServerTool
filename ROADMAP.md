@@ -7,22 +7,19 @@
 
 ---
 
-## Currently shipping — v0.10.2 (Mon → Thu, target Friday testing)
+## Where We Are — v0.10.2 (released 2026-06-01)
 
-**Online-primary polish phase.**  After v0.10.0 (veto feature) + v0.10.0.1
-(hotfix) + v0.10.1 (Ready button + Public URL override + Copy-for-Discord)
-shipped, a five-agent audit of online-use readiness surfaced ~35 actionable
-findings.  v0.10.2 takes the BLOCKERs + the top three cross-cutting
-investments + the most-valuable workflow gaps into one tagged release,
-scoped to four working days.
+**Online-primary polish phase complete.**  After a five-agent audit of online-use
+readiness surfaced ~35 actionable findings, v0.10.2 took the BLOCKERs + the top
+three cross-cutting investments + the most-valuable workflow gaps into one
+release.  Four focused days, 137/137 tests green.
 
-| Day | Theme |
+| Day | Landed |
 |---|---|
 | Mon | Mobile responsive pass + captain connect-string handoff + mode pre-flight |
 | Tue | Pre-flight error surfacing + local-only UI signposting + role pill |
 | Wed | Unified SSE transport + `/api/capabilities` + `api.js` retry/timeout layer |
 | Thu | Captain limbo screen + rematch + match history + Discord webhook + ship |
-| Fri | User live-tests; hotfix window |
 
 Explicitly cut from scope: animation rewrite (parked), "Go Online" panel,
 public spectator URL, roster presets, MatchZy cvar editor, bulk SteamID
@@ -33,6 +30,8 @@ significant scope, or are better paired with the v0.11.0 Discord bot.
 Full prose in [CHANGELOG.md](CHANGELOG.md) → v0.10.2.
 
 ## Previously — v0.10.1 (released 2026-06-01)
+
+## Previously — v0.10.1 (released earlier 2026-06-01)
 
 Online-primary improvements addressing the realisation that LAN use is
 secondary.  Captain Ready button on the finale page (replaces the broken

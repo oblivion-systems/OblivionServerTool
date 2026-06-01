@@ -66,7 +66,7 @@ DEPOTDL_RELEASE_URL = (
 # ── App self-update ────────────────────────────────────────────────────────────
 # Bump APP_VERSION before each release tag, then push and create a GitHub
 # release tagged "v<APP_VERSION>" — all connected clients will see the update.
-APP_VERSION      = "0.10.1"
+APP_VERSION      = "0.10.2"
 APP_REPO         = "jacquesvniekerk-eng/OblivionServerTool"
 APP_RELEASES_URL = f"https://github.com/{APP_REPO}/releases/latest"
 APP_API_URL      = f"https://api.github.com/repos/{APP_REPO}/releases/latest"
@@ -121,6 +121,11 @@ else:
     _APP_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 _CONFIG_FILE = os.path.join(_APP_DIR, "oblivion_config.json")
+# v0.10.2: match history persists the last N completed veto sessions so the
+# operator has a "what did we play last week" reference + can rematch from
+# history if the in-memory state was lost (e.g. app restart between matches).
+MATCH_HISTORY_FILE = os.path.join(_APP_DIR, "oblivion_matches.json")
+MATCH_HISTORY_KEEP = 10        # how many recent matches to retain on disk
 
 
 def _load_int_from_config(key: str, default: int) -> int:

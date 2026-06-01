@@ -137,7 +137,7 @@ _LEGAL_TRANSITIONS: dict[str, frozenset[str]] = {
     "links":    frozenset({"veto", "links", "idle"}),      # links state re-entered if a token is revoked
     "veto":     frozenset({"veto", "finale", "idle"}),     # each ban/pick stays in veto until last step
     "finale":   frozenset({"complete", "idle"}),
-    "complete": frozenset({"idle"}),
+    "complete": frozenset({"idle", "links"}),    # links = "rematch with same teams" (v0.10.2)
 }
 
 
@@ -626,6 +626,102 @@ def complete(session: VetoSession) -> None:
     if session.state != "finale":
         raise InvalidVetoTransition(f"complete legal only from finale (now {session.state})")
     session._transition("complete")
+
+
+def archive_to_history(session: VetoSession) -> dict:
+    """v0.10.2: serialise a completed VetoSession for the history file.
+
+    Captures the operator-useful fields:
+      - matchid + timestamp
+      - team names + player rosters (with steam_ids)
+      - mode + full maplist + decider
+      - veto sequence (ordered ban/pick list)
+
+    Returns the dict; caller is responsible for writing it to disk.
+    Safe to call from any state (returns a partial dict for in-flight
+    sessions; the operator's "save mid-match" intent is the right one).
+    """
+    return {
+        "matchid":     (session.matchzy_config or {}).get(
+            "matchid", f"oblivion-veto-{int(session.created_at)}"
+        ),
+        "created_at":  session.created_at,
+        "updated_at":  session.updated_at,
+        "mode":        session.mode,
+        "team_a": {
+            "name":    session.team_a_name,
+            "players": [{"name": p.name, "steam_id": p.steam_id} for p in session.team_a],
+        },
+        "team_b": {
+            "name":    session.team_b_name,
+            "players": [{"name": p.name, "steam_id": p.steam_id} for p in session.team_b],
+        },
+        "captain_a": (session.team_a[session.captain_a_idx].name
+                      if session.captain_a_idx is not None
+                         and 0 <= session.captain_a_idx < len(session.team_a)
+                      else ""),
+        "captain_b": (session.team_b[session.captain_b_idx].name
+                      if session.captain_b_idx is not None
+                         and 0 <= session.captain_b_idx < len(session.team_b)
+                      else ""),
+        "final_maps": list(session.final_maps),
+        "decider":    session.decider,
+        "sequence":   [
+            {"kind": st.kind, "team": st.team, "map": st.map_id}
+            for st in session.sequence
+        ],
+    }
+
+
+def rematch(session: VetoSession, mode: str | None = None,
+            map_pool: list[str] | None = None) -> None:
+    """v0.10.2: rematch with the same teams.  Operator hits this from the
+    Complete page after a finished BO; preserves the team rosters + names
+    + captains + map pool but clears the veto state so a fresh series can
+    be played.  Saves the operator from re-typing 10 names.
+
+    Legal only from `complete` state.  Captains keep their election + must
+    re-claim new tokens (the old ones were single-use and may already be
+    consumed; a fresh issue_tokens() call is required after this).
+    Captain ready flags reset (each team must ready up again).
+
+    Optional `mode` switch lets the operator change BO format between
+    matches without manually resetting.  Optional `map_pool` similarly.
+    """
+    if session.state != "complete":
+        raise InvalidVetoTransition(
+            f"rematch legal only from complete (now {session.state})"
+        )
+    # Persisted: team_a, team_b, team_*_name, captain_*_idx, roster, map_pool
+    # Reset: tokens, sequence, current_step, decider, final_maps,
+    #         matchzy_config, ready flags, votes (re-running rebuild_sequence)
+    if mode is not None:
+        if mode not in _VETO_SEQUENCES:
+            raise VetoStageError(f"mode must be one of {list(_VETO_SEQUENCES)}")
+        session.mode = mode
+    if map_pool is not None:
+        if len(map_pool) != 7:
+            raise VetoStageError("map_pool must contain exactly 7 maps")
+        if len(set(map_pool)) != 7:
+            raise VetoStageError("map_pool contains duplicates")
+        session.map_pool = list(map_pool)
+    # Clear veto + finale state; preserve teams + captains
+    session.tokens.clear()
+    session.sequence.clear()
+    session.current_step = 0
+    session.decider = ""
+    session.final_maps.clear()
+    session.matchzy_config = None
+    session.ready_a = False
+    session.ready_b = False
+    # Votes stay cleared (no revote needed — captains are already elected)
+    session.votes_a.clear()
+    session.votes_b.clear()
+    # Jump straight to `links` — operator clicks Generate captain links and
+    # the same two captains get fresh single-use tokens for the new series.
+    # _transition uses the _LEGAL_TRANSITIONS map (which now allows
+    # complete → links specifically for this code path).
+    session._transition("links")
 
 
 def reset(session: VetoSession) -> None:

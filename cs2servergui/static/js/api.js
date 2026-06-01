@@ -200,6 +200,10 @@ const api = (() => {
       step:       (team, mapId)      => post('/api/veto/step', { team, map_id: mapId }),
       finale:     (loadMatch=true)   => post('/api/veto/finale', { load_match: loadMatch }),
       reset:      ()                 => post('/api/veto/reset'),
+      // v0.10.2: rematch with same teams.  Optional body fields:
+      // mode ('BO1'|'BO3'|'BO5') + map_pool (7 entries).
+      rematch:    (mode, mapPool)    => post('/api/veto/rematch',
+                                          mode || mapPool ? { mode, map_pool: mapPool } : {}),
       // v0.10.1: captain ready toggle.  team is OPTIONAL — captain role
       // sessions infer it from their cookie; admin must pass it explicitly.
       ready:      (ready, team)      => post('/api/veto/ready',

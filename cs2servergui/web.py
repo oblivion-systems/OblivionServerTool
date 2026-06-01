@@ -722,6 +722,11 @@ def create_flask(core: AppCore) -> Flask:
             # leak it anyway, and auto-launch is a UX toggle not a credential)
             "public_share_url":             core.public_share_url,
             "veto_auto_launch_on_ready":    core.veto_auto_launch_on_ready,
+            # v0.10.2 — Discord webhook (treated as a secret-ish URL: only
+            # the local admin sees it.  Remote admins get "***" so they
+            # can see "webhook is configured" without leaking the URL —
+            # webhooks are unauth'd post tokens and shouldn't leak).
+            "discord_webhook_url":          core.discord_webhook_url if is_local else ("***" if core.discord_webhook_url else ""),
             "admin_pin":             core.admin_pin     if is_local else "***",
             "guest_pin":             core.guest_pin     if is_local else "***",
             "rcon_password":         core.rcon_password  if is_local else "***",
@@ -761,6 +766,20 @@ def create_flask(core: AppCore) -> Flask:
             core.public_share_url = v.rstrip("/")
         if "veto_auto_launch_on_ready" in d:
             core.veto_auto_launch_on_ready = bool(d["veto_auto_launch_on_ready"])
+        # v0.10.2 — Discord webhook URL: local-only write (it's a secret-ish
+        # URL).  Mask-aware so a remote admin's accidental round-trip of
+        # "***" doesn't blank the real value.
+        if is_local and "discord_webhook_url" in d:
+            v = str(d["discord_webhook_url"]).strip()
+            if v == "***":
+                pass    # mask round-trip, ignore
+            elif v and not v.startswith("https://discord.com/api/webhooks/"):
+                return jsonify({
+                    "error": "discord_webhook_url must start with "
+                             "https://discord.com/api/webhooks/ (or be blank to clear)"
+                }), 400
+            else:
+                core.discord_webhook_url = v
 
         # Local-only fields (security-sensitive). The admin PIN protects the whole
         # panel, so only the trusted local window may change it.
@@ -1143,6 +1162,148 @@ def create_flask(core: AppCore) -> Flask:
     # broadcasts a JSON snapshot to all of them.
     _veto_subs: list[queue.Queue] = []
     _veto_subs_lock = threading.Lock()
+
+    # v0.10.2: match history persistence — guards concurrent appends so two
+    # operators clicking Hand-to-MatchZy at the same time can't corrupt the
+    # JSON.  Reads are lock-free (the file is overwritten atomically via
+    # tmp + os.replace).
+    _match_history_lock = threading.Lock()
+
+    def _save_to_match_history(entry: dict) -> None:
+        """Append `entry` to oblivion_matches.json, keep last
+        MATCH_HISTORY_KEEP entries.  Atomic write (tmp + os.replace) so a
+        crash mid-save can't truncate the file."""
+        from .config import MATCH_HISTORY_FILE, MATCH_HISTORY_KEEP
+        try:
+            with _match_history_lock:
+                # Load existing — empty list if file missing / unreadable
+                existing: list = []
+                if os.path.isfile(MATCH_HISTORY_FILE):
+                    try:
+                        with open(MATCH_HISTORY_FILE, "r", encoding="utf-8") as f:
+                            existing = json.load(f) or []
+                            if not isinstance(existing, list):
+                                existing = []
+                    except (OSError, ValueError):
+                        existing = []
+                existing.append(entry)
+                # Keep the most recent N (the list is append-only, so the
+                # newest is at the end).  Drop older ones.
+                if len(existing) > MATCH_HISTORY_KEEP:
+                    existing = existing[-MATCH_HISTORY_KEEP:]
+                tmp = MATCH_HISTORY_FILE + ".tmp"
+                with open(tmp, "w", encoding="utf-8") as f:
+                    json.dump(existing, f, indent=2, ensure_ascii=False)
+                    f.flush()
+                    try: os.fsync(f.fileno())
+                    except OSError: pass
+                os.replace(tmp, MATCH_HISTORY_FILE)
+            core.log(f"[veto] match archived to history (last {len(existing)} kept)")
+        except Exception as exc:
+            core.log(f"[veto] history write failed: {exc}")
+
+    def _load_match_history() -> list:
+        """Read oblivion_matches.json.  Returns [] if file missing / corrupt
+        (no recovery dance — operator can re-run a match and overwrite)."""
+        from .config import MATCH_HISTORY_FILE
+        try:
+            if not os.path.isfile(MATCH_HISTORY_FILE):
+                return []
+            with open(MATCH_HISTORY_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f) or []
+            return data if isinstance(data, list) else []
+        except (OSError, ValueError):
+            return []
+
+    def _post_discord_finale_webhook(history_entry: dict, matchzy_result: dict) -> None:
+        """v0.10.2 — POST a Discord embed to the operator's webhook URL
+        when a finale completes.  Fire-and-forget.  10-second timeout;
+        silent failure (logs once).  Webhook URL is stored in
+        core.discord_webhook_url; format must be the standard
+        https://discord.com/api/webhooks/<id>/<token>.
+
+        Embed format keeps to a single accent colour + structured fields
+        so the channel reads cleanly.  Fields:
+          • Mode (BO1/BO3/BO5)
+          • Map list (with the decider tagged)
+          • Teams + captains
+          • MatchZy status (loaded / pending / file-only)
+          • Connect command (so spectators can join to watch live)
+        """
+        import urllib.request, urllib.error
+        url = core.discord_webhook_url
+        if not url:
+            return
+        # Build the embed.  Discord limits: 256-char title, 2048-char
+        # description, 25 fields, each field 256-char name + 1024-char value.
+        # We're well under all of those.
+        team_a = history_entry.get("team_a", {})
+        team_b = history_entry.get("team_b", {})
+        maps_list = history_entry.get("final_maps") or []
+        decider = history_entry.get("decider")
+        mode = history_entry.get("mode", "")
+        maplines = []
+        for i, m in enumerate(maps_list):
+            if m == decider:
+                maplines.append(f"  🏁 **{m}** (decider)")
+            else:
+                maplines.append(f"  • Map {i+1}: {m}")
+        # MatchZy status line
+        if matchzy_result.get("loaded"):
+            mz_status = "✅ MatchZy: loaded + ready"
+        elif matchzy_result.get("error"):
+            mz_status = f"⚠ MatchZy: {matchzy_result['error']}"
+        else:
+            mz_status = "ℹ MatchZy: config written, manual load needed"
+        # Connect command — pull from the live session's match_connect block
+        connect_cmd = ""
+        with core._veto_lock:
+            if core._veto_session is not None:
+                # Reproduce the snapshot logic for match_connect (state may
+                # have moved to `complete` but the IP/password are the same)
+                game_host = core.public_ip or _config._lan_ip()
+                connect_cmd = f"connect {game_host}:{RCON_PORT}"
+                if core.sv_password:
+                    connect_cmd += f"; password {core.sv_password}"
+        embed = {
+            "title": f"🎮 {mode} match locked in — {team_a.get('name','A')} vs {team_b.get('name','B')}",
+            "color": 0xFF6B35,           # accent-ish orange; tweak via theme later
+            "fields": [
+                {"name": "Maps",     "value": "\n".join(maplines) or "(none)", "inline": False},
+                {"name": "Captains", "value": (
+                    f"**{team_a.get('name','A')}** — {history_entry.get('captain_a','?')}\n"
+                    f"**{team_b.get('name','B')}** — {history_entry.get('captain_b','?')}"
+                ), "inline": False},
+                {"name": "MatchZy",  "value": mz_status, "inline": False},
+            ],
+            "footer": {"text": f"matchid: {history_entry.get('matchid','?')}"},
+        }
+        if connect_cmd:
+            embed["fields"].append({
+                "name":   "Connect (for your team)",
+                "value":  f"```\n{connect_cmd}\n```",
+                "inline": False,
+            })
+        payload = {"embeds": [embed]}
+        body = json.dumps(payload).encode("utf-8")
+        try:
+            req = urllib.request.Request(
+                url,
+                data=body,
+                headers={"Content-Type": "application/json",
+                         "User-Agent": "OblivionServerTool"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                if resp.status >= 400:
+                    core.log(f"[veto] Discord webhook returned HTTP {resp.status}")
+                else:
+                    core.log("[veto] Discord finale webhook posted ✓")
+        except urllib.error.HTTPError as he:
+            core.log(f"[veto] Discord webhook HTTP {he.code}: {he.reason} "
+                     f"(check that the webhook URL is still valid)")
+        except Exception as exc:
+            core.log(f"[veto] Discord webhook failed: {type(exc).__name__}: {exc}")
 
     def _veto_snapshot() -> dict:
         """Serialise the current session to a JSON-safe dict.  Tokens are
@@ -1815,9 +1976,26 @@ def create_flask(core: AppCore) -> Flask:
 
         # Transition the session to `complete` regardless — the file is on
         # disk, the operator can recover from any RCON hiccup manually.
+        # v0.10.2: also archive a snapshot to oblivion_matches.json so we
+        # have a "last 10 matches" reference + rematch base if the app
+        # restarts before the operator hit Rematch.
         with core._veto_lock:
             if core._veto_session is not None:
+                snapshot = _veto.archive_to_history(core._veto_session)
                 _veto.complete(core._veto_session)
+            else:
+                snapshot = None
+        if snapshot is not None:
+            _save_to_match_history(snapshot)
+            # v0.10.2 — Discord webhook (operator-configured).  Fire-and-
+            # forget on a background thread — webhook POST shouldn't block
+            # the operator's finale click.
+            if core.discord_webhook_url:
+                threading.Thread(
+                    target=_post_discord_finale_webhook,
+                    args=(snapshot, matchzy_result),
+                    daemon=True,
+                ).start()
         _veto_broadcast()
         # v0.10.2 — also return the precheck snapshot in the success path
         # so the SPA can show "✓ mode was 5v5" alongside the matchzy result.
@@ -1828,6 +2006,44 @@ def create_flask(core: AppCore) -> Flask:
             "forced": force,
         }
         return jsonify({"ok": True, "config": cfg, "matchzy": matchzy_result})
+
+    @app.route("/api/veto/history")
+    @require_auth
+    def veto_history():
+        """v0.10.2 — Last N completed matches (newest last)."""
+        return jsonify({"matches": _load_match_history()})
+
+    @app.route("/api/veto/rematch", methods=["POST"])
+    @require_auth
+    def veto_rematch():
+        """v0.10.2: rematch with same teams.  After a finished BO the
+        operator hits this to start a new series with the same 10 players
+        + the same captains.  Saves retyping 10 names + re-running the
+        captain vote.
+
+        Legal only from `complete` state.  Captains keep their election
+        but get fresh single-use tokens (the operator must call
+        /api/veto/tokens after this to mint them).  Captain ready flags
+        reset (each team must ready up again for the new series).
+
+        Optional body fields:
+          mode      — BO1 / BO3 / BO5 (defaults to current session's mode)
+          map_pool  — 7-element list (defaults to current pool)
+        """
+        d = request.get_json() or {}
+        mode     = d.get("mode")  # None = keep current
+        map_pool = d.get("map_pool")
+        with core._veto_lock:
+            if core._veto_session is None:
+                return jsonify({"error": "no active veto session"}), 400
+            try:
+                _veto.rematch(core._veto_session, mode=mode, map_pool=map_pool)
+                snap = _veto_snapshot()
+            except Exception as e:
+                return _veto_error_response(e)
+        _veto_broadcast()
+        core.log(f"[veto] rematch — same teams, fresh BO{(mode or core._veto_session.mode)[2:]}")
+        return jsonify(snap)
 
     @app.route("/api/veto/reset", methods=["POST"])
     @require_auth

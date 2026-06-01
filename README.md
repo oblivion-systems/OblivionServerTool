@@ -3,20 +3,21 @@
 A desktop application for managing a **Counter-Strike 2 dedicated server** on Windows.  
 Built with Python + Flask + pywebview (Edge WebView2). Ships as a single `.exe` with an optional installer.
 
-> **Status: v0.10.1 (released) — v0.10.2 in progress (4-day online-primary polish phase).**
-> The **map-veto / match-setup feature** (v0.10.0 + v0.10.1) is live: guided 5-stage
-> flow (roster → teams → captain vote → captain links with QR codes + Discord-ready
-> copy → BO1/BO3/BO5 veto board) where captains veto from their own devices, signal
-> READY from the finale page, and the operator's UI is a live SSE mirror.  Finale
-> writes a MatchZy match config and issues `matchzy_loadmatch` via RCON; Cloudflare
-> tunnel URL is supported as a public share base.  Core features (v0.9.x) stable:
-> remote-guest role, split team-size modes (1v1 / 2v2 / 3v3 / 4v4 / 5v5), Warcraft
-> menu/chat dispatchers, atomic config save, multi-packet RCON sentinel.  **v0.10.2
-> in flight on master** addresses ~35 findings from a five-agent audit of online
-> readiness (mobile responsiveness, pre-flight error surfacing, role/local-only UI
-> signposting, unified SSE transport with reconnect, captain connect-string handoff,
-> rematch, match history, Discord webhook on finale).  Full spec [VETO.md](VETO.md);
-> prose [CHANGELOG.md](CHANGELOG.md).  123/123 backend tests green at v0.10.1.
+> **Status: v0.10.2 (released).**  The **map-veto / match-setup feature** is now
+> online-primary polished: mobile-responsive SPA (hamburger sidebar drawer, 44/48 px
+> touch targets, viewport-clamped popovers, visibility/online SSE reconnect for
+> phone wake), captain finale embeds the CS2 `connect <ip>; password X` command +
+> "Copy team invite" button, `/api/veto/finale` mode pre-flight refuses if the
+> server isn't in a MatchZy mode, `/api/server/start` returns 4xx with preflight
+> reason instead of silent 200 OK, unified SSE transport (`_oblivionSSE` shared
+> module with exp backoff + reconnect re-arm + header status pill),
+> `/api/capabilities` endpoint for role-aware UI, fetch retry layer in `api.js`,
+> role pill in header, captain limbo screen, Rematch (same teams) button, last-10
+> matches persisted to `oblivion_matches.json`, optional Discord webhook posting
+> finale embeds.  Core features (v0.9.x) stable: remote-guest role, split team-size
+> modes (1v1 / 2v2 / 3v3 / 4v4 / 5v5), Warcraft menu/chat dispatchers, atomic config
+> save, multi-packet RCON sentinel.  Full spec [VETO.md](VETO.md); prose
+> [CHANGELOG.md](CHANGELOG.md).  **137/137 backend tests green** at v0.10.2.
 
 ---
 
