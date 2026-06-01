@@ -296,6 +296,20 @@ entry point in `app.js`; state comes from `/api/veto/state` + the SSE stream
 SSE cleanup on tab-leave hashchange; auto-reconnect on error (5 s backoff,
 matches the existing log-stream pattern).
 
+**Cinematics (v0.10.0 Day 5).**  Three layers of animation, all
+JS-gated so re-renders from SSE pings on the same state don't restart them:
+
+* `_vetoLastRenderedState` — when the state actually changes, the new
+  `.veto-stage` gets a `.veto-stage-enter` class → 320 ms fade-in.
+* `_vetoLastSeqLen` — when a new ban/pick lands, only the freshly-acted
+  map gets `.just-stamped` → stamp slam-in (520 ms scale + rotate bounce)
+  plus a 360 ms card shake.
+* `_vetoFinaleShownThisSession` — first arrival at `finale` triggers the
+  full reveal: title-rise, sub-fade, staggered map-pop (260 + 80×idx ms),
+  decider glow pulse (twice, 900 ms onwards), launch-button fade-in, and
+  a 30-piece CSS confetti shower (2.6 s).  All counters reset when state
+  flips back to `idle`, so a re-run gets fresh theatrics.
+
 ---
 
 ## `cs2servergui/core.py` (3681 lines)

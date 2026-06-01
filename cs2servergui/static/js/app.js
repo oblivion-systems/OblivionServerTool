@@ -1913,6 +1913,15 @@ let _vetoState = null;
 let _vetoEs = null;
 let _vetoLocalRoster = [];   // unsaved roster edits before Distribute commits
 
+// ── Animation bookkeeping (Day 5) ────────────────────────────────────────
+// All three are reset when the session goes back to `idle` (operator hit
+// Reset, or a fresh tab open) so a new session gets a fresh round of
+// theatrics.  Without this, the finale-already-played guard would suppress
+// confetti the second time around.
+let _vetoLastRenderedState = null;   // for stage-entry fade
+let _vetoLastSeqLen        = 0;      // for "just-stamped" detection on the board
+let _vetoFinaleShownThisSession = false;  // confetti + decider reveal play once
+
 const VETO_MODES = ['BO1', 'BO3', 'BO5'];
 
 function _vetoStageIndex(stateStr) {
@@ -1926,6 +1935,9 @@ function _vetoCleanup() {
   if (_vetoEs) { try { _vetoEs.close(); } catch (_) {} _vetoEs = null; }
   _vetoState = null;
   _vetoLocalRoster = [];
+  _vetoLastRenderedState = null;
+  _vetoLastSeqLen = 0;
+  _vetoFinaleShownThisSession = false;
 }
 
 pages['veto'] = function() {
@@ -1986,6 +1998,20 @@ function _renderVeto() {
   if (!root) return;
   const state = _vetoState.state;
   const sess  = _vetoState.session;
+
+  // ── Day 5: session-scoped animation state resets on idle ──────────────
+  // When the operator hits Reset, the snapshot flips back to state=idle.
+  // Clear the finale-already-played + seq-len trackers so a fresh session
+  // gets fresh confetti and fresh "just-stamped" stamps.
+  if (state === 'idle') {
+    _vetoLastSeqLen = 0;
+    _vetoFinaleShownThisSession = false;
+  }
+  // Detect state transition so we can play the stage-fade-in animation
+  // exactly once per state change (not on every SSE re-render of the same
+  // stage).  _vetoLastRenderedState is updated AFTER the renderer runs.
+  const stateChanged = (_vetoLastRenderedState !== state);
+
   // Stage-pill nav update
   const stageIdx = _vetoStageIndex(state);
   document.querySelectorAll('.veto-pill-cell').forEach(cell => {
@@ -2015,6 +2041,15 @@ function _renderVeto() {
     case 'complete': _renderVetoComplete(root, sess); break;
     default:         root.innerHTML = `<div class="card">Unknown state: ${esc(state)}</div>`;
   }
+  // ── Day 5: stage-entry fade-in ────────────────────────────────────────
+  // Tag the freshly-rendered .veto-stage so the CSS animation runs exactly
+  // once (when it enters the DOM tree) and doesn't re-fire on SSE pings
+  // that arrive while the operator is on the same stage.
+  if (stateChanged) {
+    const stageEl = root.querySelector('.veto-stage');
+    if (stageEl) stageEl.classList.add('veto-stage-enter');
+  }
+  _vetoLastRenderedState = state;
 }
 
 // Shortcut to the global SPA state (different from _vetoState — that's the
@@ -2350,11 +2385,28 @@ function _renderVetoBoard(root, sess) {
   const legal = new Set(sess.legal_moves || []);
   const banned = new Set();
   const picked = new Map();   // map -> 'pick'
-  (sess.sequence || []).forEach(st => {
+  const seq = sess.sequence || [];
+  seq.forEach(st => {
     if (!st.map_id) return;
     if (st.kind === 'BAN') banned.add(st.map_id);
     else if (st.kind === 'PICK') picked.set(st.map_id, st.team);
   });
+
+  // ── Day 5: detect the most-recently-acted-on map ─────────────────────
+  // If the sequence has grown since the last render, the new last filled
+  // entry is the fresh stamp.  Only that map's stamp + card get the
+  // slam-in animation — every other already-banned map stays static.
+  // After this render we update _vetoLastSeqLen so a subsequent re-render
+  // (e.g. an SSE ping that doesn't include a new step) won't re-trigger.
+  const filledCount = seq.filter(st => st.map_id).length;
+  let justStampedMap = null;
+  if (filledCount > _vetoLastSeqLen) {
+    // Walk the filled steps to find the last one's map.
+    for (let i = seq.length - 1; i >= 0; i--) {
+      if (seq[i].map_id) { justStampedMap = seq[i].map_id; break; }
+    }
+  }
+  _vetoLastSeqLen = filledCount;
 
   const teamName = (t) => t === 'A' ? sess.team_a_name : sess.team_b_name;
 
@@ -2362,17 +2414,20 @@ function _renderVetoBoard(root, sess) {
     const isBanned = banned.has(m);
     const isPicked = picked.has(m);
     const isLegal  = legal.has(m);
+    const isFresh  = (m === justStampedMap);
     const cls = ['veto-map-card'];
     if (isBanned) cls.push('banned');
     if (isPicked) cls.push('picked');
     if (!isBanned && !isPicked && !isLegal) cls.push('illegal');
+    if (isFresh) cls.push('just-stamped');
+    const stampCls = isFresh ? 'just-stamped' : '';
     return `
       <div class="${cls.join(' ')}" data-map="${esc(m)}">
         <img class="veto-map-thumb" src="/api/maps/thumb/${esc(m)}"
              onerror="this.style.display='none'">
         <div class="veto-map-name">${esc(m)}</div>
-        ${isBanned ? '<div class="veto-map-stamp ban">BAN</div>' : ''}
-        ${isPicked ? `<div class="veto-map-stamp pick">PICK ${esc(picked.get(m))}</div>` : ''}
+        ${isBanned ? `<div class="veto-map-stamp ban ${stampCls}">BAN</div>` : ''}
+        ${isPicked ? `<div class="veto-map-stamp pick ${stampCls}">PICK ${esc(picked.get(m))}</div>` : ''}
       </div>
     `;
   };
@@ -2409,8 +2464,25 @@ function _renderVetoBoard(root, sess) {
 function _renderVetoFinale(root, sess) {
   const maps = sess.final_maps || [];
   const decider = sess.decider;
+  // ── Day 5: cinematic entry only the first time we land on finale ─────
+  // SSE pings on the same state would otherwise re-trigger the confetti
+  // and decider zoom every few seconds — once is exactly enough.
+  const playEntry = !_vetoFinaleShownThisSession;
+  _vetoFinaleShownThisSession = true;
+  const entryCls = playEntry ? 'veto-finale-enter' : '';
+  // 30 confetti pieces — enough density to look celebratory, small enough
+  // not to murder GPU on the WebView2 layer.  Colours rotate via CSS
+  // nth-child so we don't need per-piece inline styles.  Only injected on
+  // first entry to keep the DOM lean on subsequent re-renders.
+  const confetti = playEntry ? `
+    <div class="veto-confetti" aria-hidden="true">
+      ${Array.from({length: 30}).map((_, i) =>
+        `<div class="veto-confetti-piece" style="left:${(i*3.3).toFixed(1)}%;animation-delay:${(i*0.08).toFixed(2)}s"></div>`
+      ).join('')}
+    </div>` : '';
   root.innerHTML = `
-    <div class="veto-stage veto-finale">
+    <div class="veto-stage veto-finale ${entryCls}">
+      ${confetti}
       <div class="veto-finale-title">Get Ready to Battle</div>
       <div class="veto-finale-sub">${esc(sess.team_a_name)} vs ${esc(sess.team_b_name)} · ${esc(sess.mode)}</div>
       <div class="veto-finale-maps">
