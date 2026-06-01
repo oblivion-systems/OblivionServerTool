@@ -2380,9 +2380,16 @@ function _renderVetoRoster(root, sess) {
   // Pull existing roster from server if local buffer is empty (e.g. SSE
   // arrived first OR we revisited the tab mid-roster).
   if (_vetoLocalRoster.length === 0) {
+    // v0.11.0 fix: include discord_id when hydrating from the server
+    // snapshot.  Without this, a tab-revisit / SSE re-render after
+    // partial typing would drop the operator's Discord ID input.
     _vetoLocalRoster = (sess.roster && sess.roster.length === 10)
-      ? sess.roster.map(p => ({ name: p.name, steam_id: p.steam_id }))
-      : Array.from({length: 10}, () => ({ name: '', steam_id: '' }));
+      ? sess.roster.map(p => ({
+          name: p.name,
+          steam_id: p.steam_id || '',
+          discord_id: p.discord_id || ''
+        }))
+      : Array.from({length: 10}, () => ({ name: '', steam_id: '', discord_id: '' }));
   }
   const filled = _vetoLocalRoster.filter(p => p.name.trim()).length;
   const ready  = filled === 10;
@@ -2468,7 +2475,7 @@ function _renderVetoRoster(root, sess) {
   el('veto-roster-demo').addEventListener('click', () => {
     const demo = ['Phoenix','Vortex','Stryker','Talon','Reaver',
                   'Wraith','Cypher','Onyx','Raven','Echo'];
-    _vetoLocalRoster = demo.map((n, i) => ({ name: n, steam_id: `STEAM_DEMO_${i}` }));
+    _vetoLocalRoster = demo.map((n, i) => ({ name: n, steam_id: `STEAM_DEMO_${i}`, discord_id: '' }));
     _renderVeto();
   });
   el('veto-roster-paste').addEventListener('click', async () => {
@@ -2476,7 +2483,7 @@ function _renderVetoRoster(root, sess) {
       const txt = await navigator.clipboard.readText();
       const lines = txt.split(/[\r\n]+/).map(s => s.trim()).filter(Boolean);
       if (lines.length < 10) { toast(`Need 10 names, clipboard has ${lines.length}`, 'var(--bad)'); return; }
-      _vetoLocalRoster = lines.slice(0, 10).map(n => ({ name: n, steam_id: '' }));
+      _vetoLocalRoster = lines.slice(0, 10).map(n => ({ name: n, steam_id: '', discord_id: '' }));
       _renderVeto();
       toast('Pasted 10 names');
     } catch (e) { toast(`Clipboard read failed: ${e.message}`, 'var(--bad)'); }
