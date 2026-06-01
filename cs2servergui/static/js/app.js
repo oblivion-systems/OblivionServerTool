@@ -452,6 +452,20 @@ function applyState(s) {
   // the operator can dismiss; auto-clears when next /api/state has empty
   // boot_error (e.g. after a successful Start or a Stop).
   _renderBootError(s.boot_error || '');
+
+  // v0.11.0 — Discord bot status line on Config page (when the page is open).
+  // No-op if the operator isn't on Config or hasn't configured a bot.
+  const discordStatus = el('cfg-discord-status');
+  if (discordStatus && s.discord_bot) {
+    const b = s.discord_bot;
+    if (!b.configured) {
+      discordStatus.innerHTML = '<span style="color:var(--text-4)">○ Bot not configured</span>';
+    } else if (b.connected) {
+      discordStatus.innerHTML = `<span style="color:var(--ok)">✓ Connected as <strong>${esc(b.user || '?')}</strong></span>`;
+    } else {
+      discordStatus.innerHTML = '<span style="color:var(--accent)">… Connecting</span>';
+    }
+  }
   // Pulse the Config update button when an update was detected (it stays a
   // normal forced-update button when not pulsing — the glow is just a cue).
   el('cfg-update-btn')?.classList.toggle('update-pending', !!s.update_available);
@@ -3268,6 +3282,38 @@ pages['config'] = async function() {
         </div>
 
         ${isLocal ? `
+        <div class="config-label">Discord (v0.11.0 bot integration)</div>
+        <div class="card mb-16">
+          <div class="text-sub text-sm" style="margin-bottom:12px">
+            Bot integration adds <strong>DM captain links</strong>, <strong>voice-channel roster pull</strong>, and <strong>live veto embed</strong> to your Discord server.
+            See <a href="https://github.com/jacquesvniekerk-eng/OblivionServerTool/blob/master/DISCORD.md">DISCORD.md</a> for the 5-minute setup guide.
+          </div>
+          <div class="field">
+            <label>Bot Token <span style="color:var(--text-4)">(local-only — never sent to remote sessions)</span></label>
+            <input class="input" id="cfg-discord-bot-token" type="password"
+                   value=""
+                   placeholder="${cfg.discord_bot_token ? '(unchanged — leave blank to keep, type CLEAR to remove)' : 'MTAxxxxxx.xxxxxxx.xxxxxxx...'}">
+          </div>
+          <div class="field" style="margin-top:10px">
+            <label>Server (Guild) ID</label>
+            <input class="input" id="cfg-discord-guild-id" type="text" inputmode="numeric"
+                   value="${esc(cfg.discord_guild_id||'')}"
+                   placeholder="123456789012345678">
+          </div>
+          <div class="field" style="margin-top:10px">
+            <label>Veto Embed Channel ID <span style="color:var(--text-4)">(optional — blank skips live embeds)</span></label>
+            <input class="input" id="cfg-discord-channel-id" type="text" inputmode="numeric"
+                   value="${esc(cfg.discord_veto_channel_id||'')}"
+                   placeholder="234567890123456789">
+          </div>
+          <div id="cfg-discord-status" class="text-sm" style="margin-top:12px;color:var(--text-3)">
+            <!-- Populated by pollState from /api/state.discord_bot -->
+          </div>
+          <button class="btn btn-accent btn-full mt-16" id="cfg-discord-save">Save Discord Settings</button>
+        </div>
+        ` : ''}
+
+        ${isLocal ? `
         <div class="config-label">Security</div>
         <div class="card mb-16">
           <div class="flex-col gap-8">
@@ -3389,6 +3435,25 @@ pages['config'] = async function() {
     try {
       await api.setConfig(data);
       toast('Veto settings saved');
+    } catch (e) { toast(e.message, 'var(--bad)'); }
+  });
+
+  // v0.11.0 — Discord bot settings save (local-only, conditional)
+  const discordSaveBtn = el('cfg-discord-save');
+  if (discordSaveBtn) discordSaveBtn.addEventListener('click', async () => {
+    const tokenVal = el('cfg-discord-bot-token').value.trim();
+    const guild    = el('cfg-discord-guild-id').value.trim();
+    const channel  = el('cfg-discord-channel-id').value.trim();
+    const data = {
+      discord_guild_id:          guild,
+      discord_veto_channel_id:   channel,
+    };
+    if (tokenVal === 'CLEAR') data.discord_bot_token = '';
+    else if (tokenVal) data.discord_bot_token = tokenVal;
+    // else leave undefined → server keeps existing value
+    try {
+      await api.setConfig(data);
+      toast('Discord settings saved — bot will connect in a moment if a token is set');
     } catch (e) { toast(e.message, 'var(--bad)'); }
   });
 
