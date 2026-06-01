@@ -2271,11 +2271,29 @@ function _renderVetoLinks(root, sess) {
   const card = (team, captain, claimed) => {
     const teamLetter = team.toLowerCase();
     const urls = _vetoTokenUrls[team];
+    // QR codes: SVG fetched from /api/veto/qr (server caches via Cache-Control).
+    // The same token URL is stable for the life of the token, so the browser
+    // re-uses the SVG across re-renders.  We show the LAN QR by default and
+    // the Public QR only if a public IP is configured — captain on phone
+    // scans whichever applies to their network.
+    const qrLan    = api.veto.qrUrl(urls.token, 'lan');
+    const qrPublic = urls.public ? api.veto.qrUrl(urls.token, 'public') : null;
     return `
       <div class="veto-link-card ${teamLetter}">
         ${claimed ? '<div class="veto-claimed-pill">CLAIMED</div>' : ''}
         <h3>${esc(team === 'A' ? sess.team_a_name : sess.team_b_name)}</h3>
         <div class="veto-cap-name">Captain: <strong>${esc(captain?.name || '—')}</strong></div>
+        <div class="veto-qr-row">
+          <div class="veto-qr-slot">
+            <img class="veto-qr" src="${qrLan}" alt="LAN QR" loading="lazy">
+            <div class="veto-qr-label">LAN</div>
+          </div>
+          ${qrPublic ? `
+          <div class="veto-qr-slot">
+            <img class="veto-qr" src="${qrPublic}" alt="Public QR" loading="lazy">
+            <div class="veto-qr-label">Public</div>
+          </div>` : ''}
+        </div>
         <div class="veto-link-url-row">
           <label>LAN</label>
           <div class="veto-url" title="${esc(urls.lan)}">${esc(urls.lan)}</div>
@@ -2316,7 +2334,9 @@ function _renderVetoLinks(root, sess) {
       try {
         const r = await api.veto.revokeToken(e.target.dataset.revoke);
         _vetoTokenUrls = _vetoTokenUrls || {};
-        _vetoTokenUrls[r.team] = r.urls;
+        // Merge token + urls into the same shape as /api/veto/tokens so
+        // the renderer (which reads urls.token for the QR) keeps working.
+        _vetoTokenUrls[r.team] = { token: r.token, ...r.urls };
         _renderVeto();
         toast(`New token issued for team ${r.team}`);
       } catch (err) { toast(err.message, 'var(--bad)'); }

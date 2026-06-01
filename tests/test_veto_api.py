@@ -428,6 +428,117 @@ def t_captain_can_hit_api_state():
 t('captain: GET /api/state → 200 (in _CAPTAIN_PATHS)', t_captain_can_hit_api_state)
 
 
+# ─── QR code endpoint (v0.10.0 Day 4) ─────────────────────────────────────
+def _setup_to_tokens():
+    """Drive to the post-resolve_captains stage and return (admin_client,
+    tokens_dict).  tokens_dict has the {A:{token,lan,public}, B:{...}} shape."""
+    _, _, c = _new_app()
+    _login(c)
+    c.post('/api/veto/create', json={'mode': 'BO3'})
+    c.post('/api/veto/roster', json={
+        'team_a_name': 'Alpha', 'team_b_name': 'Bravo',
+        'players': _ten_player_payload(),
+    })
+    c.post('/api/veto/distribute')
+    c.post('/api/veto/start_voting')
+    for team in ('A', 'B'):
+        for v in range(5):
+            c.post('/api/veto/vote', json={'team': team, 'voter_idx': v, 'votee_idx': 0})
+    c.post('/api/veto/resolve_captains')
+    tk = c.post('/api/veto/tokens').get_json()
+    return c, tk
+
+
+def t_tokens_response_includes_raw_token():
+    """Day 4 change: /api/veto/tokens now returns {token, lan, public} per
+    team (was just {lan, public}).  SPA needs the raw token to build QR URLs."""
+    _, tk = _setup_to_tokens()
+    return ('token' in tk['A'] and 'token' in tk['B']
+            and tk['A']['token'] and tk['B']['token']
+            and tk['A']['token'] in tk['A']['lan']), f'tk={tk}'
+t('tokens: response includes raw token per team', t_tokens_response_includes_raw_token)
+
+
+def t_qr_returns_svg_for_valid_token():
+    c, tk = _setup_to_tokens()
+    r = c.get(f"/api/veto/qr?token={tk['A']['token']}&kind=lan")
+    body = r.get_data(as_text=True)
+    return (r.status_code == 200
+            and r.mimetype == 'image/svg+xml'
+            and '<svg' in body
+            and len(body) > 200), f'status={r.status_code} mime={r.mimetype} len={len(body)}'
+t('qr: GET /api/veto/qr?token=…&kind=lan → SVG', t_qr_returns_svg_for_valid_token)
+
+
+def t_qr_rejects_unknown_token():
+    c, _tk = _setup_to_tokens()
+    r = c.get('/api/veto/qr?token=not-a-real-token-12345&kind=lan')
+    return r.status_code == 404, f'status={r.status_code}'
+t('qr: unknown token → 404', t_qr_rejects_unknown_token)
+
+
+def t_qr_rejects_missing_token():
+    c, _tk = _setup_to_tokens()
+    r = c.get('/api/veto/qr?kind=lan')
+    return r.status_code == 400, f'status={r.status_code}'
+t('qr: missing token → 400', t_qr_rejects_missing_token)
+
+
+def t_qr_rejects_bad_kind():
+    c, tk = _setup_to_tokens()
+    r = c.get(f"/api/veto/qr?token={tk['A']['token']}&kind=zigzag")
+    return r.status_code == 400, f'status={r.status_code}'
+t('qr: bad kind → 400', t_qr_rejects_bad_kind)
+
+
+def t_qr_requires_auth():
+    _, _, c_auth = _new_app()
+    _login(c_auth)
+    c_auth.post('/api/veto/create', json={'mode': 'BO3'})
+    c_auth.post('/api/veto/roster', json={
+        'team_a_name': 'Alpha', 'team_b_name': 'Bravo',
+        'players': _ten_player_payload(),
+    })
+    c_auth.post('/api/veto/distribute'); c_auth.post('/api/veto/start_voting')
+    for team in ('A','B'):
+        for v in range(5):
+            c_auth.post('/api/veto/vote', json={'team':team,'voter_idx':v,'votee_idx':0})
+    c_auth.post('/api/veto/resolve_captains')
+    tk = c_auth.post('/api/veto/tokens').get_json()
+    # Unauthenticated client (no cookies set) hitting the QR endpoint
+    from cs2servergui.core import AppCore
+    from cs2servergui.web import create_flask
+    # Re-use the same app via the auth'd client's transport: a fresh
+    # test_client() with the same Flask app but no session cookie.
+    fresh = c_auth.application.test_client()
+    r = fresh.get(f"/api/veto/qr?token={tk['A']['token']}&kind=lan")
+    return r.status_code == 401, f'status={r.status_code}'
+t('qr: unauthenticated → 401', t_qr_requires_auth)
+
+
+def t_qr_no_session_returns_400():
+    _, _, c = _new_app()
+    _login(c)
+    # No /api/veto/create called — session is None
+    r = c.get('/api/veto/qr?token=anything&kind=lan')
+    return r.status_code == 400, f'status={r.status_code}'
+t('qr: no active session → 400', t_qr_no_session_returns_400)
+
+
+def t_revoke_includes_token_in_response():
+    """Day 4 change: /api/veto/revoke_token now also returns the raw token
+    so the SPA can rebuild the QR URL after a revoke + reissue."""
+    c, tk = _setup_to_tokens()
+    r = c.post('/api/veto/revoke_token', json={'team': 'A'})
+    body = r.get_json()
+    return (r.status_code == 200
+            and 'token' in body
+            and body['token']
+            and body['token'] != tk['A']['token']
+            and body['token'] in body['urls']['lan']), f'body={body}'
+t('revoke: response includes new raw token', t_revoke_includes_token_in_response)
+
+
 # ─── Auto-generated pytest cases ──────────────────────────────────────────
 def _slug(name):
     out = ''.join(c if c.isalnum() else '_' for c in name).strip('_').lower()
