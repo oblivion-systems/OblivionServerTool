@@ -2496,21 +2496,24 @@ function _renderVetoFinale(root, sess) {
   const playEntry = !_vetoFinaleShownThisSession;
   _vetoFinaleShownThisSession = true;
   const entryCls = playEntry ? 'veto-finale-enter' : '';
-  // 30 confetti pieces — enough density to look celebratory, small enough
-  // not to murder GPU on the WebView2 layer.  Colours rotate via CSS
-  // nth-child so we don't need per-piece inline styles.  Only injected on
-  // first entry to keep the DOM lean on subsequent re-renders.
+  // v0.10.0.1 vibe rewrite: streaks not party-confetti.  18 narrow
+  // accent-coloured vertical tracers falling straight down at varying
+  // speeds.  Fewer pieces than the rainbow version because each carries
+  // more visual weight via its gradient comet-tail and the variance
+  // baked into nth-child rules in CSS.  Reads as digital tracer rounds /
+  // data stream — gamier than party confetti, lighter on GPU than 30
+  // rotating coloured rectangles.
   const confetti = playEntry ? `
     <div class="veto-confetti" aria-hidden="true">
-      ${Array.from({length: 30}).map((_, i) =>
-        `<div class="veto-confetti-piece" style="left:${(i*3.3).toFixed(1)}%;animation-delay:${(i*0.08).toFixed(2)}s"></div>`
+      ${Array.from({length: 18}).map((_, i) =>
+        `<div class="veto-confetti-piece" style="left:${(i*5.5 + (i*13) % 7).toFixed(1)}%;animation-delay:${(i*0.13).toFixed(2)}s"></div>`
       ).join('')}
     </div>` : '';
   root.innerHTML = `
     <div class="veto-stage veto-finale ${entryCls}">
       ${confetti}
-      <div class="veto-finale-title">Get Ready to Battle</div>
-      <div class="veto-finale-sub">${esc(sess.team_a_name)} vs ${esc(sess.team_b_name)} · ${esc(sess.mode)}</div>
+      <div class="veto-finale-title">${esc(sess.mode)} &middot; LOCKED IN</div>
+      <div class="veto-finale-sub">${esc(sess.team_a_name)} vs ${esc(sess.team_b_name)}</div>
       <div class="veto-finale-maps">
         ${maps.map((m, i) => `
           <div class="veto-finale-map ${m === decider ? 'decider' : ''}">

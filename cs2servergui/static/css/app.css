@@ -2540,8 +2540,15 @@ body.compact #content        { padding: 14px 16px; }
 
 .veto-finale { text-align: center; padding: 24px; }
 .veto-finale-title {
-  font-size: 32px; letter-spacing: 0.12em; text-transform: uppercase;
-  color: var(--text-1); margin-bottom: 12px;
+  /* Heavier + tighter than the v0.10.0 version — feels less "headline",
+   * more "system lock-in".  Monospace gives it the FPS-HUD readout vibe. */
+  font-family: var(--font-mono);
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--text-1);
+  margin-bottom: 16px;
 }
 .veto-finale-sub { color: var(--text-3); font-family: var(--font-mono); font-size: 12px;
   letter-spacing: 0.08em; margin-bottom: 24px; }
@@ -2567,129 +2574,195 @@ body.compact #content        { padding: 14px 16px; }
   font-size: 13px; letter-spacing: 0.16em; margin-bottom: 14px;
 }
 
-/* ─── Veto cinematics (v0.10.0 Day 5) ──────────────────────────────────
- * Animation rules:
- *   • Stage-enter fade plays exactly ONCE per state transition (JS-gated
- *     via .veto-stage-enter class — only stamped when state changed).
- *   • Stamp slam plays exactly ONCE per step performed (JS-gated via the
- *     `_vetoLastSeqLen` counter — only the freshly-acted map gets the
- *     .just-stamped class).
- *   • Confetti + decider reveal play exactly ONCE per session (JS-gated
- *     via `_vetoFinaleShownThisSession` — reset on `idle`).
- * `both` fill-mode pins the end state so the layout doesn't reflow after
- * the animation completes. */
+/* === Veto cinematics (v0.10.0.1 - "esports broadcast" rewrite) =========
+ * Day 5's first pass leaned too cheerful — pastel rainbow confetti and
+ * spring-bouncy pop-ins, like a birthday card.  This pass goes the other
+ * way: monochrome + accent only, sharp decisive motion, suggestion of
+ * weight + impact.  Think CS2/Valorant match-intro graphics or a FaceIt
+ * matchroom reveal.  No bounce, no spring, no rainbow.
+ *
+ * Same three JS gates as before:
+ *   * Stage-enter fade plays once per state transition (.veto-stage-enter)
+ *   * Stamp slam plays once per ban/pick (.just-stamped)
+ *   * Finale theatrics play once per session (.veto-finale-enter)
+ * `both` fill-mode pins the end state so layout doesn't reflow on exit.
+ *
+ * Easing language:
+ *   cubic-bezier(0.65, 0, 0.35, 1)   - sharp in-out, no overshoot
+ *   cubic-bezier(0.16, 1, 0.3, 1)    - heavy deceleration, lands with weight
+ *   cubic-bezier(0.7, 0, 0.84, 0)    - aggressive acceleration (exit)
+ * No spring/overshoot beziers anywhere — that's the "cute" feeling we
+ * killed off. */
 
-@keyframes veto-stage-fade-in {
-  from { opacity: 0; transform: translateY(6px); }
-  to   { opacity: 1; transform: translateY(0); }
+/* Stage entry: brief whiteout flash + slide-up.  The flash sells the
+ * "screen transition" feel without being a soft fade. */
+@keyframes veto-stage-snap-in {
+  0%   { opacity: 0; transform: translateY(8px); filter: brightness(2); }
+  35%  { opacity: 1;                            filter: brightness(1.4); }
+  100% { opacity: 1; transform: translateY(0);  filter: brightness(1); }
 }
 .veto-stage-enter {
-  animation: veto-stage-fade-in 320ms ease-out both;
+  animation: veto-stage-snap-in 280ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
-/* Stamp slam-in: starts huge + rotated wrong, snaps to natural rest with
- * a slight bounce.  The card itself does a tiny shake at the same time so
- * the player feels the impact, not just the stamp landing in vacuum. */
+/* === Ban/pick stamp slam =============================================== */
+/* No more rotated-30deg-cartoon-stamp.  This is a hard horizontal slam:
+ * the stamp slides in from offscreen with motion blur (via box-shadow
+ * trick: a duplicate ghost trailing behind), hits dead-center, locks. */
 @keyframes veto-stamp-slam {
-  0%   { opacity: 0; transform: translate(-50%, -50%) rotate(-35deg) scale(2.6); }
-  60%  { opacity: 1; transform: translate(-50%, -50%) rotate(-8deg)  scale(0.92); }
-  80%  {             transform: translate(-50%, -50%) rotate(-14deg) scale(1.05); }
-  100% { opacity: 1; transform: translate(-50%, -50%) rotate(-12deg) scale(1); }
+  0%   { opacity: 0;
+         transform: translate(-50%, -50%) translateX(-80px) scale(1.4);
+         filter: blur(4px); }
+  40%  { opacity: 1;
+         transform: translate(-50%, -50%) translateX(0)      scale(1.1);
+         filter: blur(0); }
+  55%  {
+         transform: translate(-50%, -50%) translateX(0)      scale(0.96);
+       }
+  100% { opacity: 1;
+         transform: translate(-50%, -50%) translateX(0)      scale(1);
+         filter: blur(0); }
 }
 .veto-map-stamp.just-stamped {
-  animation: veto-stamp-slam 520ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  animation: veto-stamp-slam 380ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  /* Override the resting -12deg tilt during the slam — we want it
+   * arriving straight, like a HUD lock-on, not a paper stamp. */
+  transform: translate(-50%, -50%);
+}
+.veto-map-stamp.just-stamped.ban  { box-shadow: 0 0 0 0 var(--bad); animation-name: veto-stamp-slam, veto-stamp-flash-bad;  animation-duration: 380ms, 240ms; animation-delay: 0ms, 360ms; animation-fill-mode: both, both; }
+.veto-map-stamp.just-stamped.pick { box-shadow: 0 0 0 0 var(--ok);  animation-name: veto-stamp-slam, veto-stamp-flash-good; animation-duration: 380ms, 240ms; animation-delay: 0ms, 360ms; animation-fill-mode: both, both; }
+@keyframes veto-stamp-flash-bad {
+  0%   { box-shadow: 0 0 0 0 var(--bad); }
+  50%  { box-shadow: 0 0 22px 4px var(--bad); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+@keyframes veto-stamp-flash-good {
+  0%   { box-shadow: 0 0 0 0 var(--ok); }
+  50%  { box-shadow: 0 0 22px 4px var(--ok); }
+  100% { box-shadow: 0 0 0 0 transparent; }
 }
 
-@keyframes veto-card-shake {
-  0%, 100% { transform: translateX(0); }
-  20% { transform: translateX(-3px); }
-  40% { transform: translateX(3px); }
-  60% { transform: translateX(-2px); }
-  80% { transform: translateX(2px); }
+/* Card hit: instead of left/right wobble (looks cartoony), a hard
+ * vertical jolt + brief border flash — feels like the card got
+ * "registered" by an FPS HUD. */
+@keyframes veto-card-jolt {
+  0%   { transform: translateY(0); }
+  20%  { transform: translateY(-4px); }
+  40%  { transform: translateY(2px); }
+  100% { transform: translateY(0); }
 }
 .veto-map-card.just-stamped {
-  animation: veto-card-shake 360ms ease-out;
+  animation: veto-card-jolt 280ms cubic-bezier(0.65, 0, 0.35, 1);
 }
 
-/* ── Finale entry choreography ──────────────────────────────────────────
- * Three layered animations on .veto-finale-enter:
- *   1. Title slides up + fades (0 → 380 ms)
- *   2. Sub-title fades in (200 → 580 ms)
- *   3. Each .veto-finale-map pops in staggered (250 + 80×idx ms)
- *   4. Decider gets an additional glow-pulse (700 ms onwards)
- *   5. Confetti rains for 3s
- * Without .veto-finale-enter (re-render of the same finale), no animation
- * runs — the page just renders in its final resting state. */
 
-@keyframes veto-title-rise {
-  from { opacity: 0; transform: translateY(20px); letter-spacing: 0.04em; }
-  to   { opacity: 1; transform: translateY(0);   letter-spacing: 0.12em; }
+/* === Finale entry choreography ========================================= */
+/* Old: title rises with letter-spacing expanding, maps pop with springy
+ *      overshoot, decider double-pulses, confetti rainbow.
+ * New: title hard-slides in from the left with motion blur snapping out,
+ *      an accent rule sweeps in below it from the right, maps slam in
+ *      with a diagonal clip-path wipe (no scale), decider gets a single
+ *      hard impact + locked-in accent border, "streaks" fall straight
+ *      down in accent color only (no rainbow).  Faster overall. */
+
+@keyframes veto-title-slam {
+  0%   { opacity: 0; transform: translateX(-60px) skewX(-12deg); filter: blur(8px); }
+  60%  { opacity: 1;                                              filter: blur(0); }
+  100% { opacity: 1; transform: translateX(0)     skewX(0);       filter: blur(0); }
 }
 .veto-finale-enter .veto-finale-title {
-  animation: veto-title-rise 480ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: veto-title-slam 420ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
+/* Sub-title still fades but faster + with a leading accent bar that
+ * sweeps in from the right (created via ::before pseudo-element on the
+ * sub container). */
 @keyframes veto-sub-fade {
-  from { opacity: 0; }
-  to   { opacity: 1; }
-}
-.veto-finale-enter .veto-finale-sub {
-  animation: veto-sub-fade 380ms ease-out both;
-  animation-delay: 220ms;
-}
-
-@keyframes veto-map-pop {
-  from { opacity: 0; transform: translateY(14px) scale(0.85); }
-  to   { opacity: 1; transform: translateY(0)    scale(1); }
-}
-.veto-finale-enter .veto-finale-map {
-  animation: veto-map-pop 420ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
-  opacity: 0;
-}
-/* Stagger up to 5 maps (BO5 is the max).  More than 5 just snaps to the
- * 5-slot delay — harmless and we don't ship modes that big. */
-.veto-finale-enter .veto-finale-map:nth-child(1) { animation-delay: 260ms; }
-.veto-finale-enter .veto-finale-map:nth-child(2) { animation-delay: 340ms; }
-.veto-finale-enter .veto-finale-map:nth-child(3) { animation-delay: 420ms; }
-.veto-finale-enter .veto-finale-map:nth-child(4) { animation-delay: 500ms; }
-.veto-finale-enter .veto-finale-map:nth-child(5) { animation-delay: 580ms; }
-
-/* Decider gets a glow pulse AFTER the pop completes.  We use a second
- * animation on the same element via comma-separated declarations. */
-@keyframes veto-decider-glow {
-  /* color-mix lets us fade the accent's alpha — the accent token is oklch
-   * so we can't just rgba(var(--accent), 0.55).  Modern WebView2 supports
-   * color-mix natively.  Fallback (older WebView): box-shadow simply
-   * doesn't render — the rest of the reveal still works. */
-  0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 0%, transparent); }
-  50%  { box-shadow: 0 0 28px 6px color-mix(in srgb, var(--accent) 55%, transparent); }
-  100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 0%, transparent); }
-}
-.veto-finale-enter .veto-finale-map.decider {
-  /* override the generic pop with a bigger one + the glow pulse after */
-  animation:
-    veto-map-pop 480ms cubic-bezier(0.34, 1.56, 0.64, 1) both,
-    veto-decider-glow 1.8s ease-in-out 900ms 2;
-  animation-delay: 700ms, 900ms;
-}
-
-/* Launch button + footer fade in last so the eye lands on them after the
- * maps have settled. */
-@keyframes veto-launch-fade {
-  from { opacity: 0; transform: translateY(8px); }
+  from { opacity: 0; transform: translateY(4px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-.veto-finale-enter #veto-launch-btn {
-  animation: veto-launch-fade 360ms ease-out both;
-  animation-delay: 900ms;
+.veto-finale-enter .veto-finale-sub {
+  animation: veto-sub-fade 280ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: 180ms;
+  position: relative;
+}
+.veto-finale-enter .veto-finale-sub::before {
+  content: '';
+  position: absolute; left: 50%; top: -8px;
+  height: 2px; width: 0;
+  background: var(--accent);
+  animation: veto-rule-sweep 360ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: 240ms;
+  transform: translateX(-50%);
+}
+@keyframes veto-rule-sweep {
+  from { width: 0; opacity: 0; }
+  to   { width: 60%; opacity: 0.85; }
 }
 
-/* ── Confetti ───────────────────────────────────────────────────────────
- * Absolutely positioned over the finale stage.  Each piece is a small
- * rotated rectangle that falls from -40 px to 600 px while spinning.
- * Colours rotate via :nth-child(N of …) — 5 hues mixed so it doesn't
- * read as a flag.  pointer-events: none so the Hand-to-MatchZy button
- * stays clickable underneath. */
+/* Map cards slide in via diagonal clip-path wipe + slight horizontal
+ * drift.  No scale change — feels less toy-like.  Stagger tighter
+ * (60 ms apart instead of 80 ms) so the whole reveal lands faster. */
+@keyframes veto-map-wipe {
+  0%   { opacity: 0;
+         transform: translateY(8px) translateX(-12px);
+         clip-path: polygon(0 0, 0 0, 0 100%, 0 100%); }
+  60%  { opacity: 1; }
+  100% { opacity: 1;
+         transform: translateY(0) translateX(0);
+         clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%); }
+}
+.veto-finale-enter .veto-finale-map {
+  animation: veto-map-wipe 380ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  opacity: 0;
+}
+.veto-finale-enter .veto-finale-map:nth-child(1) { animation-delay: 220ms; }
+.veto-finale-enter .veto-finale-map:nth-child(2) { animation-delay: 280ms; }
+.veto-finale-enter .veto-finale-map:nth-child(3) { animation-delay: 340ms; }
+.veto-finale-enter .veto-finale-map:nth-child(4) { animation-delay: 400ms; }
+.veto-finale-enter .veto-finale-map:nth-child(5) { animation-delay: 460ms; }
+
+/* Decider: single hard impact, not a soft pulsing glow.  Comes in slightly
+ * larger via the wipe, then snaps to rest with an instant accent flash
+ * around the border that locks in (doesn't fade out — stays as the
+ * permanent accent border for the decider). */
+@keyframes veto-decider-impact {
+  0%   { opacity: 0;
+         transform: translateY(16px) scale(1.1);
+         clip-path: polygon(0 0, 0 0, 0 100%, 0 100%);
+         box-shadow: 0 0 0 0 transparent; }
+  60%  { opacity: 1; box-shadow: 0 0 0 0 transparent; }
+  72%  { transform: translateY(0) scale(1.05);
+         clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%);
+         box-shadow: 0 0 40px 8px var(--accent), 0 0 0 2px var(--accent); }
+  100% { opacity: 1;
+         transform: translateY(0) scale(1);
+         clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%);
+         box-shadow: 0 0 16px 2px color-mix(in srgb, var(--accent) 40%, transparent),
+                     0 0 0 1px var(--accent); }
+}
+.veto-finale-enter .veto-finale-map.decider {
+  animation: veto-decider-impact 580ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: 540ms;
+  /* Final-state border stays accent-coloured — locked-in HUD feel */
+}
+
+/* Launch button: hard reveal, no soft fade.  Brief brightness flash. */
+@keyframes veto-launch-arm {
+  0%   { opacity: 0; transform: translateY(8px) scale(0.96); filter: brightness(1.8); }
+  60%  { opacity: 1; filter: brightness(1.4); }
+  100% { opacity: 1; transform: translateY(0) scale(1); filter: brightness(1); }
+}
+.veto-finale-enter #veto-launch-btn {
+  animation: veto-launch-arm 360ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: 820ms;
+}
+
+/* === Streaks (replaces rainbow confetti) ==============================
+ * Narrow vertical accent-coloured streaks falling straight down at
+ * varying speeds.  No rotation, no horizontal drift, no rainbow.  Reads
+ * as digital sparks / data streams / tracer rounds — gamier than party
+ * confetti.  pointer-events: none so the button stays clickable. */
 .veto-confetti {
   position: absolute; inset: 0; overflow: hidden; pointer-events: none;
   z-index: 1;
@@ -2698,23 +2771,32 @@ body.compact #content        { padding: 14px 16px; }
 .veto-finale-title, .veto-finale-sub, .veto-finale-maps, #veto-launch-btn {
   position: relative; z-index: 2;
 }
-@keyframes veto-confetti-fall {
-  0%   { transform: translateY(-40px) rotate(0deg);   opacity: 0; }
-  10%  { opacity: 1; }
-  90%  { opacity: 1; }
-  100% { transform: translateY(620px) rotate(720deg); opacity: 0; }
+@keyframes veto-streak-fall {
+  0%   { transform: translateY(-60px); opacity: 0; }
+  8%   { opacity: 1; }
+  92%  { opacity: 1; }
+  100% { transform: translateY(640px); opacity: 0; }
 }
 .veto-confetti-piece {
-  position: absolute; top: 0; width: 8px; height: 14px;
-  background: var(--accent);
-  animation: veto-confetti-fall 2.6s linear both;
+  position: absolute; top: 0;
+  width: 2px; height: 60px;
+  /* Accent color only — the gradient gives the streak a comet-like tail */
+  background: linear-gradient(to bottom,
+                              transparent 0%,
+                              color-mix(in srgb, var(--accent) 70%, transparent) 60%,
+                              var(--accent) 100%);
+  animation: veto-streak-fall 1.8s cubic-bezier(0.7, 0, 0.84, 0) both;
 }
-/* Colour rotation — five hues, with the accent (orange-ish) anchoring. */
-.veto-confetti-piece:nth-child(5n+1) { background: var(--accent); }
-.veto-confetti-piece:nth-child(5n+2) { background: var(--ok); }
-.veto-confetti-piece:nth-child(5n+3) { background: var(--blue, #5aa9e6); }
-.veto-confetti-piece:nth-child(5n+4) { background: #f6c84c; }   /* warm gold */
-.veto-confetti-piece:nth-child(5n+5) { background: #d96cc4; }   /* magenta accent */
-/* Every other piece falls slightly tilted for visual variety. */
-.veto-confetti-piece:nth-child(2n) { width: 6px; height: 10px; transform: rotate(15deg); }
-.veto-confetti-piece:nth-child(3n) { width: 10px; height: 6px; }
+/* Vary speed + width per streak so it doesn't read as a uniform rain.
+ * Every Nth piece is slower / thicker / lighter — gives depth + parallax. */
+.veto-confetti-piece:nth-child(3n)   { animation-duration: 2.4s; opacity: 0.6; width: 1px; height: 40px; }
+.veto-confetti-piece:nth-child(5n)   { animation-duration: 1.4s; width: 3px;  height: 80px; }
+.veto-confetti-piece:nth-child(7n)   { animation-duration: 2.0s; opacity: 0.4; width: 1px; height: 30px; }
+/* A few accent-on-white "tracer" streaks for contrast (1 in ~10) */
+.veto-confetti-piece:nth-child(10n+1) {
+  background: linear-gradient(to bottom,
+                              transparent 0%,
+                              color-mix(in srgb, var(--text-1) 30%, transparent) 50%,
+                              var(--text-1) 100%);
+  width: 1px; height: 50px; opacity: 0.5;
+}
