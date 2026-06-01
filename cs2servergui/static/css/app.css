@@ -2635,6 +2635,64 @@ body.compact #content        { padding: 14px 16px; }
   color: var(--text-4); margin-top: 10px;
 }
 
+/* v0.10.2 — Boot-error banner shown at the top of #content when the most
+ * recent Start was blocked by a preflight failure.  Sticky, dismissable,
+ * auto-clears when /api/state.boot_error goes empty (next successful Start
+ * or Stop). */
+.boot-error-banner {
+  margin: 12px 18px 0;
+  padding: 14px 16px;
+  background: color-mix(in srgb, var(--bad) 12%, var(--bg-1));
+  border: 1px solid var(--bad);
+  border-radius: 8px;
+}
+.boot-error-head {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 8px;
+  color: var(--text-1);
+  font-size: 14px;
+}
+.boot-error-icon { font-size: 18px; }
+.boot-error-dismiss {
+  margin-left: auto;
+  background: transparent; border: none;
+  color: var(--text-3);
+  font-size: 20px;
+  cursor: pointer; line-height: 1;
+  padding: 0 6px;
+}
+.boot-error-dismiss:hover { color: var(--text-1); }
+.boot-error-list {
+  margin: 0; padding-left: 22px;
+  color: var(--text-2);
+  font-family: var(--font-mono); font-size: 12px;
+  line-height: 1.55;
+}
+.boot-error-list li { margin: 2px 0; }
+
+/* v0.10.2 — Role pill in the header.  Lets a remote user (captain, guest,
+ * remote admin) verify the role their session is authenticated as.
+ * Coloured per-role so it's recognisable at a glance:
+ *   admin    — accent  (default theme)
+ *   captain  — ok-green (they're empowered to act for their team)
+ *   guest    — text-3   (muted; they have limited access)
+ */
+.role-pill {
+  display: inline-flex; align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 10px; font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  background: var(--bg-1);
+  border: 1px solid var(--line-1);
+  color: var(--text-2);
+}
+.role-pill.role-admin   { background: var(--accent); color: var(--bg-0); border-color: var(--accent); }
+.role-pill.role-captain { background: var(--ok);     color: var(--bg-0); border-color: var(--ok); }
+.role-pill.role-guest   { background: var(--bg-1);   color: var(--text-3); }
+
 /* v0.10.1 — Captain finale view: own Ready toggle + opponent status */
 .veto-captain-ready-block {
   margin: 24px 0 0 0; padding: 18px;

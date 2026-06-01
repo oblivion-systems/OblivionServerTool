@@ -458,6 +458,92 @@ t('/api/workshop/download: 409 when _active_dl_proc busy', t_workshop_download_4
 
 
 # ════════════════════════════════════════════════════════════════════
+# v0.10.2 — Pre-flight error surfacing + state shape additions
+# ════════════════════════════════════════════════════════════════════
+
+def t_server_start_returns_422_with_preflight_errors():
+    """When _preflight_checks fails, POST /api/server/start returns 422
+    with a `preflight_errors` list — not 200 OK with silent log-only.
+
+    We bypass the route's `is_installed` early-bail by patching the
+    property to True, AND we steer _preflight_checks to fail by pointing
+    _config.CS2_PATH at a non-existent file (the test machine may have
+    a real CS2 install so we can't rely on the default path being absent).
+    Both patches are restored in `finally` to keep this test hermetic."""
+    from cs2servergui.web import create_flask
+    from cs2servergui import config as _cfg
+    original_is_installed = AppCore.is_installed
+    original_cs2_path     = _cfg.CS2_PATH
+    AppCore.is_installed  = property(lambda self: True)
+    _cfg.CS2_PATH         = '/nope/this/path/does/not/exist/cs2.exe'
+    try:
+        ac = AppCore()
+        ac.admin_pin = '0000'
+        ac.server_dir = '/tmp/fake-server-dir'
+        app = create_flask(ac)
+        client = app.test_client()
+        client.post('/api/auth/login', json={'pin': '0000'})
+        r = client.post('/api/server/start', json={'map': 'de_dust2', 'mode': 'Competitive'})
+        body = r.get_json() or {}
+        return (r.status_code == 422
+                and 'preflight_errors' in body
+                and isinstance(body['preflight_errors'], list)
+                and len(body['preflight_errors']) >= 1), \
+               f'status={r.status_code} body_keys={list(body.keys())}'
+    finally:
+        AppCore.is_installed = original_is_installed
+        _cfg.CS2_PATH        = original_cs2_path
+t('/api/server/start: returns 422 with preflight_errors when preflight fails', t_server_start_returns_422_with_preflight_errors)
+
+
+def t_api_state_includes_boot_error_field():
+    """/api/state must include `boot_error` (string, empty by default).
+    SPA reads this to render the v0.10.2 dismissable banner when a Start
+    is refused at preflight."""
+    from cs2servergui.web import create_flask
+    ac = AppCore()
+    ac.admin_pin = '0000'
+    app = create_flask(ac)
+    client = app.test_client()
+    client.post('/api/auth/login', json={'pin': '0000'})
+    snap = client.get('/api/state').get_json() or {}
+    return ('boot_error' in snap
+            and isinstance(snap['boot_error'], str)
+            and snap['boot_error'] == ''), f'snap_keys={sorted(snap.keys())[:8]}...'
+t('/api/state: includes boot_error field (empty by default)', t_api_state_includes_boot_error_field)
+
+
+def t_api_state_includes_captain_team_field():
+    """/api/state must include `captain_team` so the SPA's captain finale
+    view knows which team's ready flag to toggle.  Empty string for
+    non-captain sessions (the admin in this test)."""
+    from cs2servergui.web import create_flask
+    ac = AppCore()
+    ac.admin_pin = '0000'
+    app = create_flask(ac)
+    client = app.test_client()
+    client.post('/api/auth/login', json={'pin': '0000'})
+    snap = client.get('/api/state').get_json() or {}
+    return ('captain_team' in snap and snap['captain_team'] == ''), f'snap={snap}'
+t('/api/state: includes captain_team field (empty for admin)', t_api_state_includes_captain_team_field)
+
+
+def t_stop_server_clears_last_start_error():
+    """stop_server() must clear the stale last_start_error so a successful
+    next-Start doesn't show a leftover banner from a failure two attempts ago."""
+    ac = AppCore()
+    ac.last_start_error = "Port 27015 is held by a non-CS2 process"
+    ac.running = True
+    # stop_server clears lots of state under _lifecycle_lock
+    try:
+        ac.stop_server()
+    except Exception:
+        pass    # may complain about no proc; we just care about the field
+    return ac.last_start_error == '', f'last_start_error={ac.last_start_error!r}'
+t('stop_server: clears last_start_error', t_stop_server_clears_last_start_error)
+
+
+# ════════════════════════════════════════════════════════════════════
 # Pytest entry points — one test function per battery case
 # ════════════════════════════════════════════════════════════════════
 # Generate `def test_*` functions at import time from the results list so
