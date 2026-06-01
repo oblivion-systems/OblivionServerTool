@@ -3029,6 +3029,9 @@ function _renderVetoFinaleCaptain(root, sess) {
 
 /* ── Complete ──────────────────────────────────────────────────────────── */
 function _renderVetoComplete(root, sess) {
+  // v0.10.2: Captain role sees a read-only summary (no rematch / reset
+  // buttons — those are operator decisions).
+  const isCap = (state_ && state_.server && state_.server.role === 'captain');
   root.innerHTML = `
     <div class="veto-stage veto-finale">
       <div class="veto-finale-title">Series Complete</div>
@@ -3041,13 +3044,40 @@ function _renderVetoComplete(root, sess) {
           </div>
         `).join('')}
       </div>
-      <button class="btn btn-accent" id="veto-new-btn">Start a new session →</button>
+      ${isCap ? `
+        <div style="color:var(--text-3);font-family:var(--font-mono);font-size:11px;margin-top:10px">
+          Operator will start the next match or reset the session.
+        </div>
+      ` : `
+        <div class="veto-complete-actions">
+          <button class="btn btn-accent" id="veto-rematch-btn"
+                  style="min-height:48px">
+            🔄 Rematch (same teams) →
+          </button>
+          <button class="btn btn-ghost" id="veto-new-btn"
+                  style="min-height:48px">
+            Start a new session →
+          </button>
+        </div>
+        <div style="color:var(--text-4);font-family:var(--font-mono);font-size:11px;margin-top:14px;max-width:480px;margin-left:auto;margin-right:auto">
+          <strong>Rematch</strong> keeps the 10 players + same captains + map pool; you'll re-issue captain links + run a fresh veto in seconds.
+          <strong>New session</strong> clears everything back to idle.
+        </div>
+      `}
     </div>
   `;
-  el('veto-new-btn').addEventListener('click', async () => {
-    try { await api.veto.reset(); toast('Ready for a new session'); }
-    catch (e) { toast(e.message, 'var(--bad)'); }
-  });
+  if (!isCap) {
+    el('veto-rematch-btn').addEventListener('click', async () => {
+      try {
+        await api.veto.rematch();
+        toast('Rematch — same teams, fresh BO. Click "Generate captain links" to mint new tokens.', 'var(--accent)');
+      } catch (e) { toast(e.message, 'var(--bad)'); }
+    });
+    el('veto-new-btn').addEventListener('click', async () => {
+      try { await api.veto.reset(); toast('Ready for a new session'); }
+      catch (e) { toast(e.message, 'var(--bad)'); }
+    });
+  }
 }
 
 /* ── Captain view (simplified — just shows the relevant action) ───────── */
@@ -3059,14 +3089,60 @@ function _renderVetoCaptain(root, state, sess) {
   }
   if (state === 'veto') return _renderVetoBoard(root, sess);
   if (state === 'finale' || state === 'complete') return _renderVetoFinale(root, sess);
-  // Pre-veto stages — captain just sees a waiting screen
+  // v0.10.2 — Pre-veto limbo screen: give the captain useful context about
+  // what's blocking instead of the generic "Current stage: voting"
+  // placeholder.  Per-state messages name the blocker + show progress so
+  // captains know whether to wait 30 seconds or 5 minutes.
+  const myTeam = (state_ && state_.server && state_.server.captain_team) || '';
+  const myTeamName = myTeam === 'A' ? sess.team_a_name
+                   : myTeam === 'B' ? sess.team_b_name
+                   : '';
+  const stageMessages = {
+    roster: {
+      heading: 'Operator is setting up the roster',
+      detail:  `Players in: ${(sess.roster || []).length}/10. Once all 10 are entered the operator will split into teams.`,
+    },
+    teams: {
+      heading: 'Teams have been split — captain vote next',
+      detail:  'Operator will start the captain vote shortly. You\'ll see your team\'s players when voting begins.',
+    },
+    voting: {
+      heading: 'Captain vote in progress',
+      detail:  (() => {
+        const va = Object.keys(sess.votes_a || {}).length;
+        const vb = Object.keys(sess.votes_b || {}).length;
+        return `Team votes: A ${va}/5, B ${vb}/5. The veto board appears once both captains are elected + claim their links.`;
+      })(),
+    },
+    links: {
+      heading: 'Waiting for the other captain to claim their link',
+      detail:  (() => {
+        const claimedA = sess.tokens_claimed?.A;
+        const claimedB = sess.tokens_claimed?.B;
+        const myClaimed = (myTeam === 'A') ? claimedA : claimedB;
+        const otherClaimed = (myTeam === 'A') ? claimedB : claimedA;
+        if (myClaimed && !otherClaimed) {
+          return 'You\'re in. The veto board will appear as soon as the other captain claims their link.';
+        }
+        return 'Both links need to be claimed before the veto board appears.';
+      })(),
+    },
+  };
+  const m = stageMessages[state] || {
+    heading: 'Waiting on operator',
+    detail:  `Current stage: ${esc(state)}.`,
+  };
   root.innerHTML = `
     <div class="veto-stage veto-captain-greeting">
-      <h2>Welcome, captain</h2>
-      <div class="veto-captain-team">Team — waiting on operator</div>
-      <div style="color:var(--text-3);font-family:var(--font-mono);font-size:11px">
-        Current stage: ${esc(state)}<br>
-        Your veto board will appear when both captains have claimed their links.
+      <h2>${esc(m.heading)}</h2>
+      ${myTeamName
+        ? `<div class="veto-captain-team">${esc(myTeamName)} · captain</div>`
+        : `<div class="veto-captain-team">Team — pending</div>`}
+      <div style="color:var(--text-3);font-family:var(--font-mono);font-size:12px;line-height:1.6;max-width:480px;margin:0 auto">
+        ${esc(m.detail)}
+      </div>
+      <div style="margin-top:18px;font-family:var(--font-mono);font-size:10px;letter-spacing:0.12em;color:var(--text-4)">
+        STAGE: ${esc(state).toUpperCase()} · LIVE
       </div>
     </div>
   `;
@@ -3175,6 +3251,19 @@ pages['config'] = async function() {
               <span class="toggle-track"></span><span class="toggle-thumb"></span>
             </label>
           </div>
+          ${isLocal ? `
+          <div class="field" style="margin-top:14px">
+            <label>Discord Webhook URL (post finale results to a channel)</label>
+            <input class="input" id="cfg-discord-webhook" type="password"
+                   value=""
+                   placeholder="${cfg.discord_webhook_url ? '(unchanged — leave blank to keep, type CLEAR to remove)' : 'https://discord.com/api/webhooks/...'}">
+            <small style="color:var(--text-3);font-size:11px;line-height:1.5;display:block;margin-top:6px">
+              When set, the tool POSTs an embed (teams + maplist + decider + connect string) to this Discord channel when a finale completes.
+              Captures most of the v0.11.0 Discord-bot value without the gateway setup.
+              <strong>Create a webhook:</strong> Discord channel → ⚙ → Integrations → Webhooks → New Webhook → Copy URL.
+            </small>
+          </div>
+          ` : ''}
           <button class="btn btn-accent btn-full mt-16" id="cfg-veto-save">Save Veto Settings</button>
         </div>
 
@@ -3284,11 +3373,21 @@ pages['config'] = async function() {
       toast('Public Share URL must start with http:// or https:// (or be blank)', 'var(--bad)');
       return;
     }
+    const data = {
+      public_share_url:          raw,
+      veto_auto_launch_on_ready: el('cfg-veto-auto-launch').checked,
+    };
+    // Discord webhook only present for local sessions.  "CLEAR" magic
+    // word lets the operator empty the field; blank = leave existing.
+    const discordEl = el('cfg-discord-webhook');
+    if (discordEl) {
+      const dv = discordEl.value.trim();
+      if (dv === 'CLEAR') data.discord_webhook_url = '';
+      else if (dv) data.discord_webhook_url = dv;
+      // else leave unset → server keeps existing value
+    }
     try {
-      await api.setConfig({
-        public_share_url:          raw,
-        veto_auto_launch_on_ready: el('cfg-veto-auto-launch').checked,
-      });
+      await api.setConfig(data);
       toast('Veto settings saved');
     } catch (e) { toast(e.message, 'var(--bad)'); }
   });

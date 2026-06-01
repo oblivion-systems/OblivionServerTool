@@ -2,16 +2,120 @@
 
 ---
 
-## v0.10.2 — In Progress (Mon → Thu, target Friday testing)
+## v0.10.2 — 2026-06-01 (release)
+
+Audit-driven online-primary polish phase.  Four focused days addressing
+~35 findings from a five-agent audit (mobile responsiveness, online
+workflow, feature integration, pre-v0.10.0 surface, cross-cutting
+concerns).  137/137 backend tests green at release.
+
+### Day 1 — Mobile + captain connect handoff + mode pre-flight
+* Single `@media (max-width: 640px)` block (~190 lines): sidebar→
+  hamburger drawer, popovers clamped to viewport, 44/48 px touch
+  targets, `clamp()` on big finale titles, `visibilitychange` SSE
+  re-arm, `@media (hover: none)` kills stuck-hover, `@media
+  (prefers-reduced-motion)` kills the cinematics for vestibular users.
+* Captain finale embeds `connect <ip>; password X` + Copy connect +
+  Copy team-invite buttons — the workflow gap that left captains
+  unable to tell their team where to join.
+* `/api/veto/finale` mode pre-flight refuses 409 if server isn't on a
+  MatchZy mode (Practice / 3v3 / 4v4 / 5v5 / Competitive).  `force:
+  true` body field bypasses.  `load_match: false` skips the check
+  (preview mode).
+
+### Day 2 — Pre-flight errors + local-only signposting + role pill
+* `_preflight_checks` now returns `(ok, errors)`.  `/api/server/start`
+  returns 422 with `preflight_errors` list instead of silently 200 OK
+  + log-only output.
+* `boot_error` field in `/api/state`; SPA renders dismissable red
+  banner at top of `#content` when set.
+* Local-only UI guards: hide CS2-update / app-update badges + log
+  drawer (for non-admin) + log Save button + LAN IP row for non-local
+  viewers.
+* App self-updater silently swallows GitHub 404 (private repo) instead
+  of logging noise every check interval.
+* New `#hdr-role-pill` next to state pill — shows admin / guest /
+  captain with team letter; coloured per role.
+
+### Day 3 — Unified SSE transport + /api/capabilities + retry layer
+* New `_oblivionSSE` shared module replaces two divergent reconnect
+  strategies (log capped at 12 retries; veto fixed 5 s).  Exponential
+  backoff (1→2→4→8→16→30 s capped), online/visibilitychange re-arm,
+  aggregate health status, header pill ("Live" / "Reconnecting…" /
+  "✗ Offline") so users distinguish quiet from broken.
+* Existing log + veto SSE refactored to use the shared module.
+* New `/api/capabilities` returns `{role, is_local, can: [tags…]}` —
+  single source of truth for role-aware UI.  Allowlisted for
+  guest + captain.
+* `api.js` retry layer: 10 s AbortController timeout, one retry on
+  network failure or HTTP 502/503/504 (Cloudflare tunnel hiccup).
+  Errors carry `.status / .body / .network`.
+* `/api/state` poll interval 3 s → 10 s.  At 7 users that's 140 RTT/min
+  → 42/min through the tunnel.  Plus immediate-poll on visibility
+  restore for fast catch-up on phone wake.
+
+### Day 4 — Polish + history + Discord webhook + ship
+* **Captain limbo screen.**  Pre-veto stages get a contextual heading
+  + progress (e.g. "Players in: 7/10" during roster, "Team votes: A
+  3/5, B 5/5" during voting) instead of the generic "Current stage:
+  voting" placeholder.
+* **Rematch button.**  New `veto.rematch()` + `/api/veto/rematch`.
+  Preserves team rosters + names + captains + map pool; clears tokens
+  + sequence + ready flags.  State machine gains a
+  `complete → links` transition specifically for this code path.
+  Optional `mode` + `map_pool` overrides.  SPA Complete page shows
+  "🔄 Rematch (same teams) →" alongside "Start a new session".
+* **Match history.**  Last 10 finales persisted to
+  `oblivion_matches.json` (atomic write + thread-safe append).
+  `veto.archive_to_history()` serialises matchid + teams + players +
+  maplist + decider + veto sequence.  New `GET /api/veto/history`
+  returns the list.
+* **Discord webhook on finale.**  New `discord_webhook_url` config
+  field (local-only write; remote round-trip masked as `***`).  When
+  set, finale POSTs an embed to the channel: title with mode + teams,
+  maplist with decider tagged, captains, MatchZy status, connect
+  command for spectators.  Background thread + 10 s timeout — failure
+  doesn't block the finale.
+
+### Version + build
+* `APP_VERSION` 0.10.1 → 0.10.2
+* `installer.iss` MyAppVersion 0.10.1 → 0.10.2
+* `OblivionServerTool.spec` unchanged from v0.10.1 (segno still
+  `collect_all`'d for QR codes)
+
+### Test totals at v0.10.2 release
+* `tests/test_v092.py` — 28/28 (Day 2 + 3 added 6 cases: preflight 422,
+  boot_error, captain_team, last_start_error clear, capabilities admin,
+  capabilities guest)
+* `tests/test_veto.py` — 58/58 (Day 4 added 4: rematch preserves teams,
+  rematch legal-only-from-complete, rematch mode switch, archive shape)
+* `tests/test_veto_api.py` — 51/51 (Day 1 added 4 mode pre-flight cases)
+* **All 137/137 green**
+
+### Explicitly cut from v0.10.2 (deferred or won't-do)
+* Animation rewrite (parked at operator's request)
+* "Go Online" header panel with cloudflared command generator
+* Public read-only spectator URL
+* Roster presets save/load
+* MatchZy cvar editor (overtime / max-rounds)
+* Bulk SteamID paste
+* Tournament brackets
+* iOS Safari < 16.2 graceful fallbacks
+* Full Discord bot (= v0.11.0; the webhook in Day 4 captures most of
+  the immediate value without the gateway complexity)
+
+---
+
+## v0.10.2 — Build journal (the in-progress writeups before release tag)
 
 **The "make-it-pleasant-online" phase.**  After v0.10.0 + v0.10.1 shipped the
 veto feature and the Cloudflare-friendly captain handoff, a five-agent audit
 (mobile responsiveness, online workflow, feature integration, pre-v0.10.0
 surface, cross-cutting concerns) surfaced ~35 actionable findings: ~10 blockers,
-~17 gaps, ~8 polish items.  v0.10.2 takes the BLOCKERs from all five audits
+~17 gaps, ~8 polish items.  v0.10.2 took the BLOCKERs from all five audits
 + the top three cross-cutting investments + the most-valuable workflow gaps
 into a single release, scoped to four working days so Friday is real testing
-not finishing.
+not finishing.  Daily prose below; release rollup is at the top of the file.
 
 ### Day 1 (Mon) — Mobile + two workflow blockers
 Mobile responsiveness was identified as **fundamentally broken** by the audit

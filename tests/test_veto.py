@@ -809,6 +809,75 @@ def t_reset_clears_ready_flags():
 t('reset: clears both ready flags', t_reset_clears_ready_flags)
 
 
+def t_rematch_preserves_teams_and_captains():
+    """v0.10.2: rematch from complete-state must keep team rosters +
+    names + captains but clear veto state."""
+    s = _make_to('complete')
+    teamA_before = list(s.team_a)
+    teamB_before = list(s.team_b)
+    capA_before  = s.captain_a_idx
+    capB_before  = s.captain_b_idx
+    nameA = s.team_a_name
+    nameB = s.team_b_name
+    V.rematch(s)
+    return (s.state == 'links'
+            and s.team_a == teamA_before
+            and s.team_b == teamB_before
+            and s.captain_a_idx == capA_before
+            and s.captain_b_idx == capB_before
+            and s.team_a_name == nameA
+            and s.team_b_name == nameB
+            and not s.tokens
+            and not s.sequence
+            and not s.final_maps
+            and s.ready_a is False
+            and s.ready_b is False), \
+           f'state={s.state} ta={len(s.team_a)} tb={len(s.team_b)} caps={s.captain_a_idx},{s.captain_b_idx} tokens={len(s.tokens)}'
+t('rematch: preserves teams + captains + names; clears veto state', t_rematch_preserves_teams_and_captains)
+
+
+def t_rematch_legal_only_from_complete():
+    """Rematch is a special complete→links jump.  Not legal from any
+    other state — operator must finish the current series first.
+    `idle` is a fresh VetoSession (no helper branch in _make_to)."""
+    for state in ('idle', 'roster', 'teams', 'voting', 'links', 'veto', 'finale'):
+        s = V.VetoSession() if state == 'idle' else _make_to(state)
+        try:
+            V.rematch(s)
+            return False, f'should have raised from state={state}'
+        except InvalidVetoTransition:
+            pass
+    return True, ''
+t('rematch: rejected from every non-complete state', t_rematch_legal_only_from_complete)
+
+
+def t_rematch_can_change_mode():
+    """Rematch accepts an optional `mode` switch (e.g. complete a BO3,
+    then rematch as BO1 if time's running short)."""
+    s = _make_to('complete')
+    assert s.mode == 'BO3'
+    V.rematch(s, mode='BO1')
+    return s.mode == 'BO1', f'mode={s.mode}'
+t('rematch: optional mode switch (BO3 → BO1)', t_rematch_can_change_mode)
+
+
+def t_archive_to_history_captures_fields():
+    """v0.10.2: archive_to_history serialises a finished session into a
+    dict the operator can read out of oblivion_matches.json later."""
+    s = _make_to('finale')
+    V.build_matchzy_config(s)
+    snap = V.archive_to_history(s)
+    needs = {'matchid', 'created_at', 'mode', 'team_a', 'team_b',
+             'captain_a', 'captain_b', 'final_maps', 'decider', 'sequence'}
+    return (needs.issubset(snap.keys())
+            and snap['mode'] == 'BO3'
+            and snap['decider'] == s.decider
+            and len(snap['final_maps']) == 3
+            and len(snap['sequence']) == 6), \
+           f'keys={sorted(snap.keys())}'
+t('archive_to_history: captures matchid + teams + maplist + sequence', t_archive_to_history_captures_fields)
+
+
 def t_reset_from_complete():
     """A finished session must accept reset() so the operator can
     start a fresh BO without restarting the app."""

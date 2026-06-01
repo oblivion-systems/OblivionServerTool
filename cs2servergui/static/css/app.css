@@ -2670,6 +2670,14 @@ body.compact #content        { padding: 14px 16px; }
 }
 .boot-error-list li { margin: 2px 0; }
 
+/* v0.10.2 — Complete-page action row.  Two buttons (Rematch + New session)
+ * stacked on mobile, side-by-side on desktop. */
+.veto-complete-actions {
+  display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;
+  margin-top: 18px;
+}
+.veto-complete-actions .btn { min-width: 220px; padding: 12px 24px; }
+
 /* v0.10.2 — SSE connection status pill.  Lives next to the role pill in
  * the header.  Hidden when SSE is healthy ("live") so it doesn't clutter
  * the chrome; appears as soon as the unified _oblivionSSE module flips

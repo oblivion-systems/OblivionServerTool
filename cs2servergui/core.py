@@ -494,6 +494,13 @@ class AppCore:
         #   default — admin clicks GO manually so they can verify the
         #   server's in the right mode first.
         self.veto_auto_launch_on_ready: bool = False
+        # v0.10.2 — Discord webhook URL.  When set, the tool POSTs an
+        # embed to this channel on every finale (teams + maplist + decider
+        # + connect string).  Captures most of the "spectators see results"
+        # value from a full Discord bot with 20 lines of code.  Operator
+        # creates a webhook in Discord channel settings + pastes the URL
+        # in Config → Veto / Match Setup.
+        self.discord_webhook_url:   str  = ""
 
         # Runtime state
         self.public_ip:           str                      = ""
@@ -665,6 +672,8 @@ class AppCore:
         # v0.10.1 — online-primary veto support (see __init__ for prose)
         self.public_share_url            = cfg.get("public_share_url", "")
         self.veto_auto_launch_on_ready   = bool(cfg.get("veto_auto_launch_on_ready", False))
+        # v0.10.2 — Discord webhook (see __init__ for prose)
+        self.discord_webhook_url         = cfg.get("discord_webhook_url", "")
 
         # Workshop command-filter detection results + manual overrides (wid → bool).
         self._cmdfilter_auto       = dict(cfg.get("cmdfilter_auto", {}))
@@ -710,6 +719,8 @@ class AppCore:
                 # v0.10.1 online-primary veto config
                 "public_share_url":              self.public_share_url,
                 "veto_auto_launch_on_ready":     self.veto_auto_launch_on_ready,
+                # v0.10.2 — Discord webhook
+                "discord_webhook_url":           self.discord_webhook_url,
             }
             # Atomic write: serialize via _config_save_lock so concurrent
             # save_config calls don't interleave (Flask is threaded), and use
