@@ -110,5 +110,24 @@ const api = (() => {
     // ── Log ───────────────────────────────────────────────────────────────
     logHistory: ()      => get('/api/log/history'),
     logSave:    ()      => post('/api/log/save'),
+
+    // ── Veto (v0.10.0) ─────────────────────────────────────────────────
+    veto: {
+      state:      ()                 => get('/api/veto/state'),
+      create:     (mode, mapPool)    => post('/api/veto/create', { mode, map_pool: mapPool }),
+      roster:     (teamA, teamB, ps) => post('/api/veto/roster', {
+                                          team_a_name: teamA, team_b_name: teamB, players: ps }),
+      distribute: ()                 => post('/api/veto/distribute'),
+      startVoting:()                 => post('/api/veto/start_voting'),
+      vote:       (team, vi, ti)     => post('/api/veto/vote', {
+                                          team, voter_idx: vi, votee_idx: ti }),
+      resolve:    ()                 => post('/api/veto/resolve_captains'),
+      tokens:     ()                 => post('/api/veto/tokens'),
+      revokeToken:(team)             => post('/api/veto/revoke_token', { team }),
+      claim:      (token)            => post('/api/veto/claim', { token }),
+      step:       (team, mapId)      => post('/api/veto/step', { team, map_id: mapId }),
+      finale:     (loadMatch=true)   => post('/api/veto/finale', { load_match: loadMatch }),
+      reset:      ()                 => post('/api/veto/reset'),
+    },
   };
 })();

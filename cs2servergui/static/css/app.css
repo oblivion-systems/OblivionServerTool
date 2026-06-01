@@ -2293,3 +2293,253 @@ body.compact #content        { padding: 14px 16px; }
   line-height: 1.5; max-width: 340px; margin-left: auto; margin-right: auto;
 }
 .empty-state-v2 .es-action { margin-top: 8px; }
+
+/* ══════════════════════════════════════════════════════════════ VETO (v0.10.0) */
+/* Compact SPA port of _prototypes/veto.html — reuses existing palette tokens.
+   Day 5 will layer cinematic finale animations (ban stamp, decider reveal,
+   confetti); this is the working flow. */
+
+.veto-hdr {
+  display: flex; align-items: center; gap: 14px; margin-bottom: 18px;
+  padding-bottom: 14px; border-bottom: 1px solid var(--line-1);
+}
+.veto-hdr h1 {
+  font-size: 22px; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--text-1); margin: 0;
+}
+.veto-hdr .veto-sub {
+  color: var(--text-3); font-family: var(--font-mono); font-size: 11px;
+  letter-spacing: 0.08em;
+}
+.veto-hdr .veto-spacer { flex: 1; }
+
+.veto-pill {
+  display: grid; grid-template-columns: repeat(5, 1fr); gap: 1px;
+  background: var(--line-1); border: 1px solid var(--line-1);
+  border-radius: 6px; overflow: hidden; margin-bottom: 24px;
+  font-family: var(--font-mono); font-size: 11px;
+}
+.veto-pill-cell {
+  background: var(--bg-1); color: var(--text-3); padding: 10px 12px;
+  display: flex; align-items: center; gap: 8px; letter-spacing: 0.06em;
+  transition: background .2s, color .2s;
+}
+.veto-pill-cell.active { background: var(--accent-dim); color: var(--text-1); }
+.veto-pill-cell.done   { background: var(--bg-2); color: var(--text-2); }
+.veto-pill-cell.done::after  { content: "OK"; margin-left: auto; color: var(--ok); font-weight: 700; }
+.veto-pill-num {
+  width: 18px; height: 18px; border-radius: 50%;
+  background: var(--bg-0); color: var(--text-2);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: 10px;
+}
+.veto-pill-cell.active .veto-pill-num { background: var(--accent); color: var(--bg-0); }
+
+.veto-stage { background: var(--bg-1); border: 1px solid var(--line-1);
+  border-radius: 8px; padding: 22px; }
+.veto-stage-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 18px; }
+.veto-stage-head h2 {
+  font-size: 18px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--text-1); margin: 0;
+}
+.veto-stage-head .sub { color: var(--text-3); font-family: var(--font-mono); font-size: 11px; }
+.veto-stage-actions { display: flex; gap: 10px; align-items: center; margin-top: 18px; }
+.veto-stage-actions .spacer { flex: 1; }
+
+.veto-create-card { max-width: 520px; }
+.veto-create-card .field { margin-bottom: 14px; }
+.veto-create-card label { display: block; font-family: var(--font-mono);
+  font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--text-3); margin-bottom: 6px; }
+.veto-mode-pills { display: flex; gap: 6px; }
+.veto-mode-pills .pill {
+  padding: 8px 18px; border: 1px solid var(--line-2); border-radius: 4px;
+  background: var(--bg-0); color: var(--text-2); cursor: pointer;
+  font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.1em;
+}
+.veto-mode-pills .pill.active { background: var(--accent); color: var(--bg-0); border-color: var(--accent); }
+
+.veto-roster-team-names { display: flex; gap: 10px; margin-bottom: 14px; }
+.veto-roster-team-names .veto-tn {
+  flex: 1; padding: 10px 14px; background: var(--bg-0); border: 1px solid var(--line-1);
+  border-radius: 6px; display: flex; flex-direction: column; gap: 4px;
+}
+.veto-roster-team-names .veto-tn label { font-family: var(--font-mono);
+  font-size: 10px; letter-spacing: 0.1em; color: var(--text-3); text-transform: uppercase; }
+.veto-roster-team-names .veto-tn input {
+  background: transparent; border: none; color: var(--text-1); font-size: 15px;
+  font-weight: 600; padding: 2px 0; width: 100%;
+}
+.veto-roster-team-names .veto-tn input:focus { outline: none; }
+.veto-roster-team-names .veto-tn.a { border-left: 3px solid var(--accent); }
+.veto-roster-team-names .veto-tn.b { border-left: 3px solid var(--blue, #5aa9e6); }
+
+.veto-roster-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;
+  margin-bottom: 12px; }
+.veto-roster-slot {
+  display: grid; grid-template-columns: 28px 1fr 160px; gap: 8px; align-items: center;
+  padding: 8px 12px; background: var(--bg-0); border: 1px solid var(--line-1);
+  border-radius: 5px;
+}
+.veto-roster-slot .veto-slot-num {
+  font-family: var(--font-mono); color: var(--text-4); font-size: 12px;
+}
+.veto-roster-slot input {
+  background: transparent; border: none; color: var(--text-1); font-size: 14px;
+  padding: 2px 0;
+}
+.veto-roster-slot input:focus { outline: none; }
+.veto-roster-slot input.veto-steam { font-family: var(--font-mono); font-size: 11px;
+  color: var(--text-2); }
+.veto-roster-slot.filled { border-color: var(--line-2); }
+
+.veto-roster-progress {
+  font-family: var(--font-mono); font-size: 11px; color: var(--text-3);
+  display: flex; align-items: center; gap: 8px;
+}
+.veto-ring {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; border-radius: 50%;
+  background: var(--bg-0); border: 1px solid var(--line-2);
+  color: var(--text-2); font-weight: 700; font-size: 11px;
+}
+.veto-ring.full { background: var(--ok); color: var(--bg-0); border-color: var(--ok); }
+
+.veto-teams { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.veto-team-col {
+  background: var(--bg-0); border: 1px solid var(--line-1); border-radius: 6px;
+  padding: 14px;
+}
+.veto-team-col.a { border-left: 3px solid var(--accent); }
+.veto-team-col.b { border-left: 3px solid var(--blue, #5aa9e6); }
+.veto-team-col h3 { font-size: 14px; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--text-1); margin: 0 0 10px 0; }
+.veto-team-list { display: flex; flex-direction: column; gap: 4px; }
+.veto-team-player {
+  padding: 6px 10px; background: var(--bg-1); border-radius: 4px;
+  font-size: 13px; color: var(--text-2);
+  display: flex; align-items: center; gap: 8px;
+}
+.veto-team-player.captain { background: var(--accent-dim); color: var(--text-1);
+  font-weight: 600; }
+.veto-team-player .veto-captain-badge { font-family: var(--font-mono); font-size: 9px;
+  letter-spacing: 0.12em; color: var(--accent); margin-left: auto; }
+
+.veto-vote-card .veto-vote-row {
+  display: flex; gap: 6px; align-items: center; margin-bottom: 6px;
+}
+.veto-vote-row .veto-voter {
+  width: 110px; font-size: 12px; color: var(--text-2);
+}
+.veto-vote-row .veto-vote-btns { display: flex; gap: 4px; flex: 1; }
+.veto-vote-row .veto-vote-btn {
+  flex: 1; padding: 6px 8px; background: var(--bg-1); border: 1px solid var(--line-1);
+  color: var(--text-3); border-radius: 4px; cursor: pointer;
+  font-family: var(--font-mono); font-size: 11px;
+}
+.veto-vote-row .veto-vote-btn.voted {
+  background: var(--accent); color: var(--bg-0); border-color: var(--accent);
+}
+.veto-vote-tally { font-family: var(--font-mono); font-size: 11px; color: var(--text-3);
+  margin-top: 8px; padding: 6px 10px; background: var(--bg-1); border-radius: 4px; }
+
+.veto-link-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.veto-link-card {
+  background: var(--bg-0); border: 1px solid var(--line-1); border-radius: 8px;
+  padding: 18px; position: relative;
+}
+.veto-link-card.a { border-left: 3px solid var(--accent); }
+.veto-link-card.b { border-left: 3px solid var(--blue, #5aa9e6); }
+.veto-link-card h3 { margin: 0 0 4px 0; font-size: 14px; letter-spacing: 0.1em;
+  text-transform: uppercase; }
+.veto-link-card .veto-cap-name { color: var(--text-2); font-size: 13px;
+  margin-bottom: 12px; }
+.veto-link-url-row {
+  display: grid; grid-template-columns: 60px 1fr 90px; gap: 8px; align-items: center;
+  margin-bottom: 8px;
+}
+.veto-link-url-row label { font-family: var(--font-mono); font-size: 10px;
+  letter-spacing: 0.1em; color: var(--text-3); text-transform: uppercase; }
+.veto-link-url-row .veto-url {
+  background: var(--bg-1); border: 1px solid var(--line-1); border-radius: 4px;
+  padding: 6px 10px; font-family: var(--font-mono); font-size: 11px;
+  color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.veto-claimed-pill { position: absolute; top: 14px; right: 14px;
+  padding: 4px 10px; background: var(--ok); color: var(--bg-0);
+  border-radius: 999px; font-family: var(--font-mono); font-size: 10px;
+  letter-spacing: 0.08em; }
+
+.veto-turn-banner {
+  text-align: center; padding: 18px; margin-bottom: 18px;
+  background: var(--accent-dim); border: 1px solid var(--accent);
+  border-radius: 8px;
+}
+.veto-turn-banner .veto-turn-team {
+  font-size: 24px; font-weight: 700; color: var(--text-1); letter-spacing: 0.08em;
+}
+.veto-turn-banner .veto-turn-kind {
+  font-family: var(--font-mono); font-size: 13px; letter-spacing: 0.12em;
+  color: var(--accent); margin-top: 4px;
+}
+.veto-board {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+}
+.veto-map-card {
+  position: relative; aspect-ratio: 16/9;
+  background: var(--bg-0); border: 1px solid var(--line-1); border-radius: 6px;
+  overflow: hidden; cursor: pointer; transition: border-color .15s, transform .15s;
+}
+.veto-map-card:hover { border-color: var(--accent); transform: translateY(-1px); }
+.veto-map-card.banned { opacity: 0.3; filter: grayscale(1); cursor: not-allowed;
+  border-color: var(--bad); }
+.veto-map-card.banned:hover { transform: none; }
+.veto-map-card.picked { border-color: var(--ok); border-width: 2px;
+  box-shadow: 0 0 0 2px var(--ok); }
+.veto-map-card.illegal { opacity: 0.4; cursor: not-allowed; }
+.veto-map-card.illegal:hover { transform: none; }
+.veto-map-thumb { width: 100%; height: 100%; object-fit: cover; display: block;
+  background: var(--bg-1); }
+.veto-map-name {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  padding: 6px 10px; background: rgba(0,0,0,0.7); color: white;
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.08em;
+}
+.veto-map-stamp {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-12deg);
+  font-family: var(--font-mono); font-size: 20px; font-weight: 800;
+  letter-spacing: 0.12em; padding: 4px 14px; border-radius: 4px;
+  border: 2px solid currentColor; pointer-events: none;
+}
+.veto-map-stamp.ban  { color: var(--bad); }
+.veto-map-stamp.pick { color: var(--ok); }
+
+.veto-finale { text-align: center; padding: 24px; }
+.veto-finale-title {
+  font-size: 32px; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--text-1); margin-bottom: 12px;
+}
+.veto-finale-sub { color: var(--text-3); font-family: var(--font-mono); font-size: 12px;
+  letter-spacing: 0.08em; margin-bottom: 24px; }
+.veto-finale-maps {
+  display: flex; gap: 12px; justify-content: center; margin-bottom: 28px;
+  flex-wrap: wrap;
+}
+.veto-finale-map {
+  background: var(--bg-0); border: 1px solid var(--line-1); border-radius: 6px;
+  padding: 14px 22px; font-family: var(--font-mono); font-size: 13px;
+  letter-spacing: 0.08em;
+}
+.veto-finale-map .veto-finale-label { font-size: 9px; color: var(--text-4);
+  letter-spacing: 0.14em; display: block; margin-bottom: 4px; }
+.veto-finale-map.decider { border-color: var(--accent); color: var(--accent); }
+
+.veto-captain-greeting { text-align: center; padding: 28px; }
+.veto-captain-greeting h2 { font-size: 24px; color: var(--text-1);
+  letter-spacing: 0.1em; text-transform: uppercase; margin: 0 0 6px 0; }
+.veto-captain-greeting .veto-captain-team {
+  display: inline-block; padding: 6px 18px; background: var(--accent);
+  color: var(--bg-0); border-radius: 999px; font-family: var(--font-mono);
+  font-size: 13px; letter-spacing: 0.16em; margin-bottom: 14px;
+}
