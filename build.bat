@@ -1,16 +1,30 @@
 @echo off
 setlocal
 
+REM Use `python -m pip` / `python -m PyInstaller` everywhere so the build
+REM uses the SAME Python interpreter that `python` resolves to on this
+REM machine.  Otherwise — on machines with multiple Python installs —
+REM `pip` and `pyinstaller` can resolve to a different Python whose
+REM site-packages doesn't have segno (or any other dep), and PyInstaller
+REM silently drops the missing module from the bundle without warning.
+REM Symptom: frozen .exe runs but throws "No module named 'X'" at runtime
+REM the first time the missing import fires.  v0.10.0 and v0.10.0.1 first
+REM build both shipped without segno because of this exact env mismatch.
+set "PY=python"
+
 echo [1/3] Installing dependencies...
-pip install -r requirements.txt --quiet
-pip install pyinstaller --quiet
+%PY% -m pip install -r requirements.txt --quiet
+%PY% -m pip install pyinstaller --quiet
+echo Python    : %PY%
+%PY% -c "import sys; print('Python ver:', sys.version.split()[0])"
+%PY% -c "import segno; print('segno ver :', segno.__version__, '(', segno.__file__, ')')"
 
 echo [1.5/3] Clearing previous build artefacts...
 if exist build\OblivionServerTool rmdir /s /q build\OblivionServerTool
 if exist dist\OblivionServerTool.exe del /f /q dist\OblivionServerTool.exe
 
 echo [2/3] Building executable...
-pyinstaller ^
+%PY% -m PyInstaller ^
   --onefile ^
   --windowed ^
   --noconfirm ^
