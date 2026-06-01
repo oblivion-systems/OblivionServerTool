@@ -1596,6 +1596,64 @@ def create_flask(core: AppCore) -> Flask:
         core.log(f"[veto] session created — mode={mode} pool=({len(snap['session']['map_pool'])} maps)")
         return jsonify(snap)
 
+    # ── Discord bot — voice-channel roster pull (v0.11.0 Layer 1B) ────────────
+    # Two thin endpoints over discord_bot:
+    #   GET /api/discord/voice_channels                — list channels in guild
+    #   GET /api/discord/voice_members?channel_id=...  — connected members
+    # The SPA Roster page calls the first to populate a picker, then the
+    # second to fill in the 10 player slots with {display_name, discord_id}.
+    # Operator still types SteamIDs by hand (Discord doesn't expose them).
+    # Admin-only via the role gate (NOT in _GUEST_PATHS / _CAPTAIN_PATHS).
+    # The data returned (channel names + connected member display names) is
+    # already public to anyone in the server, so admin-only is the right
+    # level — the bot token itself stays in local-only config writes.
+    @app.route("/api/discord/voice_channels")
+    @require_auth
+    def discord_voice_channels():
+        if not core.discord_guild_id:
+            return jsonify({
+                "error": "Discord guild ID not configured — set it in Config → Discord."
+            }), 400
+        try:
+            from . import discord_bot
+        except Exception as exc:
+            return jsonify({"error": f"bot module unavailable: {exc}"}), 503
+        if not discord_bot.bot_status().get("connected"):
+            return jsonify({"error": "Discord bot is not connected"}), 503
+        channels = discord_bot.bot_voice_channels(core.discord_guild_id)
+        if channels is None:
+            return jsonify({
+                "error": "Could not read voice channels — verify the bot has "
+                         "View Channels + Connect permissions on the server, "
+                         "and that the guild ID matches."
+            }), 502
+        return jsonify({"channels": channels})
+
+    @app.route("/api/discord/voice_members")
+    @require_auth
+    def discord_voice_members():
+        channel_id = request.args.get("channel_id", "").strip()
+        if not channel_id:
+            return jsonify({"error": "channel_id required"}), 400
+        if not core.discord_guild_id:
+            return jsonify({
+                "error": "Discord guild ID not configured — set it in Config → Discord."
+            }), 400
+        try:
+            from . import discord_bot
+        except Exception as exc:
+            return jsonify({"error": f"bot module unavailable: {exc}"}), 503
+        if not discord_bot.bot_status().get("connected"):
+            return jsonify({"error": "Discord bot is not connected"}), 503
+        members = discord_bot.bot_voice_members(core.discord_guild_id, channel_id)
+        if members is None:
+            return jsonify({
+                "error": "Could not read channel members — verify the channel ID "
+                         "is correct, the bot has access, and Server Members "
+                         "intent is enabled in Developer Portal."
+            }), 502
+        return jsonify({"members": members})
+
     @app.route("/api/veto/roster", methods=["POST"])
     @require_auth
     def veto_roster():

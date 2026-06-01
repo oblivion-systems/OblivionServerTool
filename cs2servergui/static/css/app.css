@@ -2614,6 +2614,95 @@ body.compact #content        { padding: 14px 16px; }
   animation: veto-launch-armed-pulse 1.8s ease-in-out infinite;
 }
 
+/* v0.11.0 Layer 1B — Voice-channel pull modal.  Centred dialog over a dim
+ * backdrop.  Reusable shell for future modals if needed (only this one
+ * uses .veto-modal-* classes today). */
+.veto-modal-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 1000;
+  padding: 16px;
+  animation: veto-modal-fade-in 180ms ease-out both;
+}
+@keyframes veto-modal-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.veto-modal {
+  background: var(--bg-1);
+  border: 1px solid var(--line-1);
+  border-radius: 10px;
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100vh - 64px);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+}
+.veto-modal-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--line-1);
+}
+.veto-modal-head h2 {
+  margin: 0;
+  font-size: 16px;
+  font-family: var(--font-mono);
+  letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--text-1);
+}
+.veto-modal-close {
+  background: transparent; border: none;
+  color: var(--text-3);
+  font-size: 24px; line-height: 1;
+  cursor: pointer; padding: 0 6px;
+}
+.veto-modal-close:hover { color: var(--text-1); }
+.veto-modal-body {
+  padding: 18px 20px 22px;
+  overflow-y: auto;
+}
+
+/* Channel picker buttons inside the modal */
+.veto-pull-channel-list {
+  display: flex; flex-direction: column; gap: 6px;
+}
+.veto-pull-channel {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px;
+  background: var(--bg-0); border: 1px solid var(--line-1);
+  border-radius: 6px;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: border-color 120ms ease-out, background 120ms ease-out;
+  text-align: left;
+  font-family: inherit;
+  font-size: 14px;
+  min-height: 48px;
+}
+.veto-pull-channel:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-0));
+}
+.veto-pull-channel:disabled {
+  opacity: 0.45; cursor: not-allowed;
+}
+.veto-pull-channel.has   { border-color: var(--accent); }
+.veto-pull-channel.ready {
+  border-color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 10%, var(--bg-0));
+}
+.veto-pull-channel-name {
+  font-weight: 500;
+  color: var(--text-1);
+}
+.veto-pull-channel-count {
+  font-family: var(--font-mono); font-size: 11px;
+  letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--text-3);
+}
+.veto-pull-channel.ready .veto-pull-channel-count { color: var(--ok); }
+
 /* v0.10.2 — Captain connect block on the finale (the workflow handoff that
  * was missing from v0.10.0/.1).  Shown to captains AND admins on the
  * finale page; backend only populates `match_connect` at finale/complete

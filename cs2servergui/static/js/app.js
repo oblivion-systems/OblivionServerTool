@@ -2421,6 +2421,10 @@ function _renderVetoRoster(root, sess) {
       <div class="veto-stage-actions">
         <button class="btn btn-ghost" id="veto-roster-demo">Demo names</button>
         <button class="btn btn-ghost" id="veto-roster-paste">Paste 10 names</button>
+        <button class="btn btn-ghost" id="veto-roster-discord"
+                title="Pull a voice channel's connected members into the roster (auto-fills name + Discord ID)">
+          🎤 Pull from voice channel
+        </button>
         <div class="spacer"></div>
         <div class="veto-roster-progress">
           <span class="veto-ring ${ready?'full':''}">${filled}</span>
@@ -2488,6 +2492,15 @@ function _renderVetoRoster(root, sess) {
       toast('Pasted 10 names');
     } catch (e) { toast(`Clipboard read failed: ${e.message}`, 'var(--bad)'); }
   });
+
+  // v0.11.0 Layer 1B — Pull roster from a Discord voice channel.  Opens a
+  // modal listing every voice channel in the operator's guild (with live
+  // connected counts); operator picks one + the modal fetches the members
+  // and overwrites _vetoLocalRoster with their {display_name, discord_id}
+  // pairs.  SteamIDs still typed by hand (Discord doesn't expose them).
+  el('veto-roster-discord').addEventListener('click', async () => {
+    await _vetoOpenDiscordPullModal();
+  });
   const saveBtn = el('veto-roster-save');
   if (saveBtn) saveBtn.addEventListener('click', async () => {
     try {
@@ -2507,6 +2520,118 @@ function _renderVetoRoster(root, sess) {
     try { await api.veto.distribute(); toast('Teams distributed'); }
     catch (e) { toast(e.message, 'var(--bad)'); }
   });
+}
+
+/* ── v0.11.0 Layer 1B — Discord voice-channel roster pull modal ───────── */
+async function _vetoOpenDiscordPullModal() {
+  // Build the modal shell.  Removed on close to keep the DOM clean.
+  let modal = el('veto-discord-pull-modal');
+  if (modal) modal.remove();
+  modal = document.createElement('div');
+  modal.id = 'veto-discord-pull-modal';
+  modal.className = 'veto-modal-backdrop';
+  modal.innerHTML = `
+    <div class="veto-modal" role="dialog" aria-label="Pull from voice channel">
+      <div class="veto-modal-head">
+        <h2>🎤 Pull from voice channel</h2>
+        <button class="veto-modal-close" aria-label="Close">×</button>
+      </div>
+      <div class="veto-modal-body" id="veto-pull-body">
+        <div style="text-align:center;padding:30px;color:var(--text-3)">
+          Loading channels…
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  const close = () => { try { modal.remove(); } catch(_){} };
+  modal.querySelector('.veto-modal-close').addEventListener('click', close);
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) close();      // backdrop click closes
+  });
+
+  // Fetch + render channel list
+  try {
+    const r = await api.discord.voiceChannels();
+    const channels = r.channels || [];
+    const body = el('veto-pull-body');
+    if (channels.length === 0) {
+      body.innerHTML = `
+        <div style="padding:24px;text-align:center;color:var(--text-3)">
+          No voice channels found in this server.  Check that the bot has
+          <strong>View Channels</strong> permission.
+        </div>
+      `;
+      return;
+    }
+    body.innerHTML = `
+      <div style="color:var(--text-3);font-size:13px;margin-bottom:14px">
+        Pick a voice channel.  The connected members will overwrite your
+        current roster (names + Discord IDs).  Need exactly 10 connected.
+      </div>
+      <div class="veto-pull-channel-list">
+        ${channels.map(ch => `
+          <button class="veto-pull-channel ${ch.member_count === 10 ? 'ready' : (ch.member_count >= 1 ? 'has' : '')}"
+                  data-channel-id="${esc(ch.id)}"
+                  data-channel-name="${esc(ch.name)}"
+                  ${ch.member_count === 0 ? 'disabled' : ''}>
+            <span class="veto-pull-channel-name">${esc(ch.name)}</span>
+            <span class="veto-pull-channel-count">
+              ${ch.member_count} ${ch.member_count === 1 ? 'member' : 'members'}
+              ${ch.member_count === 10 ? ' ✓' : ''}
+            </span>
+          </button>
+        `).join('')}
+      </div>
+    `;
+    // Wire each channel button → fetch members → fill roster → close
+    body.querySelectorAll('.veto-pull-channel').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const channelId   = btn.dataset.channelId;
+        const channelName = btn.dataset.channelName;
+        btn.textContent = '… loading members';
+        try {
+          const r2 = await api.discord.voiceMembers(channelId);
+          const members = r2.members || [];
+          if (members.length === 0) {
+            toast('Channel has no connected members', 'var(--bad)');
+            close();
+            return;
+          }
+          if (members.length > 10) {
+            toast(`Channel has ${members.length} members — only the first 10 will be used`,
+                  'var(--accent)');
+          }
+          // Overwrite local roster.  Pad to 10 with empty slots if fewer
+          // than 10 are connected so the operator can still see all rows.
+          _vetoLocalRoster = Array.from({length: 10}, (_, i) => {
+            const m = members[i];
+            return m
+              ? { name: m.display_name || '', steam_id: m.steam_id || '',
+                  discord_id: m.discord_id || '' }
+              : { name: '', steam_id: '', discord_id: '' };
+          });
+          close();
+          _renderVeto();
+          toast(`Pulled ${Math.min(members.length, 10)} members from #${channelName}`,
+                'var(--ok)');
+        } catch (err) {
+          toast(`Pull failed: ${err.message}`, 'var(--bad)');
+          close();
+        }
+      });
+    });
+  } catch (err) {
+    el('veto-pull-body').innerHTML = `
+      <div style="padding:24px;text-align:center;color:var(--bad)">
+        ${esc(err.message || 'Failed to fetch voice channels')}
+      </div>
+      <div style="padding:0 24px 24px;text-align:center;color:var(--text-4);font-size:11px">
+        Need help?  See <a href="https://github.com/jacquesvniekerk-eng/OblivionServerTool/blob/master/DISCORD.md">DISCORD.md</a>
+        for permissions + setup.
+      </div>
+    `;
+  }
 }
 
 /* ── Teams ─────────────────────────────────────────────────────────────── */
