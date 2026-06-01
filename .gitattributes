@@ -1,0 +1,12 @@
+# Force Windows line endings for files that cmd.exe / PowerShell parses.
+# Without this, the file's eol depends on each contributor's core.autocrlf
+# setting; LF-only .bat files cause cmd.exe to silently abort on multi-line
+# if-blocks (window flashes open and closes).
+*.bat       text eol=crlf
+*.cmd       text eol=crlf
+*.ps1       text eol=crlf
+
+# Inno Setup compiler (ISCC) also expects CRLF.
+*.iss       text eol=crlf
+
+# Everything else: let git autocrlf settings + the user's platform decide.
