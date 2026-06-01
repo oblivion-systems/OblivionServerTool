@@ -1,29 +1,17 @@
 @echo off
 REM ==========================================================================
 REM  pull-latest.bat - fetch the latest OblivionServerTool.exe release
-REM  and drop it into dist\ ready to launch.   (v2 - CRLF guaranteed)
 REM
-REM  Why this exists: the repo is private, so a plain curl/wget can't reach
-REM  the release asset.  This script piggybacks on your existing `gh` CLI
-REM  auth (the same one that publishes the releases) to download the .exe
-REM  without exposing any tokens in the script itself.
+REM  v3: rewritten with `if X goto :label` style instead of multi-line
+REM  `if X ( ... )` blocks.  cmd.exe's parser is notoriously fragile with
+REM  multi-line if-blocks when their bodies contain colons (e.g. URLs like
+REM  `https://...`), which caused the earlier "then was unexpected at
+REM  this time" parser error.  Single-line if + explicit label jumps
+REM  sidestep that entire class of bug.
 REM
-REM  What it does:
-REM    1. Verifies gh CLI is installed + authenticated
-REM    2. Refuses to overwrite if OblivionServerTool.exe is currently running
-REM       (so you can save state cleanly first)
-REM    3. Backs up your current exe to dist\OblivionServerTool.exe.bak
-REM    4. Downloads the latest release's .exe to dist\
-REM    5. Offers to launch it
-REM
-REM  NOTE: This file is ASCII-only.  cmd.exe on the default Windows code page
-REM  (1252) silently aborts on multi-byte UTF-8 sequences in comments, which
-REM  is why earlier attempts with fancy unicode dashes flashed and died.
+REM  ASCII-only.  Forced CRLF via .gitattributes (*.bat text eol=crlf).
 REM ==========================================================================
 setlocal
-
-REM Run from the script's own directory so dist\ resolves correctly even
-REM when invoked via right-click -> Run or from a shortcut.
 pushd "%~dp0"
 
 set "REPO=jacquesvniekerk-eng/OblivionServerTool"
@@ -41,71 +29,40 @@ echo.
 
 REM --- 1. gh CLI present? -----------------------------------------------
 where gh >nul 2>&1
-if errorlevel 1 (
-  echo [X] gh CLI not found on PATH.
-  echo     Install from https://cli.github.com/ or run:
-  echo         winget install --id GitHub.cli
-  goto :fail
-)
+if errorlevel 1 goto :no_gh
 
 REM --- 2. gh authenticated? ---------------------------------------------
 gh auth status >nul 2>&1
-if errorlevel 1 (
-  echo [X] gh CLI not authenticated.  Run: gh auth login
-  echo     Pick GitHub.com, HTTPS, login with web browser.
-  goto :fail
-)
+if errorlevel 1 goto :no_auth
 
 REM --- 3. App not running? ----------------------------------------------
-REM   Refuse to overwrite a running .exe -- Windows would lock the file and
-REM   the user would lose any unsaved state.  Operator closes from the tray
-REM   first, then re-runs.
-tasklist /FI "IMAGENAME eq %EXE_NAME%" 2>nul | find /I "%EXE_NAME%" >nul
-if not errorlevel 1 (
-  echo [!] %EXE_NAME% is currently running.
-  echo     Close it from the system tray or app window first
-  echo     (so it saves state cleanly), then re-run this script.
-  goto :fail
-)
+tasklist /FI "IMAGENAME eq %EXE_NAME%" 2>nul | findstr /I "%EXE_NAME%" >nul
+if not errorlevel 1 goto :running
 
 REM --- 4. Ensure dest dir exists ----------------------------------------
 if not exist "%DEST_DIR%" mkdir "%DEST_DIR%"
 
-REM --- 5. Show the release we'll pull -----------------------------------
+REM --- 5. Query latest release tag --------------------------------------
 echo [i] Querying latest release...
 set "TAG="
 for /f "usebackq delims=" %%v in (`gh release view --repo %REPO% --json tagName -q ".tagName" 2^>nul`) do set "TAG=%%v"
-if "%TAG%"=="" (
-  echo [X] Couldn't read latest release.  Possible causes:
-  echo     - no releases published yet
-  echo     - your gh token lacks read access to %REPO%
-  goto :fail
-)
+if "%TAG%"=="" goto :no_release
 echo [i] Latest release tag: %TAG%
 
-REM --- 6. Back up existing exe (if any) ---------------------------------
-if exist "%DEST%" (
-  echo [i] Backing up existing exe to %BACKUP%
-  copy /Y "%DEST%" "%BACKUP%" >nul
-  if errorlevel 1 (
-    echo [X] Backup failed.  Aborting before overwriting %DEST%.
-    goto :fail
-  )
-)
+REM --- 6. Back up existing exe ------------------------------------------
+if not exist "%DEST%" goto :skip_backup
+echo [i] Backing up existing exe to %BACKUP%
+copy /Y "%DEST%" "%BACKUP%" >nul
+if errorlevel 1 goto :backup_failed
+:skip_backup
 
 REM --- 7. Download via gh -----------------------------------------------
 echo [i] Downloading %EXE_NAME% from release %TAG%...
 gh release download %TAG% --repo %REPO% --pattern %EXE_NAME% --dir %DEST_DIR% --clobber
-if errorlevel 1 (
-  echo [X] Download failed.  If you backed up your old exe it's still at:
-  echo         %BACKUP%
-  goto :fail
-)
+if errorlevel 1 goto :download_failed
 
 REM --- 8. Report what we got --------------------------------------------
-for %%I in ("%DEST%") do (
-  echo [+] Downloaded %%~zI bytes  /  %%~tI
-)
+for %%I in ("%DEST%") do echo [+] Downloaded %%~zI bytes - %%~tI
 
 REM --- 9. Offer to launch -----------------------------------------------
 echo.
@@ -113,20 +70,63 @@ choice /M "Launch the new version now"
 if errorlevel 2 goto :done
 echo [i] Launching %DEST%...
 start "" "%DEST%"
+goto :done
+
+
+REM ====================================================================
+REM   Error handlers
+REM ====================================================================
+
+:no_gh
+echo [X] gh CLI not found on PATH.
+echo     Install: winget install --id GitHub.cli
+goto :fail
+
+:no_auth
+echo [X] gh CLI not authenticated.
+echo     Run: gh auth login
+echo     Pick GitHub.com, HTTPS, web browser.
+goto :fail
+
+:running
+echo [!] %EXE_NAME% is currently running.
+echo     Close it from the system tray or app window first
+echo     so it can save state cleanly, then re-run this script.
+goto :fail
+
+:no_release
+echo [X] Could not read latest release.  Possible causes:
+echo     - no releases published yet
+echo     - your gh token lacks read access to %REPO%
+goto :fail
+
+:backup_failed
+echo [X] Backup failed.  Aborting before overwriting %DEST%.
+goto :fail
+
+:download_failed
+echo [X] Download failed.  If you backed up your old exe it is at:
+echo         %BACKUP%
+goto :fail
+
+
+REM ====================================================================
+REM   Exit paths
+REM ====================================================================
 
 :done
 echo.
-echo Done.  If anything goes wrong, the previous version is at:
+echo Done.  Previous version (if any) is at:
 echo     %BACKUP%
 echo.
 popd
-pause
 endlocal
+pause
 exit /b 0
 
 :fail
 echo.
 popd
-pause
 endlocal
+pause
 exit /b 1
