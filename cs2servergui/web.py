@@ -214,6 +214,7 @@ def create_flask(core: AppCore) -> Flask:
     # 403s on those), so install/RCON/Steam stay strictly local.
     _GUEST_PATHS = frozenset({
         "/api/state",
+        "/api/capabilities",      # v0.10.2: every session reads its own caps
         "/api/server/map",        # change map + game mode
         "/api/players",           # read-only roster for the status view
         "/api/workshop/maps",     # browse downloaded maps
@@ -226,6 +227,7 @@ def create_flask(core: AppCore) -> Flask:
     # Created by /api/veto/claim with a valid single-use token (no PIN).
     _CAPTAIN_PATHS = frozenset({
         "/api/state",             # captains see basic server status too
+        "/api/capabilities",      # v0.10.2: every session reads its own caps
         "/api/veto/state",
         "/api/veto/stream",
         "/api/veto/step",
@@ -398,6 +400,88 @@ def create_flask(core: AppCore) -> Flask:
             # renders a banner so remote admins see why their Start did
             # nothing instead of staring at a frozen "Offline" pill.
             "boot_error":         core.last_start_error or "",
+        })
+
+    @app.route("/api/capabilities")
+    @require_auth
+    def api_capabilities():
+        """v0.10.2 — Tell the SPA exactly what the current session can do.
+
+        The audit's "local-only restrictions surfaced as 'X failed: local
+        access only'" pattern came from the SPA having to guess which
+        buttons to disable based on `is_local` + `role`.  Now there's a
+        single endpoint that returns the canonical list, and the SPA
+        renders local-only / admin-only controls as `disabled` + tooltip
+        instead of clickable-but-403-on-click.
+
+        Schema:
+          {
+            "role":     "admin" | "guest" | "captain",
+            "is_local": bool,
+            "can": [<allowed-capability-tags>...],
+          }
+
+        Capability tags (in lieu of brittle url-path matching):
+          server.start         server.stop           server.map
+          server.broadcast     server.ff             server.round
+          server.match
+          players.kick         players.ban           players.unban
+          workshop.download    workshop.cancel
+          workshop.update      workshop.scan         workshop.override
+          config.read          config.write          config.write_secrets
+          rcon                 steam.login           server.install
+          server.update_cs2    log.read              log.save
+          veto.admin           veto.captain
+        """
+        session  = _current_session()
+        is_local = bool(session and session.get("is_local"))
+        role     = "admin" if is_local else ((session or {}).get("role") or "guest")
+
+        # Build the capability set per role.  Local sessions get the
+        # superset (everything admin can do PLUS local-only secret/install
+        # operations).  We explicitly enumerate rather than negate so a
+        # future-added endpoint isn't accidentally exposed.
+        cap: set[str] = set()
+
+        if role in ("admin", "captain"):
+            cap.add("log.read")            # admin + captain can stream the log
+
+        if role == "admin":
+            cap.update({
+                "server.start", "server.stop", "server.map",
+                "server.broadcast", "server.ff", "server.round", "server.match",
+                "players.kick", "players.ban", "players.unban",
+                "workshop.download", "workshop.cancel",
+                "config.read", "config.write",
+                "veto.admin",
+            })
+        elif role == "guest":
+            cap.update({
+                "server.map",
+                "workshop.download", "workshop.cancel",
+            })
+        elif role == "captain":
+            cap.add("veto.captain")
+
+        # Local-only superset: install / Steam creds / RCON / log save /
+        # workshop update + scan + override + directory picker.  These map
+        # 1:1 to the @require_local routes in this file — if you add a new
+        # @require_local route, add the matching cap tag here.
+        if is_local:
+            cap.update({
+                "config.write_secrets",
+                "rcon",
+                "steam.login",
+                "server.install", "server.update_cs2",
+                "workshop.update", "workshop.scan", "workshop.override",
+                "log.save",
+                "system.pick_directory",
+            })
+
+        return jsonify({
+            "role":     role,
+            "is_local": is_local,
+            "can":      sorted(cap),
         })
 
     # ── Server control ─────────────────────────────────────────────────────────
