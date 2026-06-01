@@ -10,3 +10,9 @@ keyring>=25.0.0
 # captain-link share cards (v0.10.0 Day 4) to render SVG QR codes for the
 # captain join URLs.  ~70 KB pure Python; PyInstaller picks it up automatically.
 segno>=1.6.0
+# Discord bot (v0.11.0).  Maintains a gateway connection to Discord so the
+# tool can DM captain links + read voice-channel members + post live veto
+# embeds.  Runs in a dedicated background asyncio loop alongside Flask.
+# Optional at runtime — if no bot token is configured the module imports
+# but doesn't connect.
+discord.py>=2.3.0

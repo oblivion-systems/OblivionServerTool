@@ -501,6 +501,18 @@ class AppCore:
         # creates a webhook in Discord channel settings + pastes the URL
         # in Config → Veto / Match Setup.
         self.discord_webhook_url:   str  = ""
+        # v0.11.0 — Discord bot integration (Layer 1).  When `discord_bot_token`
+        # is set the tool starts a background gateway connection to Discord
+        # via discord.py.  Operator configures these in Config → Discord:
+        #   discord_bot_token  — secret bot token from developer.discord.com
+        #   discord_guild_id   — operator's Discord server ID (numeric)
+        #   discord_veto_channel_id — channel where live veto embeds are posted
+        #                              (Layer 1C); blank = no live embed
+        # The bot lifecycle is owned by cs2servergui/discord_bot.py — see
+        # the prose there for the asyncio-on-thread architecture.
+        self.discord_bot_token:           str = ""
+        self.discord_guild_id:            str = ""
+        self.discord_veto_channel_id:     str = ""
 
         # Runtime state
         self.public_ip:           str                      = ""
@@ -551,6 +563,17 @@ class AppCore:
         self.rcon.password = self.rcon_password
         _config.RCON_PASSWORD = self.rcon_password
         _config.ADMIN_PIN     = self.admin_pin
+
+        # v0.11.0 — Start the Discord bot if a token is configured.  Safe
+        # no-op when no token; the bot module imports cleanly without
+        # discord.py if it's missing from the bundle (source-mode runs
+        # without the dep installed will see "[discord] discord.py not
+        # installed").
+        try:
+            from . import discord_bot
+            discord_bot.start_bot(self)
+        except Exception as exc:
+            self.log(f"[discord] bot start skipped: {exc}")
 
     # ── logging ───────────────────────────────────────────────────────────────
 
@@ -674,6 +697,10 @@ class AppCore:
         self.veto_auto_launch_on_ready   = bool(cfg.get("veto_auto_launch_on_ready", False))
         # v0.10.2 — Discord webhook (see __init__ for prose)
         self.discord_webhook_url         = cfg.get("discord_webhook_url", "")
+        # v0.11.0 — Discord bot (Layer 1)
+        self.discord_bot_token           = cfg.get("discord_bot_token", "")
+        self.discord_guild_id            = cfg.get("discord_guild_id", "")
+        self.discord_veto_channel_id     = cfg.get("discord_veto_channel_id", "")
 
         # Workshop command-filter detection results + manual overrides (wid → bool).
         self._cmdfilter_auto       = dict(cfg.get("cmdfilter_auto", {}))
@@ -721,6 +748,10 @@ class AppCore:
                 "veto_auto_launch_on_ready":     self.veto_auto_launch_on_ready,
                 # v0.10.2 — Discord webhook
                 "discord_webhook_url":           self.discord_webhook_url,
+                # v0.11.0 — Discord bot
+                "discord_bot_token":             self.discord_bot_token,
+                "discord_guild_id":              self.discord_guild_id,
+                "discord_veto_channel_id":       self.discord_veto_channel_id,
             }
             # Atomic write: serialize via _config_save_lock so concurrent
             # save_config calls don't interleave (Flask is threaded), and use

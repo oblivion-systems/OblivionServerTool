@@ -171,6 +171,17 @@ def _clear_global() -> None:
 def create_flask(core: AppCore) -> Flask:
     app = Flask(__name__)   # static_folder=<pkg>/static, template_folder=<pkg>/templates
 
+    # ── Discord bot status helper (v0.11.0) ───────────────────────────────────
+    # Wraps discord_bot.bot_status() so a missing discord.py doesn't crash
+    # /api/state.  The bot module itself has a DISCORD_AVAILABLE flag for
+    # graceful degradation.
+    def _discord_bot_status() -> dict:
+        try:
+            from . import discord_bot
+            return discord_bot.bot_status()
+        except Exception:
+            return {"configured": False, "connected": False, "user": None}
+
     # ── Auth helpers ───────────────────────────────────────────────────────────
 
     def _current_session() -> dict | None:
@@ -400,6 +411,9 @@ def create_flask(core: AppCore) -> Flask:
             # renders a banner so remote admins see why their Start did
             # nothing instead of staring at a frozen "Offline" pill.
             "boot_error":         core.last_start_error or "",
+            # v0.11.0 — Discord bot status (best-effort; safe no-op when
+            # discord.py isn't installed or no token configured)
+            "discord_bot":        _discord_bot_status(),
         })
 
     @app.route("/api/capabilities")
@@ -727,6 +741,14 @@ def create_flask(core: AppCore) -> Flask:
             # can see "webhook is configured" without leaking the URL —
             # webhooks are unauth'd post tokens and shouldn't leak).
             "discord_webhook_url":          core.discord_webhook_url if is_local else ("***" if core.discord_webhook_url else ""),
+            # v0.11.0 — Discord bot config.  Token is local-only (always
+            # masked for remote).  Guild ID + channel ID are not secrets
+            # (they're visible in any Discord invite) so they're exposed
+            # for remote admins to read but only LOCAL admins can change
+            # any of them.
+            "discord_bot_token":            core.discord_bot_token if is_local else ("***" if core.discord_bot_token else ""),
+            "discord_guild_id":             core.discord_guild_id,
+            "discord_veto_channel_id":      core.discord_veto_channel_id,
             "admin_pin":             core.admin_pin     if is_local else "***",
             "guest_pin":             core.guest_pin     if is_local else "***",
             "rcon_password":         core.rcon_password  if is_local else "***",
@@ -766,6 +788,28 @@ def create_flask(core: AppCore) -> Flask:
             core.public_share_url = v.rstrip("/")
         if "veto_auto_launch_on_ready" in d:
             core.veto_auto_launch_on_ready = bool(d["veto_auto_launch_on_ready"])
+        # v0.11.0 — Discord bot config: local-only writes (token is a secret).
+        # When the token / guild changes we restart the bot so the new
+        # value is picked up.  Guild + channel can change without
+        # restart (looked up per-call).
+        if is_local and "discord_bot_token" in d:
+            v = str(d["discord_bot_token"]).strip()
+            if v != "***":
+                old = core.discord_bot_token
+                core.discord_bot_token = v
+                if v != old:
+                    try:
+                        from . import discord_bot
+                        if v:
+                            discord_bot.start_bot(core)
+                        else:
+                            discord_bot.stop_bot(core)
+                    except Exception as exc:
+                        core.log(f"[discord] bot lifecycle on token change failed: {exc}")
+        if is_local and "discord_guild_id" in d:
+            core.discord_guild_id = str(d["discord_guild_id"]).strip()
+        if is_local and "discord_veto_channel_id" in d:
+            core.discord_veto_channel_id = str(d["discord_veto_channel_id"]).strip()
         # v0.10.2 — Discord webhook URL: local-only write (it's a secret-ish
         # URL).  Mask-aware so a remote admin's accidental round-trip of
         # "***" doesn't blank the real value.

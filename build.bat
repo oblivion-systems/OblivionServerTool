@@ -34,6 +34,7 @@ echo [2/3] Building executable...
   --collect-all jinja2 ^
   --collect-all webview ^
   --collect-all segno ^
+  --collect-all discord ^
   --hidden-import werkzeug ^
   --hidden-import werkzeug.serving ^
   --hidden-import werkzeug.routing ^
@@ -47,6 +48,7 @@ echo [2/3] Building executable...
   --hidden-import cs2servergui.web ^
   --hidden-import cs2servergui._netutils ^
   --hidden-import cs2servergui.veto ^
+  --hidden-import cs2servergui.discord_bot ^
   --add-data "emblem.ico;." ^
   --add-data "cs2servergui/plugins;cs2servergui/plugins" ^
   --add-data "cs2servergui/templates;cs2servergui/templates" ^
