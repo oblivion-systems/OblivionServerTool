@@ -1,13 +1,13 @@
 # ROADMAP — Oblivion Server Tool
 
-> The **plan**: how we get from where we are (v0.9.2 candidate) to a stable, fully
-> tested **v1.0.0** and beyond. This is intentionally rough — it sets direction and
-> sequence, not exact dates. The granular, checkable steps live in
+> The **plan**: how we get from where we are (v0.9.2.1 shipped) to a stable, fully
+> tested **v1.0.0** and beyond.  This is intentionally rough — it sets direction and
+> sequence, not exact dates.  The granular, checkable steps live in
 > [TODO.md](TODO.md); the *why* behind it all lives in [BIBLE.md](BIBLE.md).
 
 ---
 
-## Where We Are — v0.9.2 (release candidate, tag pending live smoke)
+## Where We Are — v0.9.2.1 (released 2026-06-01, hotfix on v0.9.2)
 
 Core features are stable.  Since v0.9.1 the focus has shifted from feature work to
 **correctness, observability, and resilience under real load**.
@@ -49,12 +49,38 @@ Core features are stable.  Since v0.9.1 the focus has shifted from feature work 
 - **Code hygiene** — `_holder_of_port` deduplicated into `cs2servergui/_netutils.py`,
   unused imports removed, SyntaxWarning fixed, legacy plugin scrubs dropped.
 
-**Remaining gap to tag v0.9.2:**
+**Shipped 2026-06-01 — what's done:**
 
-- ~30-minute live smoke session (Start, change maps, swap a mode, Stop, exit
-  cleanly) to validate the unverified hot paths from the sweep
-- One Warcraft session with 3-4 players to validate v2 dispatchers under real load
-- `APP_VERSION` bump to `"0.9.2"` in `config.py`
+- ✅ v0.9.2 tagged and released to GitHub (binary + tag + notes)
+- ✅ v0.9.2.1 hotfix tagged and released — fixes the 5-second RCON regression
+  the multi-packet sentinel introduced, plus five other re-audit findings
+  (workshop-download lock race, `_resolve_rcon_host` loopback clobber,
+  `current_map` lock consistency, `_stop_event` edge-window cancel, Warcraft
+  `ReferenceEquals` → SteamID equality)
+- ✅ `tests/test_v092.py` behavioural battery (22/22 passing)
+- ✅ Packaging polish: `_netutils` hidden-import, werkzeug pin, WebView2
+  bootstrapper docs, explicit icons, `--noconfirm`
+
+**Next milestone — v0.10.0 (map veto + match setup):**
+
+This week's focus.  See [VETO.md](VETO.md) for the full spec.  Five-stage
+match-setup flow ending in a CS2 veto board, with MatchZy handoff at the
+finale.  Decisions locked in: dedicated "Veto" tab, LAN + Public captain
+links, per-veto override starting from active-duty 7, Steam IDs collected
+at roster for MatchZy strict mode.
+
+**v0.11.0+ — Discord bot integration:**
+
+User's-own-bot model (no shared hosting): voice-channel roster pull,
+captain DM delivery, match-result announce, live veto embed.  Falls back
+to manual + QR when not configured.  Detailed plan in [VETO.md](VETO.md)
+§ Discord bot.
+
+**Live stress test still pending (#29):**
+
+A full-lobby Warcraft session (real players) to validate the v2 menu /
+chat-broadcast dispatchers under the conditions the v1 cooldown couldn't
+cover.  Can be retroactive — the dispatchers already exist in v0.9.2.1.
 
 ---
 

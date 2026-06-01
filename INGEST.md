@@ -40,13 +40,14 @@ each with a one-sentence summary. No code, no behavioural changes — reference 
 
 ---
 
-## `cs2servergui/config.py` (264 lines)
+## `cs2servergui/config.py` (319 lines)
 
 ### Functions
 
 | Symbol | Summary |
 |--------|---------|
-| `_lan_ip()` | Returns the machine's primary LAN IP by routing a UDP socket toward 8.8.8.8 without sending data; falls back to `127.0.0.1`. |
+| `_lan_ip(force_refresh=False)` | Returns the machine's primary LAN IP by routing a UDP socket toward 8.8.8.8 (no data sent); falls back to `127.0.0.1`.  Cached 30 s; `force_refresh=True` bypasses the cache (used by `AppCore._resolve_rcon_host` at server start). |
+| `_load_int_from_config(key, default)` | Reads one integer from `oblivion_config.json` at module-import time so module-level constants (e.g. `FLASK_PORT`) can pick up user overrides before `AppCore` exists. |
 | `update_paths(server_dir)` | Recomputes all path globals (`CS2_SERVER_DIR`, `STEAMCMD_PATH`, `CS2_PATH`, `WORKSHOP_DIR`, `DEPOTDL_PATH`, `CS2_ADDONS_DIR`) from a new base directory. |
 | `load_workshop()` | Returns a sorted list of downloaded workshop map IDs (folder names) from `WORKSHOP_DIR`. |
 
@@ -56,11 +57,13 @@ each with a one-sentence summary. No code, no behavioural changes — reference 
 |--------|---------|
 | `CS2_APP_ID` | Steam App ID for CS2 (`"730"`). |
 | `DEPOTDL_RELEASE_URL` | GitHub API URL for the latest DepotDownloader release. |
-| `APP_VERSION` | Current application version string (e.g. `"0.9.1"`). |
+| `APP_VERSION` | Current application version string (currently `"0.9.2.1"`). |
 | `APP_REPO` | GitHub repository slug for the app (`"jacquesvniekerk-eng/OblivionServerTool"`). |
 | `APP_RELEASES_URL` / `APP_API_URL` | Human and API GitHub release URLs derived from `APP_REPO`. |
 | `CS2_SERVER_DIR` / `STEAMCMD_PATH` / `CS2_PATH` / `WORKSHOP_DIR` / `DEPOTDL_PATH` / `CS2_ADDONS_DIR` | Default path constants; all re-set by `update_paths()`. |
-| `RCON_HOST` / `RCON_PORT` / `RCON_PASSWORD` / `FLASK_PORT` / `ADMIN_PIN` | Network/auth constants; `RCON_HOST` is set at module load from `_lan_ip()`. |
+| `RCON_HOST` / `RCON_PORT` / `RCON_PASSWORD` | RCON network/auth constants.  `RCON_HOST` is the LAN IP from `_lan_ip()` at import time; mutated at runtime by `AppCore._resolve_rcon_host()` and the netstat-based safety net in `_post_launch_sanity_check`.  Modules MUST read `_config.RCON_HOST` at call time — `from .config import RCON_HOST` captures the stale import-time value. |
+| `FLASK_PORT` | Default 5050; reads `flask_port` from `oblivion_config.json` via `_load_int_from_config()` so user overrides survive a build. |
+| `_LAN_IP_CACHE` / `_LAN_IP_TTL_SECS` | Internal: state-poll cache (30 s TTL) for `_lan_ip()` to stop hammering UDP probes on every `/api/state`. |
 | `_CONFIG_FILE` | Absolute path to `oblivion_config.json`; under `%APPDATA%\Oblivion Server Tool\` when frozen, project root when dev. |
 | `OFFICIAL_MAPS` | List of 10 official CS2 competitive maps. |
 | `CS2_PANORAMA_THUMBS_SUBPATH` | Relative path from a CS2 install root to the 1080p map screenshot folder. |
@@ -72,31 +75,43 @@ each with a one-sentence summary. No code, no behavioural changes — reference 
 
 ---
 
-## `cs2servergui/rcon.py` (134 lines)
+## `cs2servergui/rcon.py` (173 lines)
 
 | Symbol | Summary |
 |--------|---------|
-| `RCONClient` | Thread-safe RCON client that opens a fresh TCP connection for every command. |
-| `RCONClient.__init__(host, port, password)` | Stores connection params and initialises an `itertools.count` for packet IDs. |
-| `RCONClient._next_id()` | Returns the next auto-incremented packet ID (thread-safe under the GIL). |
-| `RCONClient._pack(id, type_, body)` | Packs a Source RCON packet (little-endian size + id + type + body + two null bytes). |
-| `RCONClient._recv(sock)` | Reads one complete RCON response packet from `sock`, handling partial reads. |
-| `RCONClient.execute(command)` | Sends a single RCON command on a fresh TCP connection (auth then exec) and returns the response string. |
-| `RCONClient.execute_many(commands)` | Sends multiple commands over a single authenticated connection, returning responses joined with newlines. |
-| `RCONClient.execute_retry(command, retries, delay)` | Calls `execute()` up to `retries` times with `delay`-second back-off; re-raises on final failure. |
+| `RCONClient` | Thread-safe Source RCON client that opens a fresh TCP connection per command. |
+| `RCONClient.__init__(host, port, password)` | Stores connection params; per-instance ID counter under a `threading.Lock`. |
+| `RCONClient._next_id()` | Returns the next packet ID (thread-safe via `_id_lock`). |
+| `RCONClient._pack(pkt_id, pkt_type, body)` | Builds a Source RCON packet: little-endian `(size, id, type)` + body + two null terminators. |
+| `RCONClient._recv(sock)` | Reads one complete RCON packet from `sock`, handling partial reads; returns `(pkt_id, pkt_type, body)`. |
+| `RCONClient.execute(command)` | Authenticates, sends the command **plus a sentinel empty command** so multi-packet responses (Source RCON's >4 KB split) are concatenated correctly, returns the joined response.  Tolerates the CSGO-era junk type-0 prelude packet. |
+| `RCONClient.execute_many(commands)` | Single-auth batch sender for many short commands (does NOT use the multi-packet sentinel; intended for short cvar/bot_add commands where 4 KB truncation is impossible). |
+| `RCONClient.execute_retry(command, retries=6, delay=5.0)` | Calls `execute()` with retry on `TimeoutError`, `OSError` (covers `ConnectionResetError` / `ConnectionAbortedError` / `BrokenPipeError` / WinError 10054), and `ConnectionError` except for "auth failed" (never retried). |
 
 ---
 
-## `cs2servergui/web.py` (958 lines)
+## `cs2servergui/web.py` (1059 lines)
+
+### Module-level constants
+
+| Symbol | Summary |
+|--------|---------|
+| `_MAP_NAME_RE` / `_DIGITS_RE` / `_STEAMID_RE` | Input validators.  `_STEAMID_RE` is length-capped to 64 chars to defang 1 MB-input DoS attempts. |
+| `_NAME_MAX_LEN` | 64 — applied to `players_kick` `name` before RCON. |
+| `_BROADCAST_MAX_LEN` | 200 — applied to `server_broadcast` `message` after `;`/CRLF/backtick strip. |
+| `_REMOTE_SESSION_TTL` | 8 hours for remote sessions; local sessions never expire. |
+| `_MAX_ATTEMPTS` / `_LOCKOUT_SECS` / `_ATTEMPT_TTL_SECS` | Per-IP PIN brute-force: 5 fails → 300 s lockout; GC entries past 600 s of inactivity. |
+| `_GLOBAL_MAX_ATTEMPTS` / `_GLOBAL_LOCKOUT_SECS` / `_GLOBAL_DECAY_SECS` | Global PIN brute-force (defends against distributed attacks): 20 fails → 300 s; resets after 600 s of quiet. |
+| `_startup_token_lock` | Serialises the `/auth/auto` compare-and-clear so two simultaneous loopback hits can't both mint a local session. |
 
 ### Session store & lockout (module-level)
 
 | Symbol | Summary |
 |--------|---------|
 | `_create_session(ip, is_local, role)` | Mints a random session token storing `ip`, `is_local`, `role` (`"admin"`/`"guest"`), and `created_at`. |
-| `_get_session(token)` / `_clear_session(token)` | Look up a session (expiring remote ones past the 8 h TTL) / drop a session. |
-| `_check_lockout(ip)` / `_record_fail(ip)` / `_clear_attempts(ip)` | Per-IP PIN brute-force lockout: 5 fails → 300 s. |
-| `_check_global_lockout()` / `_record_global_fail()` / `_clear_global()` | Global backoff (20 fails → 300 s, decays after 600 s quiet) defending against distributed brute force. |
+| `_get_session(token)` / `_clear_session(token)` | Look up a session (expiring remote ones past `_REMOTE_SESSION_TTL`) / drop a session. |
+| `_check_lockout(ip)` / `_record_fail(ip)` / `_clear_attempts(ip)` | Per-IP PIN brute-force lockout (5 fails → 300 s), with TTL-based GC so the dict can't grow unboundedly under a slow attack. |
+| `_check_global_lockout()` / `_record_global_fail()` / `_clear_global()` | Global backoff defending against distributed brute force. |
 
 ### Factory & auth (inner to `create_flask`)
 
@@ -122,11 +137,11 @@ each with a one-sentence summary. No code, no behavioural changes — reference 
 
 | Route | Summary |
 |-------|---------|
-| `GET /api/state` | Full state snapshot (running, boot_state, map, mode, players, IPs, update flags, `role`, `guest_pin_set`, dl_progress). **(guest-allowed)** |
+| `GET /api/state` | Full state snapshot (running, boot_state, map, mode, players, public/lan IPs, `flask_port`, `rcon_port`, update flags, `role`, `sv_password_set`, `dl_active`, `dl_progress`). `lan_ip` is the live primary LAN IP (not RCON_HOST). **(guest-allowed)** |
 | `POST /api/server/start` | Starts the server with map/mode/workshop flag. *(admin)* |
 | `POST /api/server/stop` | Stops the running server. *(admin)* |
 | `POST /api/server/map` | Changes map + game mode (RCON or `_restart_into` on plugin swap). **(guest-allowed)** |
-| `POST /api/server/broadcast` | RCON `say` chat broadcast. *(admin)* |
+| `POST /api/server/broadcast` | RCON `say` chat broadcast.  Strips `;` (Source 2 command separator), CRLF, backtick; caps at 200 chars. *(admin)* |
 | `POST /api/server/ff` | Toggles friendly fire. *(admin)* |
 | `POST /api/server/round/restart` / `/round/warmup` | `mp_restartgame 1` / `mp_warmup_end`. *(admin)* |
 | `POST /api/server/match/pause` / `/match/unpause` | Pause / unpause the match. *(admin)* |
@@ -155,7 +170,7 @@ each with a one-sentence summary. No code, no behavioural changes — reference 
 | Route | Summary |
 |-------|---------|
 | `GET /api/workshop/maps` | Downloaded maps with cached name/tags/preview/cmdfilter. **(guest-allowed)** |
-| `POST /api/workshop/download` | DepotDownloader staged download. **(guest-allowed)** |
+| `POST /api/workshop/download` | DepotDownloader staged download.  Atomic check-and-reserve under `_dl_lock` — returns 409 if another download is in flight. **(guest-allowed)** |
 | `POST /api/workshop/cancel` | Cancel the active download. **(guest-allowed)** |
 | `POST /api/workshop/update` | Re-pull subscribed maps that changed. *(local-only)* |
 | `POST /api/workshop/cmdfilter/scan` / `/cmdfilter/override` | Scan descriptions for the command-filter flag / per-map override. *(local-only)* |
@@ -169,37 +184,32 @@ each with a one-sentence summary. No code, no behavioural changes — reference 
 |-------|---------|
 | `POST /api/steam/login` | Interactive steamcmd console for 2FA. *(local-only)* |
 | `GET /api/system/pick_directory` | Native folder picker for the server dir. *(local-only)* |
-| `GET /api/setup/status` | First-run wizard state. **(guest-allowed)** |
+| `GET /api/setup/status` | First-run wizard state. *(local-only — leaked `pin_is_default` to guests before v0.9.2)* |
 | `POST /api/setup/complete` | Persist first-run setup. *(local-only)* |
 | `GET /api/log/history` / `GET /api/log/stream` | Log history / live SSE stream. *(admin)* |
+| `POST /api/log/save` | Writes the in-memory log buffer to a `oblivion_log_<ts>_<6 hex>.txt` in the config dir (collision-proof + size-capped). *(local-only)* |
 
 ---
 
-## `cs2servergui/core.py` (3619 lines)
+## `cs2servergui/core.py` (3681 lines)
 
-> **Drift note (2026-05-30):** the file grew by ~470 lines since this section
-> was first generated. Notable additions in the v0.9.2 candidate that aren't
-> yet enumerated below:
->   - `AppCore._resolve_rcon_host()` — refreshes `_config.RCON_HOST` and
->     `self.rcon.host` from the live LAN IP on every server start / attach.
->   - `AppCore._preflight_checks(map, mode, is_workshop)` — runs before
->     `deploy_plugins()`; blocks Start on missing CS2, foreign port-27015
->     holder, or missing plugin bundle folders.
->   - `AppCore._post_launch_sanity_check()` — background thread that catches
->     immediate `cs2.exe` death AND enumerates `netstat` listeners on 27015
->     to switch `self.rcon.host` to the actual bind address, then force-fires
->     the workshop trigger.
->   - `AppCore._list_dedicated_pids()` — PowerShell `Get-CimInstance` first,
->     `wmic` fallback (deprecated/removed on Win 11 24H2).
->   - `AppCore._holder_of_port` / `._listeners_on_port` — thin wrappers over
->     `cs2servergui._netutils` so the AppCore logger picks up netstat output.
->   - `AppCore._validate_bundle_configs(deployed, csgo_dir)` — warns when a
->     plugin ships `*.example` without an active counterpart (Zombie
->     weapons.cfg bug class).
->   - Lock additions: `_config_save_lock` (atomic `save_config`), `_stop_event`
->     (cancellable crash-restart backoff).
-> 
-> Existing entries below remain accurate for the unchanged majority.
+### v0.9.2 / v0.9.2.1 additions worth knowing about
+
+The file has grown ~540 lines since this section was first generated.  The
+new public-ish surface area on `AppCore` (and a few module-level helpers):
+
+| Symbol | Summary |
+|--------|---------|
+| `AppCore._resolve_rcon_host()` | Re-resolves `_config._lan_ip(force_refresh=True)` on every server start / attach.  Won't clobber a good IP with `127.0.0.1` if the UDP probe falls back to loopback (v0.9.2.1 guard). |
+| `AppCore._preflight_checks(map_name, mode, is_workshop) -> bool` | Runs before `deploy_plugins()`.  Blocks Start on missing CS2, foreign holder of 27015, or missing plugin bundle folders.  Soft-warns on missing Steam creds + DepotDownloader. |
+| `AppCore._post_launch_sanity_check()` | Background thread: catches immediate `cs2.exe` death (proc.poll within 3 s) AND enumerates `netstat` listeners on 27015 to switch `self.rcon.host` to whichever bind address actually answers (handles CS2 binding to Hyper-V/Docker/VPN adapters).  Re-checks `self.running` before mutating state. |
+| `AppCore._list_dedicated_pids() -> list[int]` | PowerShell `Get-CimInstance` first, `wmic` fallback (deprecated/removed on Win 11 24H2).  Logs loudly when both strategies fail. |
+| `AppCore._holder_of_port(port)` / `._listeners_on_port(port)` | Thin instance-method wrappers over `cs2servergui._netutils.holder_of_port` / `listeners_on_port` that pass `self.log` so AppCore picks up netstat diagnostics. |
+| `AppCore._validate_bundle_configs(deployed, csgo_dir)` | Walks each deployed plugin's bundle and warns when a `*.example` config ships without an active counterpart (Zombie weapons.cfg bug class). |
+| `AppCore._fix_metamod_dll_nesting()` | Repairs the `addons/metamod/bin/win64/win64/` extraction bug by `shutil.move`-ing the nested DLLs up a level (v0.9.2 switched from copy+rmtree to atomic-move). |
+| `AppCore.save_config()` | **Atomic write**: lock-guarded, tmp + `os.replace` + `fsync`.  Replaces v0.9.1's bare open-truncate-write that could corrupt config under concurrent saves or power loss. |
+| `AppCore._config_save_lock` | Serialises concurrent `save_config()` calls (Flask is threaded). |
+| `AppCore._stop_event` | `threading.Event`; set by `stop_server()` to cancel the crash-restart backoff sleep.  Cleared at the top of every fresh `start_server()`.  v0.9.2.1 adds a re-check after `wait()` returns False to close the edge-window race. |
 
 ### Module-level constants & helpers
 

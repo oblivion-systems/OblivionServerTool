@@ -68,9 +68,33 @@ deferred loose ends. Full prose in [CHANGELOG.md](CHANGELOG.md) → v0.9.1.*
 - [x] **Code hygiene (2026-05-30)** — `_holder_of_port` deduplicated into
   `cs2servergui/_netutils.py`, `\O` SyntaxWarning fixed, unused `RCON_HOST` import dropped
   from `web.py`, legacy plugin scrubs removed from `_PLUGIN_CLEANUP_ITEMS`.
-- [ ] **Cut the v0.9.2 release** — bump `APP_VERSION` → `0.9.2` in `config.py`, tag `v0.9.2`,
-  push, create the GitHub release. *Blocked on: short live smoke session validating the new
-  hot-paths (Start, change map, mode swap, Stop) and one Warcraft lobby for v2 dispatchers.*
+- [x] **Behavioural test battery (2026-05-30)** — `tests/test_v092.py` covering RCON multi-
+  packet sentinel, execute_retry exception widening, broadcast injection block, log_save
+  uniqueness, Event.wait cancellation, _lan_ip cache TTL, input caps, save_config atomicity,
+  _lifecycle_lock reentrancy, _netutils sanity, Flask route auth + 409.  22/22 passing.
+- [x] **Cut v0.9.2 release (2026-05-30)** — tagged, pushed, GitHub release with binary.
+- [x] **v0.9.2.1 hotfix release (2026-06-01)** — fixes the 5-second RCON regression that
+  v0.9.2's multi-packet sentinel introduced (speculative trailing `_recv()` waited the full
+  socket timeout for a phantom packet CS2 doesn't send), plus the workshop-download lock
+  race, `_resolve_rcon_host` loopback clobber, two `current_map` writes missing the lifecycle
+  lock, the `_stop_event` edge-window cancel race, and the Warcraft `ReferenceEquals` → SteamID
+  equality fix in three deferred-menu sites.
+
+### Next milestone — v0.10.0 (map-veto match setup)
+*Full spec in [VETO.md](VETO.md).  Layered build plan with v0.10.0 = Layer 0 (core veto),
+v0.11.0 = Layer 1 (Discord bot).*
+
+- [ ] **`VetoSession` model + state machine** in `core.py` — roster, teams, votes, captain
+  tokens, mode (BO1/BO3/BO5), map pool, sequence, results.
+- [ ] **API endpoints** in `web.py` — roster / distribute / vote / generate-links /
+  captain-join / ban / pick.  Reuse the existing SSE log-stream pattern for live mirror.
+- [ ] **Frontend port** — `_prototypes/veto.html`'s 5-stage flow into the SPA as a dedicated
+  "Veto" tab.  Bundled workshop thumbnails for the map cards.
+- [ ] **Captain link delivery** — LAN + Public link per captain (mirrors Connect popover),
+  Copy button, QR code (single-use, scoped tokens enforced server-side).
+- [ ] **"Get Ready to Battle" finale** + MatchZy match-config generator (Steam IDs for strict
+  team assignment).
+- [ ] **`tests/test_veto_session.py`** — state machine unit tests before any HTTP/UI work.
 
 ### Shipped in v0.9.1 — confirmed in-game
 - [x] **Jailbreak crash fixed** — dropped CS2Fixes (`zombie`) from the Jailbreak mode; native
