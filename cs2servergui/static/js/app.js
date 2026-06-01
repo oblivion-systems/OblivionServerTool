@@ -1897,6 +1897,579 @@ pages['workshop'] = function() {
   pages['maps']();
 };
 
+/* ══════════════════════════════════════════════════════════════ VETO (v0.10.0)
+   Compact SPA port of the prototype's 5-stage flow.  Live state from
+   /api/veto/state + /api/veto/stream (SSE).  All mutations go through the
+   server — no localStorage, no client-side source-of-truth.
+
+   Architecture:
+     - pages['veto']() builds the shell, kicks off initial fetch + SSE subscribe
+     - vetoState holds the latest snapshot
+     - renderVeto() is the single render entrypoint; switches on snapshot.state
+     - Each stage has its own _renderStage<X>() function for clarity
+     - Reset on navigate-away or hashchange cleans up the SSE                */
+
+let _vetoState = null;
+let _vetoEs = null;
+let _vetoLocalRoster = [];   // unsaved roster edits before Distribute commits
+
+const VETO_MODES = ['BO1', 'BO3', 'BO5'];
+
+function _vetoStageIndex(stateStr) {
+  // Map server state to 0-4 for the stages-pill nav
+  const m = { idle: -1, roster: 0, teams: 1, voting: 2, links: 3,
+              veto: 4, finale: 4, complete: 4 };
+  return m[stateStr] ?? -1;
+}
+
+function _vetoCleanup() {
+  if (_vetoEs) { try { _vetoEs.close(); } catch (_) {} _vetoEs = null; }
+  _vetoState = null;
+  _vetoLocalRoster = [];
+}
+
+pages['veto'] = function() {
+  _vetoLocalRoster = [];   // fresh roster buffer each time the tab opens
+  const content = el('content');
+  content.innerHTML = `
+    <div class="veto-hdr">
+      <h1>Veto</h1>
+      <span class="veto-sub" id="veto-mode-label">match setup</span>
+      <div class="veto-spacer"></div>
+      <button class="btn btn-ghost" id="veto-reset-btn" style="display:none">Reset session</button>
+    </div>
+    <div class="veto-pill" id="veto-pill">
+      <div class="veto-pill-cell" data-s="0"><span class="veto-pill-num">1</span><span>Roster</span></div>
+      <div class="veto-pill-cell" data-s="1"><span class="veto-pill-num">2</span><span>Teams</span></div>
+      <div class="veto-pill-cell" data-s="2"><span class="veto-pill-num">3</span><span>Vote</span></div>
+      <div class="veto-pill-cell" data-s="3"><span class="veto-pill-num">4</span><span>Links</span></div>
+      <div class="veto-pill-cell" data-s="4"><span class="veto-pill-num">5</span><span>Veto</span></div>
+    </div>
+    <div id="veto-content"><div class="card" style="text-align:center;padding:40px;color:var(--text-3)">Loading...</div></div>
+  `;
+
+  el('veto-reset-btn').addEventListener('click', async () => {
+    if (!confirm('Reset the active veto session? All roster and progress will be lost.')) return;
+    try { await api.veto.reset(); toast('Session reset'); }
+    catch (e) { toast(e.message, 'var(--bad)'); }
+  });
+
+  // Initial state fetch + SSE subscribe (SSE delivers initial snapshot on
+  // connect, so we could skip the explicit fetch — but the fetch gives us a
+  // synchronous render, which feels snappier on tab open).
+  api.veto.state().then(snap => { _vetoState = snap; _renderVeto(); })
+                 .catch(e => toast(e.message, 'var(--bad)'));
+  _vetoSubscribe();
+};
+
+function _vetoSubscribe() {
+  if (_vetoEs) { try { _vetoEs.close(); } catch (_) {} }
+  _vetoEs = new EventSource('/api/veto/stream');
+  _vetoEs.onmessage = (e) => {
+    try {
+      _vetoState = JSON.parse(e.data);
+      if (currentPage === 'veto') _renderVeto();
+    } catch (_) {}
+  };
+  _vetoEs.onerror = () => {
+    try { _vetoEs.close(); } catch (_) {}
+    _vetoEs = null;
+    // Cap reconnects via a 5-s setTimeout; SSE recovers naturally on the
+    // next render-trigger (tab re-open, manual reload).
+    if (currentPage === 'veto') setTimeout(_vetoSubscribe, 5000);
+  };
+}
+
+function _renderVeto() {
+  if (!_vetoState) return;
+  const root = el('veto-content');
+  if (!root) return;
+  const state = _vetoState.state;
+  const sess  = _vetoState.session;
+  // Stage-pill nav update
+  const stageIdx = _vetoStageIndex(state);
+  document.querySelectorAll('.veto-pill-cell').forEach(cell => {
+    const idx = parseInt(cell.dataset.s, 10);
+    cell.classList.toggle('active', idx === stageIdx);
+    cell.classList.toggle('done',   idx >= 0 && idx < stageIdx);
+  });
+  // Show Reset button when there's an active session
+  el('veto-reset-btn').style.display = (state === 'idle') ? 'none' : '';
+  // Mode label
+  if (sess) el('veto-mode-label').textContent = `${sess.mode} · ${sess.team_a_name} vs ${sess.team_b_name}`;
+  else      el('veto-mode-label').textContent = 'match setup';
+
+  // Captain view: simplified — only the captain's actionable stages
+  const isCap = (state_.server && state_.server.role === 'captain');
+  if (isCap) return _renderVetoCaptain(root, state, sess);
+
+  // Admin / local view: full flow
+  switch (state) {
+    case 'idle':     _renderVetoIdle(root); break;
+    case 'roster':   _renderVetoRoster(root, sess); break;
+    case 'teams':    _renderVetoTeams(root, sess); break;
+    case 'voting':   _renderVetoVoting(root, sess); break;
+    case 'links':    _renderVetoLinks(root, sess); break;
+    case 'veto':     _renderVetoBoard(root, sess); break;
+    case 'finale':   _renderVetoFinale(root, sess); break;
+    case 'complete': _renderVetoComplete(root, sess); break;
+    default:         root.innerHTML = `<div class="card">Unknown state: ${esc(state)}</div>`;
+  }
+}
+
+// Shortcut to the global SPA state (different from _vetoState — that's the
+// veto-session snapshot; this is the server-status snapshot which carries `role`).
+const state_ = state;
+
+/* ── Idle / Create ─────────────────────────────────────────────────────── */
+let _vetoCreateMode = 'BO3';
+function _renderVetoIdle(root) {
+  root.innerHTML = `
+    <div class="veto-stage">
+      <div class="veto-stage-head"><h2>Start a new match setup</h2>
+        <span class="sub">10 players, captain vote, ban/pick over 7 maps</span></div>
+      <div class="veto-create-card">
+        <div class="field">
+          <label>Match format</label>
+          <div class="veto-mode-pills" id="veto-mode-pills">
+            ${VETO_MODES.map(m => `<div class="pill ${m===_vetoCreateMode?'active':''}" data-mode="${m}">${m}</div>`).join('')}
+          </div>
+        </div>
+        <button class="btn btn-accent" id="veto-create-btn">Create session →</button>
+      </div>
+    </div>
+  `;
+  document.querySelectorAll('#veto-mode-pills .pill').forEach(p => {
+    p.addEventListener('click', () => {
+      _vetoCreateMode = p.dataset.mode;
+      document.querySelectorAll('#veto-mode-pills .pill').forEach(x =>
+        x.classList.toggle('active', x.dataset.mode === _vetoCreateMode));
+    });
+  });
+  el('veto-create-btn').addEventListener('click', async () => {
+    try { await api.veto.create(_vetoCreateMode); toast('Session created'); }
+    catch (e) { toast(e.message, 'var(--bad)'); }
+  });
+}
+
+/* ── Roster ────────────────────────────────────────────────────────────── */
+function _renderVetoRoster(root, sess) {
+  // Pull existing roster from server if local buffer is empty (e.g. SSE
+  // arrived first OR we revisited the tab mid-roster).
+  if (_vetoLocalRoster.length === 0) {
+    _vetoLocalRoster = (sess.roster && sess.roster.length === 10)
+      ? sess.roster.map(p => ({ name: p.name, steam_id: p.steam_id }))
+      : Array.from({length: 10}, () => ({ name: '', steam_id: '' }));
+  }
+  const filled = _vetoLocalRoster.filter(p => p.name.trim()).length;
+  const ready  = filled === 10;
+  root.innerHTML = `
+    <div class="veto-stage">
+      <div class="veto-stage-head"><h2>Roster</h2>
+        <span class="sub">Enter 10 players · names required, SteamIDs enable MatchZy strict team mode</span></div>
+      <div class="veto-roster-team-names">
+        <div class="veto-tn a">
+          <label>Team A</label>
+          <input id="veto-team-a-name" value="${esc(sess.team_a_name || 'Team Alpha')}" maxlength="32">
+        </div>
+        <div class="veto-tn b">
+          <label>Team B</label>
+          <input id="veto-team-b-name" value="${esc(sess.team_b_name || 'Team Bravo')}" maxlength="32">
+        </div>
+      </div>
+      <div class="veto-roster-grid" id="veto-roster-grid">
+        ${_vetoLocalRoster.map((p, i) => `
+          <div class="veto-roster-slot ${p.name?'filled':''}" data-i="${i}">
+            <span class="veto-slot-num">${String(i+1).padStart(2,'0')}</span>
+            <input class="veto-name" placeholder="Player name" value="${esc(p.name)}" data-i="${i}" maxlength="32">
+            <input class="veto-steam" placeholder="SteamID (optional)" value="${esc(p.steam_id)}" data-i="${i}" maxlength="64">
+          </div>
+        `).join('')}
+      </div>
+      <div class="veto-stage-actions">
+        <button class="btn btn-ghost" id="veto-roster-demo">Demo names</button>
+        <button class="btn btn-ghost" id="veto-roster-paste">Paste 10 names</button>
+        <div class="spacer"></div>
+        <div class="veto-roster-progress">
+          <span class="veto-ring ${ready?'full':''}">${filled}</span>
+          <span>of 10 ready</span>
+        </div>
+        <button class="btn btn-accent" id="veto-roster-save" ${ready?'':'disabled'}>Save roster →</button>
+        <button class="btn btn-accent" id="veto-distribute-btn" style="display:none">Distribute teams →</button>
+      </div>
+    </div>
+  `;
+  // Wire input handlers
+  document.querySelectorAll('#veto-roster-grid input.veto-name').forEach(inp => {
+    inp.addEventListener('input', (e) => {
+      const i = parseInt(e.target.dataset.i, 10);
+      _vetoLocalRoster[i].name = e.target.value;
+      _renderVeto(); // re-render to update progress ring
+    });
+  });
+  document.querySelectorAll('#veto-roster-grid input.veto-steam').forEach(inp => {
+    inp.addEventListener('input', (e) => {
+      const i = parseInt(e.target.dataset.i, 10);
+      _vetoLocalRoster[i].steam_id = e.target.value;
+    });
+  });
+  el('veto-roster-demo').addEventListener('click', () => {
+    const demo = ['Phoenix','Vortex','Stryker','Talon','Reaver',
+                  'Wraith','Cypher','Onyx','Raven','Echo'];
+    _vetoLocalRoster = demo.map((n, i) => ({ name: n, steam_id: `STEAM_DEMO_${i}` }));
+    _renderVeto();
+  });
+  el('veto-roster-paste').addEventListener('click', async () => {
+    try {
+      const txt = await navigator.clipboard.readText();
+      const lines = txt.split(/[\r\n]+/).map(s => s.trim()).filter(Boolean);
+      if (lines.length < 10) { toast(`Need 10 names, clipboard has ${lines.length}`, 'var(--bad)'); return; }
+      _vetoLocalRoster = lines.slice(0, 10).map(n => ({ name: n, steam_id: '' }));
+      _renderVeto();
+      toast('Pasted 10 names');
+    } catch (e) { toast(`Clipboard read failed: ${e.message}`, 'var(--bad)'); }
+  });
+  const saveBtn = el('veto-roster-save');
+  if (saveBtn) saveBtn.addEventListener('click', async () => {
+    try {
+      await api.veto.roster(
+        el('veto-team-a-name').value,
+        el('veto-team-b-name').value,
+        _vetoLocalRoster,
+      );
+      toast('Roster saved');
+      // Reveal Distribute button (kept as a separate click so the operator
+      // can review the saved roster before the random split)
+      el('veto-distribute-btn').style.display = '';
+      saveBtn.style.display = 'none';
+    } catch (e) { toast(e.message, 'var(--bad)'); }
+  });
+  el('veto-distribute-btn').addEventListener('click', async () => {
+    try { await api.veto.distribute(); toast('Teams distributed'); }
+    catch (e) { toast(e.message, 'var(--bad)'); }
+  });
+}
+
+/* ── Teams ─────────────────────────────────────────────────────────────── */
+function _renderVetoTeams(root, sess) {
+  const playerRow = (p) => `<div class="veto-team-player">${esc(p.name)}</div>`;
+  root.innerHTML = `
+    <div class="veto-stage">
+      <div class="veto-stage-head"><h2>Teams</h2>
+        <span class="sub">Random 5-5 split · re-shuffle if you want a different draw</span></div>
+      <div class="veto-teams">
+        <div class="veto-team-col a">
+          <h3>${esc(sess.team_a_name)}</h3>
+          <div class="veto-team-list">${(sess.team_a || []).map(playerRow).join('')}</div>
+        </div>
+        <div class="veto-team-col b">
+          <h3>${esc(sess.team_b_name)}</h3>
+          <div class="veto-team-list">${(sess.team_b || []).map(playerRow).join('')}</div>
+        </div>
+      </div>
+      <div class="veto-stage-actions">
+        <button class="btn btn-ghost" id="veto-reshuffle-btn">Re-shuffle</button>
+        <div class="spacer"></div>
+        <button class="btn btn-accent" id="veto-to-vote-btn">Vote for captains →</button>
+      </div>
+    </div>
+  `;
+  el('veto-reshuffle-btn').addEventListener('click', async () => {
+    try { await api.veto.distribute(); toast('Re-shuffled'); }
+    catch (e) { toast(e.message, 'var(--bad)'); }
+  });
+  el('veto-to-vote-btn').addEventListener('click', async () => {
+    try { await api.veto.startVoting(); }
+    catch (e) { toast(e.message, 'var(--bad)'); }
+  });
+}
+
+/* ── Voting ────────────────────────────────────────────────────────────── */
+function _renderVetoVoting(root, sess) {
+  const teamVoteCard = (team, teamLetter) => {
+    const players = team === 'A' ? sess.team_a : sess.team_b;
+    const votes   = team === 'A' ? sess.votes_a : sess.votes_b;
+    const name    = team === 'A' ? sess.team_a_name : sess.team_b_name;
+    const rows = players.map((voter, vi) => {
+      const buttons = players.map((votee, ti) => `
+        <div class="veto-vote-btn ${votes[vi]===ti?'voted':''}" data-team="${team}" data-vi="${vi}" data-ti="${ti}">
+          ${esc(votee.name)}
+        </div>
+      `).join('');
+      return `<div class="veto-vote-row">
+        <span class="veto-voter">${esc(voter.name)}:</span>
+        <div class="veto-vote-btns">${buttons}</div>
+      </div>`;
+    }).join('');
+    return `
+      <div class="veto-team-col ${teamLetter}">
+        <h3>${esc(name)} — votes (${Object.keys(votes).length}/5)</h3>
+        <div class="veto-vote-card">${rows}</div>
+      </div>
+    `;
+  };
+  const allIn = Object.keys(sess.votes_a).length === 5 && Object.keys(sess.votes_b).length === 5;
+  root.innerHTML = `
+    <div class="veto-stage">
+      <div class="veto-stage-head"><h2>Captain vote</h2>
+        <span class="sub">Each player picks their captain · ties trigger a revote on that side</span></div>
+      <div class="veto-teams">
+        ${teamVoteCard('A', 'a')}
+        ${teamVoteCard('B', 'b')}
+      </div>
+      ${sess.revote_count > 0 ? `<div class="veto-vote-tally" style="text-align:center;color:var(--accent)">Revote #${sess.revote_count}</div>` : ''}
+      <div class="veto-stage-actions">
+        <div class="spacer"></div>
+        <button class="btn btn-accent" id="veto-resolve-btn" ${allIn?'':'disabled'}>Resolve captains →</button>
+      </div>
+    </div>
+  `;
+  document.querySelectorAll('.veto-vote-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const t = e.target.dataset.team;
+      const vi = parseInt(e.target.dataset.vi, 10);
+      const ti = parseInt(e.target.dataset.ti, 10);
+      try { await api.veto.vote(t, vi, ti); }
+      catch (err) { toast(err.message, 'var(--bad)'); }
+    });
+  });
+  el('veto-resolve-btn').addEventListener('click', async () => {
+    try {
+      const r = await api.veto.resolve();
+      if (r.outcome === 'elected') toast('Captains elected');
+      else toast(`Tie — ${r.outcome} (revote required)`, 'var(--accent)');
+    } catch (e) { toast(e.message, 'var(--bad)'); }
+  });
+}
+
+/* ── Links ─────────────────────────────────────────────────────────────── */
+let _vetoTokenUrls = null;   // cache so re-renders don't drop the URLs
+function _renderVetoLinks(root, sess) {
+  const claimedA = !!(sess.tokens_claimed && sess.tokens_claimed.A);
+  const claimedB = !!(sess.tokens_claimed && sess.tokens_claimed.B);
+  const captainA = sess.team_a[sess.captain_a_idx];
+  const captainB = sess.team_b[sess.captain_b_idx];
+
+  if (!_vetoTokenUrls) {
+    // Hasn't issued tokens yet
+    root.innerHTML = `
+      <div class="veto-stage">
+        <div class="veto-stage-head"><h2>Captains elected</h2>
+          <span class="sub">${esc(captainA?.name || 'A')} and ${esc(captainB?.name || 'B')} will run the veto</span></div>
+        <div style="text-align:center;padding:18px">
+          <button class="btn btn-accent" id="veto-issue-tokens">Generate captain links →</button>
+        </div>
+      </div>
+    `;
+    el('veto-issue-tokens').addEventListener('click', async () => {
+      try { _vetoTokenUrls = await api.veto.tokens(); _renderVeto(); }
+      catch (e) { toast(e.message, 'var(--bad)'); }
+    });
+    return;
+  }
+
+  const card = (team, captain, claimed) => {
+    const teamLetter = team.toLowerCase();
+    const urls = _vetoTokenUrls[team];
+    return `
+      <div class="veto-link-card ${teamLetter}">
+        ${claimed ? '<div class="veto-claimed-pill">CLAIMED</div>' : ''}
+        <h3>${esc(team === 'A' ? sess.team_a_name : sess.team_b_name)}</h3>
+        <div class="veto-cap-name">Captain: <strong>${esc(captain?.name || '—')}</strong></div>
+        <div class="veto-link-url-row">
+          <label>LAN</label>
+          <div class="veto-url" title="${esc(urls.lan)}">${esc(urls.lan)}</div>
+          <button class="btn btn-ghost btn-sm" data-copy="${esc(urls.lan)}">Copy</button>
+        </div>
+        ${urls.public ? `
+        <div class="veto-link-url-row">
+          <label>Public</label>
+          <div class="veto-url" title="${esc(urls.public)}">${esc(urls.public)}</div>
+          <button class="btn btn-ghost btn-sm" data-copy="${esc(urls.public)}">Copy</button>
+        </div>` : ''}
+        <button class="btn btn-ghost btn-sm" data-revoke="${team}" style="margin-top:10px">Revoke + reissue</button>
+      </div>
+    `;
+  };
+  root.innerHTML = `
+    <div class="veto-stage">
+      <div class="veto-stage-head"><h2>Captain links</h2>
+        <span class="sub">Send each captain their link · single-use · LAN for in-house, Public if remote</span></div>
+      <div class="veto-link-cards">
+        ${card('A', captainA, claimedA)}
+        ${card('B', captainB, claimedB)}
+      </div>
+      <div class="veto-stage-actions">
+        <div class="spacer"></div>
+        <span style="color:var(--text-3);font-family:var(--font-mono);font-size:11px">
+          Waiting for both captains to claim (${(claimedA?1:0)+(claimedB?1:0)}/2)...
+        </span>
+      </div>
+    </div>
+  `;
+  document.querySelectorAll('[data-copy]').forEach(b => {
+    b.addEventListener('click', () => copyText(b.dataset.copy, 'Captain link'));
+  });
+  document.querySelectorAll('[data-revoke]').forEach(b => {
+    b.addEventListener('click', async (e) => {
+      if (!confirm(`Revoke captain ${e.target.dataset.revoke}'s token and issue a new one?`)) return;
+      try {
+        const r = await api.veto.revokeToken(e.target.dataset.revoke);
+        _vetoTokenUrls = _vetoTokenUrls || {};
+        _vetoTokenUrls[r.team] = r.urls;
+        _renderVeto();
+        toast(`New token issued for team ${r.team}`);
+      } catch (err) { toast(err.message, 'var(--bad)'); }
+    });
+  });
+}
+
+/* ── Veto board ────────────────────────────────────────────────────────── */
+function _renderVetoBoard(root, sess) {
+  const step = sess.current_step_detail;
+  const legal = new Set(sess.legal_moves || []);
+  const banned = new Set();
+  const picked = new Map();   // map -> 'pick'
+  (sess.sequence || []).forEach(st => {
+    if (!st.map_id) return;
+    if (st.kind === 'BAN') banned.add(st.map_id);
+    else if (st.kind === 'PICK') picked.set(st.map_id, st.team);
+  });
+
+  const teamName = (t) => t === 'A' ? sess.team_a_name : sess.team_b_name;
+
+  const card = (m) => {
+    const isBanned = banned.has(m);
+    const isPicked = picked.has(m);
+    const isLegal  = legal.has(m);
+    const cls = ['veto-map-card'];
+    if (isBanned) cls.push('banned');
+    if (isPicked) cls.push('picked');
+    if (!isBanned && !isPicked && !isLegal) cls.push('illegal');
+    return `
+      <div class="${cls.join(' ')}" data-map="${esc(m)}">
+        <img class="veto-map-thumb" src="/api/maps/thumb/${esc(m)}"
+             onerror="this.style.display='none'">
+        <div class="veto-map-name">${esc(m)}</div>
+        ${isBanned ? '<div class="veto-map-stamp ban">BAN</div>' : ''}
+        ${isPicked ? `<div class="veto-map-stamp pick">PICK ${esc(picked.get(m))}</div>` : ''}
+      </div>
+    `;
+  };
+
+  root.innerHTML = `
+    <div class="veto-stage">
+      ${step ? `
+      <div class="veto-turn-banner">
+        <div class="veto-turn-team">${esc(teamName(step.team))}</div>
+        <div class="veto-turn-kind">${esc(step.kind)} a map · step ${step.index + 1} of ${sess.sequence.length}</div>
+      </div>` : ''}
+      <div class="veto-board">${(sess.map_pool || []).map(card).join('')}</div>
+      <div class="veto-stage-actions">
+        <span style="color:var(--text-3);font-family:var(--font-mono);font-size:11px">
+          Admins can click for any team; captains can only click during their own turn.
+        </span>
+      </div>
+    </div>
+  `;
+  document.querySelectorAll('.veto-map-card').forEach(c => {
+    if (c.classList.contains('banned') || c.classList.contains('picked')
+        || c.classList.contains('illegal')) return;
+    c.addEventListener('click', async () => {
+      const mapId = c.dataset.map;
+      const team  = step?.team;
+      if (!team) return;
+      try { await api.veto.step(team, mapId); }
+      catch (e) { toast(e.message, 'var(--bad)'); }
+    });
+  });
+}
+
+/* ── Finale ────────────────────────────────────────────────────────────── */
+function _renderVetoFinale(root, sess) {
+  const maps = sess.final_maps || [];
+  const decider = sess.decider;
+  root.innerHTML = `
+    <div class="veto-stage veto-finale">
+      <div class="veto-finale-title">Get Ready to Battle</div>
+      <div class="veto-finale-sub">${esc(sess.team_a_name)} vs ${esc(sess.team_b_name)} · ${esc(sess.mode)}</div>
+      <div class="veto-finale-maps">
+        ${maps.map((m, i) => `
+          <div class="veto-finale-map ${m === decider ? 'decider' : ''}">
+            <span class="veto-finale-label">${m === decider ? 'DECIDER' : `MAP ${i+1}`}</span>
+            ${esc(m)}
+          </div>
+        `).join('')}
+      </div>
+      <button class="btn btn-accent" id="veto-launch-btn" style="font-size:14px;padding:14px 32px">
+        Hand series to MatchZy →
+      </button>
+      <div style="margin-top:14px;font-family:var(--font-mono);font-size:11px;color:var(--text-4)">
+        Generates the MatchZy match config and (Day 6) issues matchzy_loadmatch.
+      </div>
+    </div>
+  `;
+  el('veto-launch-btn').addEventListener('click', async () => {
+    try {
+      const r = await api.veto.finale(true);
+      toast('Match config generated — MatchZy handoff coming Day 6', 'var(--ok)');
+      console.log('MatchZy config:', r.config);
+    } catch (e) { toast(e.message, 'var(--bad)'); }
+  });
+}
+
+/* ── Complete ──────────────────────────────────────────────────────────── */
+function _renderVetoComplete(root, sess) {
+  root.innerHTML = `
+    <div class="veto-stage veto-finale">
+      <div class="veto-finale-title">Series Complete</div>
+      <div class="veto-finale-sub">${esc(sess.team_a_name)} vs ${esc(sess.team_b_name)} · ${esc(sess.mode)}</div>
+      <div class="veto-finale-maps">
+        ${(sess.final_maps || []).map((m, i) => `
+          <div class="veto-finale-map ${m === sess.decider ? 'decider' : ''}">
+            <span class="veto-finale-label">${m === sess.decider ? 'DECIDER' : `MAP ${i+1}`}</span>
+            ${esc(m)}
+          </div>
+        `).join('')}
+      </div>
+      <button class="btn btn-accent" id="veto-new-btn">Start a new session →</button>
+    </div>
+  `;
+  el('veto-new-btn').addEventListener('click', async () => {
+    try { await api.veto.reset(); toast('Ready for a new session'); }
+    catch (e) { toast(e.message, 'var(--bad)'); }
+  });
+}
+
+/* ── Captain view (simplified — just shows the relevant action) ───────── */
+function _renderVetoCaptain(root, state, sess) {
+  if (state === 'idle' || !sess) {
+    root.innerHTML = `<div class="veto-stage" style="text-align:center;padding:40px">
+      <div style="color:var(--text-3)">No active veto session.</div></div>`;
+    return;
+  }
+  if (state === 'veto') return _renderVetoBoard(root, sess);
+  if (state === 'finale' || state === 'complete') return _renderVetoFinale(root, sess);
+  // Pre-veto stages — captain just sees a waiting screen
+  root.innerHTML = `
+    <div class="veto-stage veto-captain-greeting">
+      <h2>Welcome, captain</h2>
+      <div class="veto-captain-team">Team — waiting on operator</div>
+      <div style="color:var(--text-3);font-family:var(--font-mono);font-size:11px">
+        Current stage: ${esc(state)}<br>
+        Your veto board will appear when both captains have claimed their links.
+      </div>
+    </div>
+  `;
+}
+
+/* Tear down SSE when leaving the tab */
+window.addEventListener('hashchange', () => {
+  if (currentPage === 'veto' && location.hash.replace('#','') !== 'veto') {
+    _vetoCleanup();
+  }
+});
+
 /* ══════════════════════════════════════════════════════════════ CONFIG PAGE */
 
 pages['config'] = async function() {

@@ -268,6 +268,28 @@ admin-only unless noted.  Captains get a scoped session via `/api/veto/claim`
 | `POST /api/veto/finale` | `build_matchzy_config()` + `complete()`.  Logs the planned `matchzy_loadmatch` (full handoff lands on Day 6). |
 | `POST /api/veto/reset` | Clear the active session and return to `idle`. |
 | `GET /veto?join=<token>` | Captain-link landing page — server-side claim + cookie set, then redirect to `/#veto`. **(public)** |
+| `GET /veto` (no token) | Redirects to `/#veto` so the SPA can render the live-mirror page. **(public)** |
+
+### Frontend — Veto tab (v0.10.0 Day 3)
+
+The SPA renders the veto session as a dedicated tab.  Single `pages['veto']`
+entry point in `app.js`; state comes from `/api/veto/state` + the SSE stream
+(`/api/veto/stream`).  Each session state has its own render function:
+
+| Function | Stage |
+|---|---|
+| `_renderVetoIdle(root)` | Create-session card (mode pills: BO1/BO3/BO5) |
+| `_renderVetoRoster(root, sess)` | 10-slot input grid + paste / demo / save / distribute |
+| `_renderVetoTeams(root, sess)` | A/B columns with captain badge after election + reshuffle |
+| `_renderVetoVoting(root, sess)` | Per-player vote buttons + revote indicator |
+| `_renderVetoLinks(root, sess)` | Captain link cards (LAN + Public URLs + Copy + Revoke) |
+| `_renderVetoBoard(root, sess)` | 7 map cards + turn banner + click-to-act (filtered by `legal_moves`) |
+| `_renderVetoFinale(root, sess)` | "Get Ready to Battle" + final maplist + Hand to MatchZy |
+| `_renderVetoComplete(root, sess)` | Series summary + Start a new session |
+| `_renderVetoCaptain(root, state, sess)` | Captain-role simplified view — only the board + finale |
+
+SSE cleanup on tab-leave hashchange; auto-reconnect on error (5 s backoff,
+matches the existing log-stream pattern).
 
 ---
 
