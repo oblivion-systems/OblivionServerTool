@@ -2522,17 +2522,50 @@ function _renderVetoFinale(root, sess) {
       <button class="btn btn-accent" id="veto-launch-btn" style="font-size:14px;padding:14px 32px">
         Hand series to MatchZy →
       </button>
-      <div style="margin-top:14px;font-family:var(--font-mono);font-size:11px;color:var(--text-4)">
-        Generates the MatchZy match config and (Day 6) issues matchzy_loadmatch.
+      <div id="veto-matchzy-status" style="margin-top:14px;font-family:var(--font-mono);font-size:11px;color:var(--text-4)">
+        Writes a MatchZy match config under <code>csgo/cfg/MatchZy/</code> and issues
+        <code>matchzy_loadmatch</code> via RCON.
       </div>
     </div>
   `;
   el('veto-launch-btn').addEventListener('click', async () => {
+    const btn = el('veto-launch-btn');
+    const status = el('veto-matchzy-status');
+    btn.disabled = true; btn.textContent = 'Handing off…';
     try {
       const r = await api.veto.finale(true);
-      toast('Match config generated — MatchZy handoff coming Day 6', 'var(--ok)');
-      console.log('MatchZy config:', r.config);
-    } catch (e) { toast(e.message, 'var(--bad)'); }
+      const mz = r.matchzy || {};
+      console.log('MatchZy config:', r.config, 'outcome:', mz);
+      if (mz.loaded) {
+        toast('MatchZy loaded the match — knife round + LIVE will follow', 'var(--ok)');
+        status.innerHTML = `
+          <div style="color:var(--ok)">✓ matchzy_loadmatch succeeded.</div>
+          <div style="margin-top:4px;color:var(--text-3)">Config: <code>${esc(mz.written_to || '')}</code></div>
+          ${mz.rcon_response ? `<div style="margin-top:4px;color:var(--text-4)">Server: ${esc(mz.rcon_response)}</div>` : ''}
+        `;
+        btn.textContent = 'Match handed off ✓';
+      } else if (mz.error) {
+        // File written, but RCON failed or server wasn't running.  Don't
+        // toast as error — the operator's not blocked; they can copy the
+        // path and run `matchzy_loadmatch <file>` manually from the RCON
+        // console.  The yellow warning style signals "action needed".
+        toast('Config written but MatchZy handoff needs attention', 'var(--warn, var(--accent))');
+        status.innerHTML = `
+          <div style="color:var(--warn, var(--accent))">⚠ ${esc(mz.error)}</div>
+          ${mz.written_to ? `<div style="margin-top:4px;color:var(--text-3)">Config saved to: <code>${esc(mz.written_to)}</code></div>` : ''}
+        `;
+        btn.textContent = 'Retry handoff';
+        btn.disabled = false;
+      } else {
+        // No load_match requested — just confirm the config dropped.
+        status.innerHTML = `<div style="color:var(--ok)">✓ Config written to <code>${esc(mz.written_to || '')}</code></div>`;
+      }
+    } catch (e) {
+      // True error from the API — file write failed, no usable config.
+      toast(e.message, 'var(--bad)');
+      btn.textContent = 'Hand series to MatchZy →';
+      btn.disabled = false;
+    }
   });
 }
 

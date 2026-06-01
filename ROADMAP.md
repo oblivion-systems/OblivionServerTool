@@ -74,13 +74,13 @@ In flight on master.  Days 1-5 of 7 done; Day 6 (real MatchZy
 | 3 | ✅ | SPA Veto tab + 8 stage renderers + `api.veto.*` namespace |
 | 4 | ✅ | QR codes for captain links (segno, `/api/veto/qr`) + 8 more tests |
 | 5 | ✅ | Cinematic finale (title rise, decider glow pulse, 30-piece confetti) |
-| 6 | ⏳ | Write MatchZy match config to disk + RCON `matchzy_loadmatch` handoff |
+| 6 | ✅ | MatchZy match config to disk + `matchzy_loadmatch` RCON handoff + 6 tests |
 | 7 | ⏳ | Polish + smoke + tag v0.10.0 + GitHub release with binary |
 
 Decisions locked in (from VETO.md): dedicated "Veto" tab, LAN + Public
 captain links, per-veto override starting from active-duty 7, Steam IDs
-collected at roster for MatchZy strict mode.  All 81/81 backend tests
-green (22 v092 + 34 veto + 25 veto-api).
+collected at roster for MatchZy strict mode.  All 87/87 backend tests
+green (22 v092 + 34 veto + 31 veto-api).
 
 **v0.11.0+ — Discord bot integration:**
 

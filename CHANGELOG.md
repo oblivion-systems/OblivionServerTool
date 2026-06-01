@@ -132,12 +132,60 @@ alpha-fade the oklch accent token without converting to RGB.  Modern
 WebView2 supports it natively; old WebView drops just the glow and keeps
 the rest.
 
-### Day 6 (pending) — MatchZy match-config write + `matchzy_loadmatch` handoff
+### Day 6 — MatchZy match-config write + RCON handoff
 
-Currently `build_matchzy_config()` returns a dict that the finale endpoint
-only logs.  Day 6 writes the JSON to a known path under the server's
-`cfg/` and issues `matchzy_loadmatch <path>` via RCON; failures surface to
-the operator without dropping the veto state.
+`/api/veto/finale` was a placeholder that built the config dict and
+logged it.  Now it does the real handoff:
+
+1. Strips `_oblivion_meta` (our SPA audit trail, unknown to MatchZy)
+   from a copy of the config so MatchZy's schema doesn't complain.
+2. Atomically writes the cleaned JSON to
+   `<csgo>/cfg/MatchZy/<matchid>.json` (tmp + `os.replace` + fsync; the
+   directory is auto-created on first use).
+3. If `load_match: true` (default) AND `core.running`, issues
+   `matchzy_loadmatch <basename>` via RCON.  Single attempt — RCON has
+   retry logic but the operator is watching this in real time; better
+   to surface a quick failure than wait 30 s through retries.
+4. Response always carries `{ok, config, matchzy: {written_to, loaded,
+   error?, rcon_response?}}` so the SPA can show the operator exactly
+   what happened.
+
+Three-way outcome design:
+* **File write fails** → 500, session stays on `finale` so the operator
+  can retry after fixing the disk issue.
+* **File written, RCON fails (or server not running)** → 200 with
+  `matchzy.error` describing what to do.  Session still transitions to
+  `complete` so the SPA isn't stuck; the operator can copy
+  `matchzy.written_to` and run `matchzy_loadmatch <file>` from the RCON
+  console.  The launch button flips to "Retry handoff".
+* **File written, RCON succeeded** → 200 with `matchzy.loaded: true`
+  and a snippet of the RCON response.  SPA shows a green ✓ and the
+  button locks to "Match handed off ✓".
+
+SPA finale renderer updated: real-time status under the launch button
+(yellow warning for needs-attention, green check for success), button
+state machine (disabled during the call, "Retry handoff" enabled on
+RCON failure, locked on success).
+
+Test additions (+6 cases, now 31/31 in `test_veto_api.py`):
+* File gets written + on-disk JSON has the expected MatchZy keys
+* `_oblivion_meta` is **stripped from the disk file** but **preserved
+  in the API response** (so the SPA can show the veto audit trail)
+* Server-not-running → 200 + `matchzy.error` mentioning "not running"
+* RCON `ConnectionError` → 200 + `matchzy.error` containing the
+  exception text; session still transitions to `complete`
+* `load_match: true` + running + RCON OK → exactly one
+  `matchzy_loadmatch <basename>` call, where `<basename>` matches the
+  on-disk filename
+* `load_match: false` + running → zero RCON calls (preview mode)
+
+Test fixture `_new_app()` now redirects `core._csgo_dir()` to a
+per-test tempdir via `mkdtemp('oblivion_veto_csgo_')` so the test
+batteries never write to the real CS2 install dir on the user's machine
+(this would otherwise litter `D:\steamcmd\…\game\csgo\cfg\MatchZy\`
+with `oblivion-veto-*.json` files on every run).
+
+### Day 7 (pending) — Polish + smoke + tag v0.10.0
 
 ### Day 7 (pending) — Polish + smoke + tag v0.10.0
 
@@ -147,8 +195,8 @@ Final UX pass, full regression, release notes, tag, GitHub release with binary.
 
 * `tests/test_v092.py` — 22/22 (unchanged from v0.9.2.1)
 * `tests/test_veto.py` — 34/34 (new in Day 1)
-* `tests/test_veto_api.py` — 25/25 (new in Day 2, extended in Day 4)
-* **All 81/81 green**
+* `tests/test_veto_api.py` — 31/31 (new in Day 2; +8 Day 4 QR cases; +6 Day 6 MatchZy cases)
+* **All 87/87 green**
 
 ---
 

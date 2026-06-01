@@ -102,12 +102,14 @@ Layered build plan with v0.10.0 = Layer 0 (core veto), v0.11.0 = Layer 1 (Discor
   decider, 30-piece CSS confetti shower; three JS gates ensure each animation fires
   exactly once. *(Day 5 — `b32be7e`)*
 - [x] **`tests/test_veto.py`** — state-machine unit tests (34/34). *(Day 1)*
-- [x] **`tests/test_veto_api.py`** — Flask test_client integration tests (25/25 after
-  Day 4's 8 new QR cases). *(Day 2 + Day 4)*
-- [ ] **Day 6: MatchZy handoff** — `build_matchzy_config()` already produces the dict;
-  Day 6 writes it to a known path under the server's `cfg/` and issues
-  `matchzy_loadmatch <path>` via RCON.  Currently the finale endpoint only logs the
-  config.  Failure surfacing → operator toast, veto state preserved.
+- [x] **`tests/test_veto_api.py`** — Flask test_client integration tests (31/31 after
+  Day 4's 8 QR cases + Day 6's 6 MatchZy cases). *(Day 2 + Day 4 + Day 6)*
+- [x] **Day 6: MatchZy handoff** — `/api/veto/finale` atomically writes
+  `<csgo>/cfg/MatchZy/<matchid>.json` (with `_oblivion_meta` stripped from disk
+  but preserved in API response), then `matchzy_loadmatch <basename>` via RCON.
+  Three-way outcome (file fail → 500; RCON fail → 200 + `matchzy.error` + session
+  still completes; full success → 200 + `matchzy.loaded`).  SPA finale updated
+  with real-time status + retry button.
 - [ ] **Day 7: Polish + smoke + tag v0.10.0** — full regression, release notes, tag,
   GitHub release with binary.
 - [ ] **Installer .spec regeneration note:** when next regenerating

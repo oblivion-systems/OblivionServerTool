@@ -17,6 +17,8 @@ Auth model:
 from __future__ import annotations
 
 import functools
+import json
+import os
 import queue
 import re
 import secrets
@@ -1393,9 +1395,26 @@ def create_flask(core: AppCore) -> Flask:
     @app.route("/api/veto/finale", methods=["POST"])
     @require_auth
     def veto_finale():
-        """Generate the MatchZy config + hand it to the server.  Caller
-        chooses whether to actually fire `matchzy_loadmatch` via the
-        `load_match` flag — useful for previewing the config in dev."""
+        """Generate the MatchZy config, write it to disk under the server's
+        `csgo/cfg/MatchZy/` directory, and issue `matchzy_loadmatch <file>`
+        via RCON so MatchZy takes over the series.
+
+        Three-way outcome in the response under `matchzy`:
+          * `written_to`: absolute path of the JSON we wrote (always set
+            on a successful write — operator can inspect it).
+          * `loaded`: True if the RCON call returned without raising.
+          * `error`:  if anything went sideways AFTER a successful file
+            write (RCON down, MatchZy plugin not loaded, server not
+            running), the operator gets a 200 with the error here — the
+            veto state still transitions to `complete` so the SPA isn't
+            stuck, and the operator can copy the file path + re-issue
+            `matchzy_loadmatch` from the RCON console manually.
+
+        Caller chooses whether to actually fire the RCON via `load_match`
+        (default True).  `{load_match: false}` is useful for previewing the
+        config in dev or when the operator wants to hand the JSON to a
+        different match-host workflow.
+        """
         d = request.get_json() or {}
         load_match = bool(d.get("load_match", True))
         with core._veto_lock:
@@ -1405,22 +1424,78 @@ def create_flask(core: AppCore) -> Flask:
                 cfg = _veto.build_matchzy_config(core._veto_session)
             except Exception as e:
                 return _veto_error_response(e)
-        # MatchZy handoff is a real RCON call → can be slow.  We've released
-        # the veto lock; the RCON layer has its own retries.
-        if load_match and core.running:
-            try:
-                # MatchZy supports matchzy_loadmatch_url for fetching a JSON,
-                # or matchzy_loadmatch for a local file.  Detailed wiring
-                # comes on Day 6 (MatchZy handoff); for now we just log.
-                core.log(f"[veto] would issue matchzy_loadmatch — config keys: "
-                         f"{sorted(cfg.keys())}")
-            except Exception as exc:
-                core.log(f"[veto] matchzy handoff failed: {exc}")
+        # Snapshot cfg for the response, then prepare the on-disk variant.
+        # MatchZy doesn't know about `_oblivion_meta` — strip it from the
+        # written file so MatchZy's schema validator doesn't complain
+        # (the field is purely for our SPA's audit trail in the response).
+        disk_cfg = {k: v for k, v in cfg.items() if not k.startswith("_")}
+        matchid = str(cfg.get("matchid", f"oblivion-veto-{int(time.time())}"))
+        # Filesystem-safe filename — matchid is already URL-safe (only
+        # the int timestamp suffix varies) but defend against an operator
+        # ever passing custom matchids through.
+        safe_filename = re.sub(r'[^a-zA-Z0-9_.-]', '_', matchid) + ".json"
+
+        matchzy_result: dict = {"loaded": False}
+        write_error: str | None = None
+        try:
+            cfg_dir = os.path.join(core._csgo_dir(), "cfg", "MatchZy")
+            os.makedirs(cfg_dir, exist_ok=True)
+            target = os.path.join(cfg_dir, safe_filename)
+            # Atomic write: tmp + os.replace.  Avoids MatchZy reading a
+            # half-written file in the gap between open() and the final
+            # flush — vanishingly unlikely in practice (the load is RCON-
+            # triggered AFTER this returns) but cheap insurance.
+            tmp = target + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(disk_cfg, f, indent=2, ensure_ascii=False)
+                f.flush()
+                try: os.fsync(f.fileno())
+                except OSError: pass   # network drives sometimes refuse fsync
+            os.replace(tmp, target)
+            matchzy_result["written_to"] = target
+            core.log(f"[veto] wrote MatchZy config → {target}")
+        except Exception as exc:
+            write_error = f"failed to write match config: {type(exc).__name__}: {exc}"
+            core.log(f"[veto] {write_error}")
+        # If the file write itself failed, stop here with 500 — the operator
+        # needs to know they can't proceed.  Don't complete the session so
+        # they can retry after fixing the disk issue.
+        if write_error:
+            return jsonify({"error": write_error}), 500
+
+        # File write OK — try the RCON handoff if requested and possible.
+        if load_match:
+            if not core.running:
+                matchzy_result["error"] = (
+                    "server not running — wrote config but skipped "
+                    "matchzy_loadmatch; start the server and run "
+                    f"`matchzy_loadmatch {safe_filename}` manually."
+                )
+                core.log(f"[veto] {matchzy_result['error']}")
+            else:
+                try:
+                    # Single attempt — RCON has retry logic but the operator
+                    # is watching this in real time; better to surface a
+                    # quick failure than wait 30 s through retries.
+                    resp = core.rcon.execute(f"matchzy_loadmatch {safe_filename}")
+                    matchzy_result["loaded"] = True
+                    matchzy_result["rcon_response"] = resp.strip()[:300]
+                    core.log(f"[veto] matchzy_loadmatch {safe_filename} → "
+                             f"{resp.strip()[:80]}")
+                except Exception as exc:
+                    matchzy_result["error"] = (
+                        f"matchzy_loadmatch RCON call failed: "
+                        f"{type(exc).__name__}: {exc}"
+                    )
+                    core.log(f"[veto] {matchzy_result['error']}")
+
+        # Transition the session to `complete` regardless — the file is on
+        # disk, the operator can recover from any RCON hiccup manually.
         with core._veto_lock:
             if core._veto_session is not None:
                 _veto.complete(core._veto_session)
         _veto_broadcast()
-        return jsonify({"ok": True, "config": cfg})
+        return jsonify({"ok": True, "config": cfg, "matchzy": matchzy_result})
 
     @app.route("/api/veto/reset", methods=["POST"])
     @require_auth

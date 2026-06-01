@@ -265,7 +265,7 @@ admin-only unless noted.  Captains get a scoped session via `/api/veto/claim`
 | `POST /api/veto/revoke_token` | Re-issue a fresh token for a team (operator action). |
 | `POST /api/veto/claim` | Public — token IS the credential.  Mints a captain session cookie. **(public)** |
 | `POST /api/veto/step` | `perform_step(team, map_id)`.  Captains can only act for their own team; admins can act for either. **(captain + admin)** |
-| `POST /api/veto/finale` | `build_matchzy_config()` + `complete()`.  Logs the planned `matchzy_loadmatch` (full handoff lands on Day 6). |
+| `POST /api/veto/finale` | (Day 6 wired) `build_matchzy_config()` → write JSON to `<csgo>/cfg/MatchZy/<matchid>.json` (atomic, `_oblivion_meta` stripped from disk file) → `matchzy_loadmatch <basename>` via RCON if `load_match: true` + server running.  Response always 200 with `matchzy.{written_to, loaded, error?}`; session transitions to `complete` even on RCON failure so the SPA isn't stuck.  500 only if the disk write itself fails. |
 | `POST /api/veto/reset` | Clear the active session and return to `idle`. |
 | `GET /api/veto/qr?token=…&kind=lan\|public` | (v0.10.0 Day 4) SVG QR code for a captain join URL.  Validates token against the live session; admin/local only; cached `private, max-age=300`. |
 | `GET /veto?join=<token>` | Captain-link landing page — server-side claim + cookie set, then redirect to `/#veto`. **(public)** |
