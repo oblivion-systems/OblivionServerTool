@@ -85,17 +85,17 @@ class RCONClient:
             # Real command + sentinel (empty body, type-2).  Server processes
             # them in order; once we see a response with `sid` we know every
             # fragment of the real command's response has been delivered.
+            # NOTE: do NOT speculatively _recv() after sid — earlier attempts
+            # did, on the theory that some Source builds emit a trailing
+            # packet, but CS2 doesn't, so every execute() stalled for the
+            # full 5-second socket timeout waiting for a phantom packet.
+            # Adding 5s per command broke status polling, broadcasts, kicks,
+            # map changes — every RCON-touching path.  v0.9.2.1 drops it.
             s.sendall(self._pack(cid, 2, command) + self._pack(sid, 2, ""))
             chunks: list[str] = []
             while True:
                 rid, _rtype, body = self._recv(s)
                 if rid == sid:
-                    # Drain one trailing empty-response packet some Source
-                    # builds emit after the sentinel; treat any error as "done".
-                    try:
-                        self._recv(s)
-                    except Exception:
-                        pass
                     break
                 if rid == cid:
                     chunks.append(body)
