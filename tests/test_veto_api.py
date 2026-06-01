@@ -905,6 +905,42 @@ def t_tokens_response_includes_dm_sent_field():
 t('tokens: response includes dm_sent: False when no bot configured', t_tokens_response_includes_dm_sent_field)
 
 
+def t_discord_voice_channels_400_without_guild_id():
+    """v0.11.0 Layer 1B: /api/discord/voice_channels returns 400 if the
+    operator hasn't configured a guild ID in Config → Discord."""
+    ac, app, c = _new_app()
+    _login(c)
+    ac.discord_guild_id = ''       # explicit empty
+    r = c.get('/api/discord/voice_channels')
+    body = r.get_json() or {}
+    return (r.status_code == 400
+            and 'guild' in body.get('error', '').lower()), \
+           f'status={r.status_code} body={body}'
+t('/api/discord/voice_channels: 400 without guild ID configured', t_discord_voice_channels_400_without_guild_id)
+
+
+def t_discord_voice_members_400_without_channel_id():
+    ac, app, c = _new_app()
+    _login(c)
+    ac.discord_guild_id = '123456789012345678'
+    r = c.get('/api/discord/voice_members')        # no channel_id arg
+    return r.status_code == 400, f'status={r.status_code}'
+t('/api/discord/voice_members: 400 without channel_id arg', t_discord_voice_members_400_without_channel_id)
+
+
+def t_discord_endpoints_503_when_bot_not_connected():
+    """When the bot isn't running (no token configured in the test),
+    the endpoints return 503 not 500 — gives the SPA a clean retry path."""
+    ac, app, c = _new_app()
+    _login(c)
+    ac.discord_guild_id = '123456789012345678'
+    r1 = c.get('/api/discord/voice_channels')
+    r2 = c.get('/api/discord/voice_members?channel_id=234567890123456789')
+    return (r1.status_code == 503 and r2.status_code == 503), \
+           f'voice_channels={r1.status_code} voice_members={r2.status_code}'
+t('/api/discord/voice_*: 503 when bot not connected', t_discord_endpoints_503_when_bot_not_connected)
+
+
 def t_finale_mode_precheck_rejects_non_matchzy_mode():
     """v0.10.2: /api/veto/finale with load_match=True refuses if the server
     is on a non-MatchZy mode (1v1 Arena / Warcraft / Zombie Escape / etc.)

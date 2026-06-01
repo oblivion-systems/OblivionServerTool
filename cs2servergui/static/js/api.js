@@ -110,6 +110,12 @@ const api = (() => {
     // based on this instead of try-then-403.
     capabilities: ()    => get('/api/capabilities'),
 
+    // ── Discord (v0.11.0 Layer 1B — voice-channel roster pull) ────────────
+    discord: {
+      voiceChannels: ()           => get('/api/discord/voice_channels'),
+      voiceMembers:  (channelId)  => get(`/api/discord/voice_members?channel_id=${encodeURIComponent(channelId)}`),
+    },
+
     // ── Server control ────────────────────────────────────────────────────
     start:   (map, mode, workshop = false) =>
                           post('/api/server/start', { map, mode, workshop }),
