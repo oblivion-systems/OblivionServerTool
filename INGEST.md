@@ -29,7 +29,7 @@ each with a one-sentence summary. No code, no behavioural changes — reference 
 
 ---
 
-## `cs2servergui/veto.py` (NEW — 365 lines)
+## `cs2servergui/veto.py` (NEW — 614 lines)
 
 Backend state machine for the v0.10.0 map-veto / match-setup feature.
 AppCore owns at most one `VetoSession` at a time, serialised by
@@ -144,7 +144,7 @@ functions here; SSE streams state changes to the SPA mirror.
 
 ---
 
-## `cs2servergui/web.py` (1059 lines)
+## `cs2servergui/web.py` (1568 lines)
 
 ### Module-level constants
 
@@ -312,7 +312,7 @@ JS-gated so re-renders from SSE pings on the same state don't restart them:
 
 ---
 
-## `cs2servergui/core.py` (3681 lines)
+## `cs2servergui/core.py` (3692 lines)
 
 ### v0.9.2 / v0.9.2.1 additions worth knowing about
 

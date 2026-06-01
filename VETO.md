@@ -1,9 +1,15 @@
-# VETO — Map Veto / Match Setup (planned feature)
+# VETO — Map Veto / Match Setup
 
-> Quick-reference spec for the in-app **Veto** feature, targeted for the full release.
-> Status: **planned / not started.** Working prototype lives at
-> [`_prototypes/veto.html`](_prototypes/veto.html) (open in a browser to see the flow).
-> See also: [ROADMAP.md](ROADMAP.md), [TODO.md](TODO.md).
+> Quick-reference spec for the in-app **Veto** feature.
+> Status: **v0.10.0 in flight, Days 1-5 of 7 done on master, Days 6-7 pending.**
+> Implementation lives in [`cs2servergui/veto.py`](cs2servergui/veto.py) (state machine,
+> 365 lines), the `/api/veto/*` routes in [`cs2servergui/web.py`](cs2servergui/web.py), and
+> the Veto tab in [`cs2servergui/static/js/app.js`](cs2servergui/static/js/app.js) +
+> [`cs2servergui/static/css/app.css`](cs2servergui/static/css/app.css).  The original
+> browser-only prototype is preserved at [`_prototypes/veto.html`](_prototypes/veto.html)
+> for reference.  See also: [CHANGELOG.md](CHANGELOG.md) → v0.10.0,
+> [ROADMAP.md](ROADMAP.md), [TODO.md](TODO.md), [INGEST.md](INGEST.md) → "API — map veto"
+> + "Frontend — Veto tab".
 
 ---
 
@@ -53,11 +59,13 @@ first map and queues the rest** per the BO format. Core pieces:
     so either collect Steam IDs at roster (or via the Discord layer mapping), or run MatchZy
     in a looser mode where players pick sides in-game. (Open sub-point.)
 
-### Known gap in the prototype
-The captain `?join=TOKEN` gate reads `state` from **localStorage** — i.e. the *host's*
-browser. A captain opening the link on their own device has empty localStorage, so the gate
-never matches. **Multi-device captain veto therefore requires the shared server-side state
-above.** Single-use token enforcement also can't live in localStorage.
+### Known gap in the prototype *(now resolved in the v0.10.0 live implementation)*
+The captain `?join=TOKEN` gate read `state` from **localStorage** — i.e. the *host's*
+browser. A captain opening the link on their own device had empty localStorage, so the
+gate never matched. **Multi-device captain veto therefore required the shared server-side
+state.** The live `cs2servergui/veto.py` + `_CAPTAIN_PATHS` allowlist + cookie-minting
+`/api/veto/claim` flow fixes this; single-use token enforcement now lives server-side in
+`claim_captain()` (idempotent for the same caller IP, rejects different caller).
 
 ---
 
@@ -94,40 +102,44 @@ bot buttons) — much larger; keep veto on the web form.
 
 ## Decisions
 
-**Resolved:**
+**All resolved (Days 1-5):**
 - ✅ **Captains play from their own devices** via hosted links — the tool's UI is a **live
-  mirror** of the session (needs server-side state + SSE).
-- ✅ **Completion auto-launches + queues** the maps with a **"Get Ready to Battle"** finale
-  (no manual map loading, no "just show the lineup").
-
-- ✅ **MatchZy runs the map series** — the veto generates a MatchZy match config and loads
-  it; MatchZy handles map order, knife rounds, scoring, and map-end → next. (Sub-point still
-  open: whether to collect Steam IDs for strict team/player assignment, or run loose.)
-
-**Still open:**
-1. **Mirror presentation** — a **dedicated "Veto" tab** that reflects the live session, OR
-   **overlay it on the Status page** (and let that overlay become the "Get Ready to Battle"
-   finale). Could also be both: tab during veto, status-overlay for the finale.
-2. **Captain reachability** — LAN only (LAN IP links), over the internet (public IP +
-   existing port-forward), or both (mirror the Connect popover).
-3. **Map pool** — competitive active-duty (the fixed 7 the prototype hardcodes), a
-   host-configurable pool (incl. workshop), or the full official list.
-4. **Player Steam IDs** — collect them at roster (enables MatchZy strict team assignment +
-   could feed the Discord mapping), or skip and let players pick sides in-game.
+  mirror** of the session.  *Implemented:* server-side state in `cs2servergui/veto.py`,
+  SSE pub/sub in `web.py` (`/api/veto/stream`).
+- ✅ **Completion auto-launches + queues** the maps with a **"Get Ready to Battle"** finale.
+  *Implemented Day 5:* cinematic finale (title rise, decider glow, confetti).  Day 6 wires
+  the real `matchzy_loadmatch` handoff (currently the finale endpoint logs the config).
+- ✅ **MatchZy runs the map series.**  *Implemented Day 1:* `build_matchzy_config()`
+  produces the config dict (BO format, ordered maplist, team names + Steam IDs).  Day 6
+  writes it to disk + RCON-loads it.
+- ✅ **Mirror presentation: dedicated Veto tab** (not an overlay).  *Implemented Day 3:*
+  `pages['veto']` in `app.js`, sidebar entry between Maps and Appearance.
+- ✅ **Captain reachability: both LAN + Public.**  *Implemented Day 2:* `/api/veto/tokens`
+  returns `{lan, public}` URLs per captain (Public only if `core.public_ip` is set —
+  mirrors the Connect popover).  Day 4 adds a QR code per URL.
+- ✅ **Map pool: per-veto override starting from the active-duty 7.**  *Implemented Day 1:*
+  `create_session(mode, map_pool)` accepts any pool; `config.ACTIVE_DUTY_POOL` is the
+  default.
+- ✅ **Player Steam IDs collected at roster** (enables MatchZy strict assignment).
+  *Implemented Day 1:* `RosterPlayer.steam_id` is optional; `/api/veto/roster` accepts
+  `{name, steam_id}` per player.
 
 ## Layered build plan
 
 Ship a simple, robust core first; each later layer is additive and optional.
 
-**Layer 0 — Core veto (the robust base):**
-1. Backend veto session + API endpoints in `AppCore`/`web.py`.
-2. Port the 5-stage UI into the SPA (tab and/or Status overlay) talking to the API.
-3. SSE live mirror + real captain-link token gate (scoped, single-use).
-4. Copy + **QR** link delivery.
-5. "Get Ready to Battle" finale → generate a MatchZy match config from the veto result and
-   load it; MatchZy runs the best-of series (map order, knife, scoring, map-end → next).
+**Layer 0 — Core veto (v0.10.0, in flight on master):**
+1. ✅ Backend veto session + API endpoints — `veto.py` + 15 routes in `web.py` *(Day 1-2)*
+2. ✅ Port the 5-stage UI into the SPA as a dedicated tab — `pages['veto']` + 8 stage
+   renderers *(Day 3)*
+3. ✅ SSE live mirror + real captain-link token gate (scoped, single-use) — `/api/veto/stream`
+   + `_CAPTAIN_PATHS` allowlist + `claim_captain()` enforcement *(Day 2)*
+4. ✅ Copy + **QR** link delivery — segno-backed `/api/veto/qr` returning SVG *(Day 4)*
+5. ✅ Cinematic finale — title rise, decider glow, confetti *(Day 5)*
+6. ⏳ MatchZy match-config write + `matchzy_loadmatch` RCON handoff *(Day 6, pending)*
+7. ⏳ Polish + smoke + tag *(Day 7, pending)*
 
-**Layer 1 — Discord bot (optional):** pull roster from a voice channel + DM the captain
+**Layer 1 — Discord bot (v0.11.0):** pull roster from a voice channel + DM the captain
 links. Falls back to manual/QR when not configured. (See Discord section above.)
 
 **Layer 2 — (stretch) full in-Discord veto:** ban/pick via bot buttons. Not planned.

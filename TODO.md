@@ -80,21 +80,40 @@ deferred loose ends. Full prose in [CHANGELOG.md](CHANGELOG.md) → v0.9.1.*
   lock, the `_stop_event` edge-window cancel race, and the Warcraft `ReferenceEquals` → SteamID
   equality fix in three deferred-menu sites.
 
-### Next milestone — v0.10.0 (map-veto match setup)
-*Full spec in [VETO.md](VETO.md).  Layered build plan with v0.10.0 = Layer 0 (core veto),
-v0.11.0 = Layer 1 (Discord bot).*
+### Currently shipping — v0.10.0 (map-veto match setup), Days 1-5 of 7 done
+*Full spec in [VETO.md](VETO.md); detailed prose in [CHANGELOG.md](CHANGELOG.md) → v0.10.0.
+Layered build plan with v0.10.0 = Layer 0 (core veto), v0.11.0 = Layer 1 (Discord bot).*
 
-- [ ] **`VetoSession` model + state machine** in `core.py` — roster, teams, votes, captain
-  tokens, mode (BO1/BO3/BO5), map pool, sequence, results.
-- [ ] **API endpoints** in `web.py` — roster / distribute / vote / generate-links /
-  captain-join / ban / pick.  Reuse the existing SSE log-stream pattern for live mirror.
-- [ ] **Frontend port** — `_prototypes/veto.html`'s 5-stage flow into the SPA as a dedicated
-  "Veto" tab.  Bundled workshop thumbnails for the map cards.
-- [ ] **Captain link delivery** — LAN + Public link per captain (mirrors Connect popover),
-  Copy button, QR code (single-use, scoped tokens enforced server-side).
-- [ ] **"Get Ready to Battle" finale** + MatchZy match-config generator (Steam IDs for strict
-  team assignment).
-- [ ] **`tests/test_veto_session.py`** — state machine unit tests before any HTTP/UI work.
+- [x] **`VetoSession` model + state machine** (`cs2servergui/veto.py`, 365 lines) — roster,
+  teams, votes, captain tokens, mode (BO1/BO3/BO5), map pool, sequence, results, with
+  `_LEGAL_TRANSITIONS`-enforced state machine. *(Day 1 — `c5bd7b8`)*
+- [x] **API endpoints** in `web.py` — 15 routes covering roster / distribute / vote /
+  generate-links / captain-join / ban / pick / finale / reset; SSE live mirror via
+  `queue.Queue` per subscriber; captain role added to `_role_gate` allowlist. *(Day 2 —
+  `8e1add4` + polish `9877b15`)*
+- [x] **Frontend port** — `_prototypes/veto.html`'s 5-stage flow into the SPA as a dedicated
+  Veto tab; 8 stage renderers + `api.veto.*` namespace + SSE subscribe/cleanup; bundled map
+  thumbnails via existing `/api/maps/thumb/<name>` proxy. *(Day 3 — `74c0f49`)*
+- [x] **Captain link delivery** — LAN + Public link per captain (mirrors Connect popover),
+  Copy button, **QR code** via segno-backed `/api/veto/qr` endpoint (single-use, scoped
+  tokens enforced server-side; unknown-token rejection blocks proxy abuse). *(Day 4 —
+  `7561d1b`)*
+- [x] **Cinematic finale** — title slide-up, staggered map reveal, accent-glow pulse on
+  decider, 30-piece CSS confetti shower; three JS gates ensure each animation fires
+  exactly once. *(Day 5 — `b32be7e`)*
+- [x] **`tests/test_veto.py`** — state-machine unit tests (34/34). *(Day 1)*
+- [x] **`tests/test_veto_api.py`** — Flask test_client integration tests (25/25 after
+  Day 4's 8 new QR cases). *(Day 2 + Day 4)*
+- [ ] **Day 6: MatchZy handoff** — `build_matchzy_config()` already produces the dict;
+  Day 6 writes it to a known path under the server's `cfg/` and issues
+  `matchzy_loadmatch <path>` via RCON.  Currently the finale endpoint only logs the
+  config.  Failure surfacing → operator toast, veto state preserved.
+- [ ] **Day 7: Polish + smoke + tag v0.10.0** — full regression, release notes, tag,
+  GitHub release with binary.
+- [ ] **Installer .spec regeneration note:** when next regenerating
+  `OblivionServerTool.spec` for an installer build, add `segno` and
+  `cs2servergui.veto` to `hiddenimports` (the file is gitignored, so the
+  segno+veto hidden-imports must be re-applied each regeneration).
 
 ### Shipped in v0.9.1 — confirmed in-game
 - [x] **Jailbreak crash fixed** — dropped CS2Fixes (`zombie`) from the Jailbreak mode; native

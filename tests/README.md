@@ -16,9 +16,16 @@ Either invocation isolates config writes to a fresh `tempfile.mkdtemp()` so the 
 
 ## What each file covers
 
-| File | Release | Scope |
-|---|---|---|
-| `test_v092.py` | v0.9.2 | RCON multi-packet sentinel, execute_retry exception widening, broadcast `;` injection block, log_save filename uniqueness, Event.wait crash-backoff cancel, _lan_ip cache TTL, _STEAMID_RE cap, save_config atomicity, _lifecycle_lock RLock reentrancy, _netutils, Flask route auth + 409 |
+| File | Release | Cases | Scope |
+|---|---|---|---|
+| `test_v092.py` | v0.9.2 | 22 | RCON multi-packet sentinel, execute_retry exception widening, broadcast `;` injection block, log_save filename uniqueness, Event.wait crash-backoff cancel, _lan_ip cache TTL, _STEAMID_RE cap, save_config atomicity, _lifecycle_lock RLock reentrancy, _netutils, Flask route auth + 409 |
+| `test_veto.py` | v0.10.0 Day 1 | 34 | `VetoSession` state machine — every legal/illegal transition, captain election ties + revote, token reuse semantics, single-use token enforcement (idempotent same caller, reject different), full BO3 walkthrough end-to-end, BO1/BO5 sequences, reset semantics |
+| `test_veto_api.py` | v0.10.0 Days 2 + 4 | 25 | Full HTTP integration via Flask `test_client`: happy-path BO3 (create → roster → vote → claim → 6 steps → finale → reset), auth/role gate (admin / guest 403 / captain 403 / unauth 401), captain wrong-turn 400 vs spoof 403, SSE `/api/veto/stream` returns event-stream + initial snapshot + mutation broadcast, snapshot `current_step_detail` + `legal_moves`, create 409 on existing session, QR endpoint (SVG mime + unknown-token 404 + bad-kind 400 + unauth 401 + raw-token in tokens response) |
+
+Run all three together: `python tests/test_v092.py && python tests/test_veto.py && python
+tests/test_veto_api.py` (or via pytest: `pytest tests/`).  All 81 cases must pass before
+any commit to master that touches `core.py`, `web.py`, `rcon.py`, `config.py`, or
+`veto.py`.
 
 ## Adding tests
 

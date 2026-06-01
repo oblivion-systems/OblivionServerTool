@@ -61,13 +61,26 @@ Core features are stable.  Since v0.9.1 the focus has shifted from feature work 
 - ✅ Packaging polish: `_netutils` hidden-import, werkzeug pin, WebView2
   bootstrapper docs, explicit icons, `--noconfirm`
 
-**Next milestone — v0.10.0 (map veto + match setup):**
+**Currently shipping — v0.10.0 (map veto + match setup):**
 
-This week's focus.  See [VETO.md](VETO.md) for the full spec.  Five-stage
-match-setup flow ending in a CS2 veto board, with MatchZy handoff at the
-finale.  Decisions locked in: dedicated "Veto" tab, LAN + Public captain
-links, per-veto override starting from active-duty 7, Steam IDs collected
-at roster for MatchZy strict mode.
+In flight on master.  Days 1-5 of 7 done; Day 6 (real MatchZy
+`matchzy_loadmatch` handoff) + Day 7 (polish + tag) remain.  Full spec
+[VETO.md](VETO.md); detailed prose [CHANGELOG.md](CHANGELOG.md) → v0.10.0.
+
+| Day | Status | Scope |
+|---|---|---|
+| 1 | ✅ | `VetoSession` state machine + 34 unit tests (`cs2servergui/veto.py`) |
+| 2 | ✅ | 15 HTTP routes + SSE live mirror + captain role + 17 integration tests |
+| 3 | ✅ | SPA Veto tab + 8 stage renderers + `api.veto.*` namespace |
+| 4 | ✅ | QR codes for captain links (segno, `/api/veto/qr`) + 8 more tests |
+| 5 | ✅ | Cinematic finale (title rise, decider glow pulse, 30-piece confetti) |
+| 6 | ⏳ | Write MatchZy match config to disk + RCON `matchzy_loadmatch` handoff |
+| 7 | ⏳ | Polish + smoke + tag v0.10.0 + GitHub release with binary |
+
+Decisions locked in (from VETO.md): dedicated "Veto" tab, LAN + Public
+captain links, per-veto override starting from active-duty 7, Steam IDs
+collected at roster for MatchZy strict mode.  All 81/81 backend tests
+green (22 v092 + 34 veto + 25 veto-api).
 
 **v0.11.0+ — Discord bot integration:**
 
@@ -182,9 +195,8 @@ real CS2 server.
 
 Candidate ideas to revisit only after 1.0 ships. None are commitments.
 
-- **Map Veto / Match Setup tab** — guided roster → teams → captain vote → captain links →
-  BO1/3/5 veto, served by the tool so captains can veto from their own devices. Full spec +
-  open decisions in [VETO.md](VETO.md); working prototype at `_prototypes/veto.html`.
+- ~~Map Veto / Match Setup tab~~ — **promoted out of backlog**; in flight as v0.10.0
+  (see "Currently shipping" above).
 - Scheduled tasks (auto-restart on a cron, nightly map updates).
 - More plugin-backed modes, re-evaluated for upstream health each release.
 - Server metrics / lightweight dashboard (player count over time, uptime history).
