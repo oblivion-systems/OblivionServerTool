@@ -7,7 +7,42 @@
 
 ---
 
-## Where We Are — v0.10.0 (released 2026-06-01)
+## Currently shipping — v0.10.2 (Mon → Thu, target Friday testing)
+
+**Online-primary polish phase.**  After v0.10.0 (veto feature) + v0.10.0.1
+(hotfix) + v0.10.1 (Ready button + Public URL override + Copy-for-Discord)
+shipped, a five-agent audit of online-use readiness surfaced ~35 actionable
+findings.  v0.10.2 takes the BLOCKERs + the top three cross-cutting
+investments + the most-valuable workflow gaps into one tagged release,
+scoped to four working days.
+
+| Day | Theme |
+|---|---|
+| Mon | Mobile responsive pass + captain connect-string handoff + mode pre-flight |
+| Tue | Pre-flight error surfacing + local-only UI signposting + role pill |
+| Wed | Unified SSE transport + `/api/capabilities` + `api.js` retry/timeout layer |
+| Thu | Captain limbo screen + rematch + match history + Discord webhook + ship |
+| Fri | User live-tests; hotfix window |
+
+Explicitly cut from scope: animation rewrite (parked), "Go Online" panel,
+public spectator URL, roster presets, MatchZy cvar editor, bulk SteamID
+paste, tournament brackets, magic-link auth, limited remote RCON.
+These either lack obvious value for the immediate online use case, add
+significant scope, or are better paired with the v0.11.0 Discord bot.
+
+Full prose in [CHANGELOG.md](CHANGELOG.md) → v0.10.2.
+
+## Previously — v0.10.1 (released 2026-06-01)
+
+Online-primary improvements addressing the realisation that LAN use is
+secondary.  Captain Ready button on the finale page (replaces the broken
+admin-only button captains couldn't actually use), Public Share URL config
+field (Cloudflare tunnel URL base for captain links), Copy-for-Discord
+button (pre-formatted captain-addressed message ready to paste into a DM).
+Build infrastructure also fixed (`python -m PyInstaller` + `--collect-all
+segno` so QR codes actually render in the frozen .exe).  123/123 tests.
+
+## Previously — v0.10.0 (released 2026-06-01)
 
 The **map-veto / match-setup feature** is live: server-side state machine
 + HTTP API + SPA Veto tab + QR captain links + cinematic finale + real

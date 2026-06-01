@@ -29,7 +29,7 @@ each with a one-sentence summary. No code, no behavioural changes — reference 
 
 ---
 
-## `cs2servergui/veto.py` (NEW — 614 lines)
+## `cs2servergui/veto.py` (NEW — 654 lines)
 
 Backend state machine for the v0.10.0 map-veto / match-setup feature.
 AppCore owns at most one `VetoSession` at a time, serialised by
@@ -144,7 +144,7 @@ functions here; SSE streams state changes to the SPA mirror.
 
 ---
 
-## `cs2servergui/web.py` (1568 lines)
+## `cs2servergui/web.py` (1826 lines)
 
 ### Module-level constants
 
@@ -266,6 +266,7 @@ admin-only unless noted.  Captains get a scoped session via `/api/veto/claim`
 | `POST /api/veto/claim` | Public — token IS the credential.  Mints a captain session cookie. **(public)** |
 | `POST /api/veto/step` | `perform_step(team, map_id)`.  Captains can only act for their own team; admins can act for either. **(captain + admin)** |
 | `POST /api/veto/finale` | (Day 6 wired) `build_matchzy_config()` → write JSON to `<csgo>/cfg/MatchZy/<matchid>.json` (atomic, `_oblivion_meta` stripped from disk file) → `matchzy_loadmatch <basename>` via RCON if `load_match: true` + server running.  Response always 200 with `matchzy.{written_to, loaded, error?}`; session transitions to `complete` even on RCON failure so the SPA isn't stuck.  500 only if the disk write itself fails. |
+| `POST /api/veto/ready` | (v0.10.1) Captain toggles their own team's ready flag at the finale stage.  Admins pass `team` explicitly to ack-on-behalf.  Captain role infers team from cookie (cross-team body value → 403 spoof guard).  Body: `{ready: bool, team?: 'A'\|'B'}`.  When config `veto_auto_launch_on_ready` is on AND both flags become True, auto-fires the same matchzy_loadmatch path as the admin's button. |
 | `POST /api/veto/reset` | Clear the active session and return to `idle`. |
 | `GET /api/veto/qr?token=…&kind=lan\|public` | (v0.10.0 Day 4) SVG QR code for a captain join URL.  Validates token against the live session; admin/local only; cached `private, max-age=300`. |
 | `GET /veto?join=<token>` | Captain-link landing page — server-side claim + cookie set, then redirect to `/#veto`. **(public)** |
@@ -312,7 +313,7 @@ JS-gated so re-renders from SSE pings on the same state don't restart them:
 
 ---
 
-## `cs2servergui/core.py` (3692 lines)
+## `cs2servergui/core.py` (3712 lines)
 
 ### v0.9.2 / v0.9.2.1 additions worth knowing about
 

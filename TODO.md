@@ -80,6 +80,94 @@ deferred loose ends. Full prose in [CHANGELOG.md](CHANGELOG.md) → v0.9.1.*
   lock, the `_stop_event` edge-window cancel race, and the Warcraft `ReferenceEquals` → SteamID
   equality fix in three deferred-menu sites.
 
+### Currently shipping — v0.10.2 (online-primary polish phase, Mon → Thu, ships Thursday)
+
+**Audit-driven release.**  Five agents audited the tool against online-primary use
+(mobile responsiveness, online workflow gaps, feature integrations, pre-v0.10.0 surface,
+cross-cutting concerns) and produced ~35 findings.  v0.10.2 ships the BLOCKERs +
+the three cross-cutting investments + the highest-leverage workflow gaps in one
+release, scoped to four working days so Friday is real testing not finishing.
+
+**Day 1 — Mon (mobile + workflow blockers):**
+- [ ] CSS responsive pass — single `@media (max-width: 640px)` block:
+      - sidebar collapses to hamburger drawer
+      - `.login-card`, `.connect-popover`, `.palette` clamped to `min(380px, calc(100vw - 16px))`
+      - all `.btn` min-height 44 px (Apple HIG)
+      - `clamp()` on big finale titles
+      - `visibilitychange` SSE-reconnect handler
+- [ ] Captain finale embeds `connect <ip:port>; password X` + Copy button (the
+      workflow handoff that was missing)
+- [ ] `/api/veto/finale` refuses if `core.current_mode` not in MatchZy modes
+      (3v3 / 4v4 / 5v5 / Competitive); response includes `matchzy.precheck`
+
+**Day 2 — Tue (pre-flight errors + local-only + role pill):**
+- [ ] `/api/server/start` returns 4xx with preflight reason (port held / plugin
+      missing / Steam creds expired)
+- [ ] `boot_error` field in `/api/state` (stuck boots visible remotely)
+- [ ] Hide CS2-update + App-update badges + CS2 server-update modal for non-local
+- [ ] App self-updater swallows GitHub Releases 404 silently (private repo)
+- [ ] Log drawer hidden for guest role (kills the 12-retry SSE hammer)
+- [ ] Role pill in header (admin / guest / captain)
+- [ ] LAN IP row hidden in status bar + Connect popover for `!is_local`
+
+**Day 3 — Wed (cross-cutting investments):**
+- [ ] Unified SSE transport module — exponential backoff (1→2→4→8→30 s capped),
+      `online`/`visibilitychange` re-arm, header status pill
+- [ ] `/api/capabilities` endpoint returning `{role, is_local, can: [...]}`
+- [ ] Local-only buttons render `disabled` + tooltip "Local only — ask the host"
+      instead of click-then-403
+- [ ] `api.js` retry/timeout layer (10 s AbortController, one retry on network
+      error, sticky error toasts)
+- [ ] Push `/api/state` over SSE so 3 s polling dies (140 RTTs/min → ~1)
+
+**Day 4 — Thu (polish + history + webhook + ship):**
+- [ ] Captain limbo screen ("Operator collecting votes — Team A: 3/5 in")
+- [ ] Rematch button on Complete page (preserves teams, resets veto)
+- [ ] Last-action attribution in `/api/state` (`{who, what, when}`)
+- [ ] Match history — last 5 completed sessions to `oblivion_matches.json`
+- [ ] Discord webhook on finale (operator pastes webhook URL → finale POSTs
+      embed to channel)
+- [ ] Full regression (123/123 → target ~145 with new cases)
+- [ ] Rebuild .exe via `build.bat` (now correctly using `python -m PyInstaller`)
+- [ ] Tag v0.10.2, GitHub release with binary, update `pull-latest.bat` references
+
+**Explicitly cut from v0.10.2 (deferred or won't-do):**
+- [ ] Animation rewrite — parked at operator's request
+- [ ] "Go Online" header panel with cloudflared generator — defer to v0.10.3
+- [ ] Public read-only spectator URL — defer
+- [ ] Roster presets save/load — defer
+- [ ] MatchZy cvar editor (overtime / max-rounds) — defer
+- [ ] Bulk SteamID paste — defer
+- [ ] Browser push notifications (service worker) — defer
+- [ ] Tournament brackets — won't-do until 5+ matches felt the pain
+- [ ] In-app chat — won't-do (Discord exists)
+- [ ] Magic-link auth — won't-do (no email infra)
+- [ ] Public REST/webhook API — won't-do until external consumer asks
+
+---
+
+### Shipped — v0.10.1 (online-primary improvements, released 2026-06-01)
+
+- [x] **Captain Ready button** — `_renderVetoFinaleCaptain` SPA renderer with
+      READY toggle + opponent status display; admin's launch button arms green
+      when both ready; admin can ack-on-behalf by clicking ready slot;
+      Shift+Click overrides both-ready gate; optional auto-launch config toggle
+- [x] **Public Share URL override** — `core.public_share_url` config field;
+      when set, captain join URLs build from this base instead of
+      `public_ip + port` (the Cloudflare-tunnel fix)
+- [x] **Copy-for-Discord button** — pre-formatted captain-addressed message
+      ready to paste into a DM; prefers Public URL, falls back to LAN
+- [x] Build fix: `python -m PyInstaller` + `--collect-all segno` so QR codes
+      actually render in the frozen .exe (multi-Python env was using the
+      wrong interpreter and dropping segno)
+- [x] Defensive `try/except ImportError` around `import segno` in `web.py:veto_qr`
+- [x] **`pull-latest.bat`** self-service updater for grabbing the latest .exe
+      from the private repo's GitHub Release via `gh` CLI
+
+123/123 tests green (22 v092 + 54 veto + 47 veto-api).
+
+---
+
 ### Shipped — v0.10.0 + v0.10.0.1 hotfix (map-veto match setup, released 2026-06-01)
 
 **v0.10.0.1 hotfix (same day):** captain-link QR codes failed to render

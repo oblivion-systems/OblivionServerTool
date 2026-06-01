@@ -1,7 +1,15 @@
 # VETO — Map Veto / Match Setup
 
 > Quick-reference spec for the in-app **Veto** feature.
-> Status: **v0.10.0 RELEASED 2026-06-01.**  All 7 days complete.
+> Status: **v0.10.1 RELEASED 2026-06-01; v0.10.2 in flight (online-primary polish).**
+> v0.10.0 shipped the core veto + MatchZy handoff; v0.10.0.1 hotfixed the QR
+> bundling; v0.10.1 added the Captain Ready button (replaces the broken admin-only
+> button captains couldn't use), Public Share URL override (Cloudflare tunnel
+> base for captain links), and Copy-for-Discord (pre-addressed paste-ready DM).
+> v0.10.2 (in flight, ships Thursday this week) fills in the audit-found gaps:
+> captain finale embeds the `connect <ip>` command + Copy button, mode pre-flight
+> on `/api/veto/finale`, captain limbo screen, rematch button, last-action
+> attribution in /api/state, basic match history, Discord webhook on finale.
 > Implementation lives in [`cs2servergui/veto.py`](cs2servergui/veto.py) (state machine,
 > 365 lines), the `/api/veto/*` routes in [`cs2servergui/web.py`](cs2servergui/web.py), and
 > the Veto tab in [`cs2servergui/static/js/app.js`](cs2servergui/static/js/app.js) +
