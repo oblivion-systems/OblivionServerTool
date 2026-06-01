@@ -2,6 +2,33 @@
 
 ---
 
+## v0.10.0.1 — 2026-06-01 (hotfix)
+
+**One bug: captain-link QR codes failed to render in the frozen `.exe`.**
+
+The v0.10.0 build used `--hidden-import segno` which only pulled the
+top-level `segno/__init__.py` into the bundle.  When `/api/veto/qr` ran
+`segno.make(url)`, segno tried to import `segno.encoder` (and consts /
+utils / writers) at runtime — none of which were bundled — and raised
+`ImportError`.  Flask returned a generic 500 with no body, the SPA's
+`<img src="/api/veto/qr?…">` showed the broken-image placeholder, and
+the operator was left guessing.
+
+Two-part fix:
+* `build.bat` + `OblivionServerTool.spec`: switched `--hidden-import segno`
+  to `--collect-all segno` so all six submodules (`encoder`, `consts`,
+  `helpers`, `utils`, `writers`, `cli`) ride along with the package.
+* `web.py:veto_qr`: wrapped the `import segno` in a try/except that
+  returns the actual error as JSON (`{"error": "QR generator not
+  available in this build: ImportError(...)"}`), so future bundling
+  regressions of any pure-Python dep show up as a 500-with-body rather
+  than the silent broken-image icon.
+
+Test totals unchanged from v0.10.0 (108/108) — the bug was bundling-
+side, not test-discoverable without a frozen build to exercise.
+
+---
+
 ## v0.10.0 — 2026-06-01 (release)
 
 The **map-veto / match-setup feature** ([VETO.md](VETO.md)).  Seven-day build:

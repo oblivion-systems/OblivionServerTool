@@ -80,7 +80,20 @@ deferred loose ends. Full prose in [CHANGELOG.md](CHANGELOG.md) → v0.9.1.*
   lock, the `_stop_event` edge-window cancel race, and the Warcraft `ReferenceEquals` → SteamID
   equality fix in three deferred-menu sites.
 
-### Shipped — v0.10.0 (map-veto match setup, released 2026-06-01)
+### Shipped — v0.10.0 + v0.10.0.1 hotfix (map-veto match setup, released 2026-06-01)
+
+**v0.10.0.1 hotfix (same day):** captain-link QR codes failed to render
+in the frozen `.exe` because `--hidden-import segno` only grabbed the
+top-level module, not its 6 submodules.  Fixed by switching to
+`--collect-all segno` in `build.bat` + `OblivionServerTool.spec`, plus
+defensive `try/except ImportError` around `import segno` inside the
+`/api/veto/qr` handler so any future bundling regression of a
+pure-Python dep returns useful JSON rather than the silent broken-image
+icon.
+
+---
+
+
 *Full spec in [VETO.md](VETO.md); detailed prose in [CHANGELOG.md](CHANGELOG.md) → v0.10.0.
 Layered build plan with v0.10.0 = Layer 0 (core veto), v0.11.0 = Layer 1 (Discord bot).*
 

@@ -1534,7 +1534,21 @@ def create_flask(core: AppCore) -> Flask:
     @app.route("/api/veto/qr")
     @require_auth
     def veto_qr():
-        import segno
+        # Import inside the handler so the rest of the app keeps working
+        # even if segno is somehow not present in the bundle.  Surface a
+        # *useful* error to the SPA — without this catch, ImportError bubbles
+        # up as a generic Flask 500 with no body and the operator sees the
+        # broken-image icon with zero diagnostic info (this exact failure
+        # mode bit us between v0.10.0 and v0.10.0.1 when --hidden-import
+        # segno only grabbed the top-level module, not its submodules).
+        try:
+            import segno
+        except ImportError as e:
+            core.log(f"[veto] QR endpoint hit but segno missing: {e}")
+            return jsonify({
+                "error": f"QR generator not available in this build: {e}.  "
+                         "Rebuild with `--collect-all segno` in build.bat."
+            }), 500
         from io import BytesIO
         token = request.args.get("token", "").strip()
         kind  = request.args.get("kind", "lan").strip().lower()
