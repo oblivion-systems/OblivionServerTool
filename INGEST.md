@@ -175,7 +175,7 @@ functions here; SSE streams state changes to the SPA mirror.
 | `_current_session()` | Returns the session dict for the request's `session` cookie, or `None`. |
 | `require_auth(f)` | Decorator: 401 unless a valid session exists; binds remote sessions to their origin IP. |
 | `require_local(f)` | Decorator (stacks on `require_auth`): 403 unless the session `is_local` — keeps RCON/install/Steam strictly on the desktop window. |
-| `_role_gate()` | `@app.before_request` **fail-closed** role enforcer: only an explicit guest/public allowlist is reachable by the `guest` role; every other `/api/*` route is admin-only by default. |
+| `_role_gate()` | `@app.before_request` **fail-closed** role enforcer.  Allowlists per role: `_PUBLIC_PATHS` (no auth), `_GUEST_PATHS` (guest PIN), `_CAPTAIN_PATHS` (v0.10.0 — scoped session minted by `/api/veto/claim`).  Admin / `is_local` pass everything.  Any role hitting an off-allowlist `/api/*` route → 403. |
 
 ### Auth routes
 
@@ -242,6 +242,32 @@ functions here; SSE streams state changes to the SPA mirror.
 | `POST /api/setup/complete` | Persist first-run setup. *(local-only)* |
 | `GET /api/log/history` / `GET /api/log/stream` | Log history / live SSE stream. *(admin)* |
 | `POST /api/log/save` | Writes the in-memory log buffer to a `oblivion_log_<ts>_<6 hex>.txt` in the config dir (collision-proof + size-capped). *(local-only)* |
+
+### API — map veto (v0.10.0)
+
+Thin HTTP wrappers over `cs2servergui/veto.py`.  Every mutation acquires
+`core._veto_lock` and broadcasts a snapshot to SSE subscribers.  All
+admin-only unless noted.  Captains get a scoped session via `/api/veto/claim`
+(no PIN — single-use token is the credential) and can ONLY hit `state`,
+`stream`, and `step`.
+
+| Route | Summary |
+|-------|---------|
+| `GET /api/veto/state` | Current session snapshot (state, roster, teams, votes, sequence, decider).  Tokens redacted. **(admin + captain)** |
+| `GET /api/veto/stream` | SSE pub/sub for live mirror — pushes a JSON snapshot on every state change.  Initial snapshot delivered immediately on subscribe. **(admin + captain)** |
+| `POST /api/veto/create` | `create_session(mode, map_pool)` — starts a fresh session in `roster` state. |
+| `POST /api/veto/roster` | `set_roster(team_a_name, team_b_name, players)` — players are `[{name, steam_id}]`. |
+| `POST /api/veto/distribute` | Random 5-5 split.  Self-callable in `teams` to reshuffle. |
+| `POST /api/veto/start_voting` | `teams` → `voting`. |
+| `POST /api/veto/vote` | `cast_vote(team, voter_idx, votee_idx)`. |
+| `POST /api/veto/resolve_captains` | Tally → `elected` (→ `links`) or `revote_*` (clears tied side). |
+| `POST /api/veto/tokens` | Issue both captain tokens; returns LAN + Public URLs per captain (mirrors Connect popover dual-display). |
+| `POST /api/veto/revoke_token` | Re-issue a fresh token for a team (operator action). |
+| `POST /api/veto/claim` | Public — token IS the credential.  Mints a captain session cookie. **(public)** |
+| `POST /api/veto/step` | `perform_step(team, map_id)`.  Captains can only act for their own team; admins can act for either. **(captain + admin)** |
+| `POST /api/veto/finale` | `build_matchzy_config()` + `complete()`.  Logs the planned `matchzy_loadmatch` (full handoff lands on Day 6). |
+| `POST /api/veto/reset` | Clear the active session and return to `idle`. |
+| `GET /veto?join=<token>` | Captain-link landing page — server-side claim + cookie set, then redirect to `/#veto`. **(public)** |
 
 ---
 
