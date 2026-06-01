@@ -1,7 +1,7 @@
 @echo off
 REM ==========================================================================
 REM  pull-latest.bat - fetch the latest OblivionServerTool.exe release
-REM  and drop it into dist\ ready to launch.
+REM  and drop it into dist\ ready to launch.   (v2 - CRLF guaranteed)
 REM
 REM  Why this exists: the repo is private, so a plain curl/wget can't reach
 REM  the release asset.  This script piggybacks on your existing `gh` CLI
