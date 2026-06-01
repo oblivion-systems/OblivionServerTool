@@ -2405,7 +2405,9 @@ function _renderVetoRoster(root, sess) {
           <div class="veto-roster-slot ${p.name?'filled':''}" data-i="${i}">
             <span class="veto-slot-num">${String(i+1).padStart(2,'0')}</span>
             <input class="veto-name" placeholder="Player name" value="${esc(p.name)}" data-i="${i}" maxlength="32">
-            <input class="veto-steam" placeholder="SteamID (optional)" value="${esc(p.steam_id)}" data-i="${i}" maxlength="64">
+            <input class="veto-steam" placeholder="SteamID (optional)" value="${esc(p.steam_id||'')}" data-i="${i}" maxlength="64">
+            <input class="veto-discord" placeholder="Discord ID (auto-DM, optional)" value="${esc(p.discord_id||'')}" data-i="${i}" maxlength="32"
+                   inputmode="numeric" pattern="[0-9]*">
           </div>
         `).join('')}
       </div>
@@ -2449,6 +2451,18 @@ function _renderVetoRoster(root, sess) {
     inp.addEventListener('input', (e) => {
       const i = parseInt(e.target.dataset.i, 10);
       _vetoLocalRoster[i].steam_id = e.target.value;
+    });
+  });
+  // v0.11.0 — Discord ID column: digits only, optional, used by Layer 1A
+  // auto-DM on /api/veto/tokens.  Same in-place update pattern as SteamID.
+  document.querySelectorAll('#veto-roster-grid input.veto-discord').forEach(inp => {
+    inp.addEventListener('input', (e) => {
+      const i = parseInt(e.target.dataset.i, 10);
+      _vetoLocalRoster[i].discord_id = e.target.value.replace(/[^0-9]/g, '');
+      // Keep input value in sync after the strip
+      if (e.target.value !== _vetoLocalRoster[i].discord_id) {
+        e.target.value = _vetoLocalRoster[i].discord_id;
+      }
     });
   });
   el('veto-roster-demo').addEventListener('click', () => {
@@ -2616,9 +2630,14 @@ function _renderVetoLinks(root, sess) {
     // scans whichever applies to their network.
     const qrLan    = api.veto.qrUrl(urls.token, 'lan');
     const qrPublic = urls.public ? api.veto.qrUrl(urls.token, 'public') : null;
+    // v0.11.0: dm_sent comes from /api/veto/tokens response when the bot
+    // auto-DM'd the captain.  Shown as a small "DM sent" pill so the
+    // operator knows whether to also paste the link manually.
+    const dmSent = !!urls.dm_sent;
     return `
       <div class="veto-link-card ${teamLetter}">
         ${claimed ? '<div class="veto-claimed-pill">CLAIMED</div>' : ''}
+        ${dmSent && !claimed ? '<div class="veto-dm-pill">📨 DM SENT</div>' : ''}
         <h3>${esc(team === 'A' ? sess.team_a_name : sess.team_b_name)}</h3>
         <div class="veto-cap-name">Captain: <strong>${esc(captain?.name || '—')}</strong></div>
         <div class="veto-qr-row">

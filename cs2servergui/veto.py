@@ -92,9 +92,15 @@ class RosterPlayer:
     assignment in the finale (per the v0.10.0 spec decision).  Optional for
     now to let the operator skip in informal scenarios; a future flag could
     enforce non-empty for strict mode.
+
+    `discord_id` (v0.11.0) is the 17-19 digit Discord user ID.  When the
+    Discord bot is configured AND a captain has this set, /api/veto/tokens
+    auto-DMs them their join URL via `discord_bot.bot_dm_user()`.  Always
+    optional — Copy-for-Discord button remains the fallback.
     """
     name: str
     steam_id: str = ""
+    discord_id: str = ""
 
     def __post_init__(self) -> None:
         # Defensive: strip whitespace at the boundary so equality / display

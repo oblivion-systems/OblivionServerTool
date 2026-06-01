@@ -809,6 +809,19 @@ def t_reset_clears_ready_flags():
 t('reset: clears both ready flags', t_reset_clears_ready_flags)
 
 
+def t_roster_player_has_discord_id_field():
+    """v0.11.0: RosterPlayer dataclass gains optional `discord_id` field
+    used by Layer 1A auto-DM.  Backward-compatible default ''."""
+    p = V.RosterPlayer(name='Alice')
+    if p.discord_id != '':
+        return False, f'default not empty: {p.discord_id!r}'
+    p2 = V.RosterPlayer(name='Bob', steam_id='STEAM_0:1:42', discord_id='123456789012345678')
+    return (p2.discord_id == '123456789012345678'
+            and p2.steam_id == 'STEAM_0:1:42'
+            and p2.name == 'Bob'), f'p2={p2}'
+t('RosterPlayer: discord_id field defaults empty, accepts a value', t_roster_player_has_discord_id_field)
+
+
 def t_rematch_preserves_teams_and_captains():
     """v0.10.2: rematch from complete-state must keep team rosters +
     names + captains but clear veto state."""

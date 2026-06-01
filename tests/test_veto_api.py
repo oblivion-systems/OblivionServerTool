@@ -839,6 +839,72 @@ def t_public_share_url_can_be_cleared():
 t('public_share_url: blank value clears it', t_public_share_url_can_be_cleared)
 
 
+def t_roster_accepts_discord_id_per_player():
+    """v0.11.0 Layer 1A: /api/veto/roster accepts an optional discord_id
+    per player; the snapshot round-trips it."""
+    ac, app, c = _new_app()
+    _login(c)
+    c.post('/api/veto/create', json={'mode': 'BO3'})
+    players = [{'name': f'p{i}', 'steam_id': f'STEAM_{i}',
+                'discord_id': f'10000000000000000{i}'} for i in range(10)]
+    r = c.post('/api/veto/roster', json={
+        'team_a_name': 'A', 'team_b_name': 'B', 'players': players,
+    })
+    if r.status_code != 200:
+        return False, f'status={r.status_code} body={r.get_data(as_text=True)[:200]!r}'
+    snap = c.get('/api/veto/state').get_json() or {}
+    sess = snap.get('session') or {}
+    roster = sess.get('roster') or []
+    if len(roster) != 10:
+        return False, f'roster len={len(roster)}'
+    # Every entry should have a discord_id field, and they should round-trip
+    bad = [p for p in roster if 'discord_id' not in p or not p['discord_id'].startswith('10000000000')]
+    return (len(bad) == 0), f'roster[0]={roster[0]} bad_count={len(bad)}'
+t('roster: discord_id per-player round-trips through snapshot', t_roster_accepts_discord_id_per_player)
+
+
+def t_roster_discord_id_optional_blank_default():
+    """Players submitted without discord_id get '' (not None / missing)."""
+    ac, app, c = _new_app()
+    _login(c)
+    c.post('/api/veto/create', json={'mode': 'BO3'})
+    players = [{'name': f'p{i}', 'steam_id': f'STEAM_{i}'} for i in range(10)]
+    r = c.post('/api/veto/roster', json={
+        'team_a_name': 'A', 'team_b_name': 'B', 'players': players,
+    })
+    snap = c.get('/api/veto/state').get_json() or {}
+    roster = (snap.get('session') or {}).get('roster') or []
+    return (all(p.get('discord_id') == '' for p in roster)), \
+           f'roster_discord_ids={[p.get("discord_id") for p in roster[:3]]}'
+t('roster: discord_id omitted from input defaults to empty string', t_roster_discord_id_optional_blank_default)
+
+
+def t_tokens_response_includes_dm_sent_field():
+    """v0.11.0 Layer 1A: /api/veto/tokens response includes `dm_sent` per
+    team (always False when no bot is configured) — SPA uses it to
+    decide whether to highlight the Copy-for-Discord button."""
+    ac, app, c = _new_app()
+    _login(c)
+    c.post('/api/veto/create', json={'mode': 'BO3'})
+    c.post('/api/veto/roster', json={
+        'team_a_name': 'A', 'team_b_name': 'B',
+        'players': _ten_player_payload(),
+    })
+    c.post('/api/veto/distribute'); c.post('/api/veto/start_voting')
+    for team in ('A', 'B'):
+        for v in range(5):
+            c.post('/api/veto/vote', json={'team':team,'voter_idx':v,'votee_idx':0})
+    c.post('/api/veto/resolve_captains')
+    r = c.post('/api/veto/tokens')
+    body = r.get_json() or {}
+    return (r.status_code == 200
+            and 'dm_sent' in body.get('A', {})
+            and 'dm_sent' in body.get('B', {})
+            and body['A']['dm_sent'] is False
+            and body['B']['dm_sent'] is False), f'body={body}'
+t('tokens: response includes dm_sent: False when no bot configured', t_tokens_response_includes_dm_sent_field)
+
+
 def t_finale_mode_precheck_rejects_non_matchzy_mode():
     """v0.10.2: /api/veto/finale with load_match=True refuses if the server
     is on a non-MatchZy mode (1v1 Arena / Warcraft / Zombie Escape / etc.)

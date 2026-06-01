@@ -1259,6 +1259,62 @@ def create_flask(core: AppCore) -> Flask:
         except (OSError, ValueError):
             return []
 
+    def _attempt_captain_dms(tokens: dict, urls_builder) -> dict:
+        """v0.11.0 Layer 1A — Try to DM each captain their join URL via the
+        Discord bot.  Returns {team: True} per team that received a DM.
+
+        Best-effort: silently skips a team when:
+          - the bot isn't running / configured (no token in config)
+          - the captain has no discord_id on their roster entry
+          - DM delivery fails (user has DMs disabled, blocked the bot, etc.)
+
+        On the silent-skip path the operator's Copy-for-Discord button
+        in the SPA Links stage remains the workflow as before.
+        """
+        results = {}
+        try:
+            from . import discord_bot
+            if not discord_bot.bot_status().get("connected"):
+                return results       # bot not configured or not connected
+        except Exception:
+            return results
+        # Resolve captain Discord IDs from the live session
+        s = core._veto_session
+        if s is None:
+            return results
+        captains = {}
+        if s.captain_a_idx is not None and 0 <= s.captain_a_idx < len(s.team_a):
+            captains["A"] = s.team_a[s.captain_a_idx]
+        if s.captain_b_idx is not None and 0 <= s.captain_b_idx < len(s.team_b):
+            captains["B"] = s.team_b[s.captain_b_idx]
+        for team, player in captains.items():
+            did = (player.discord_id or "").strip()
+            if not did:
+                continue
+            token = tokens.get(team, "")
+            url_obj = urls_builder(token)
+            link = url_obj.get("public") or url_obj.get("lan") or ""
+            if not link:
+                continue
+            team_name = (s.team_a_name if team == "A" else s.team_b_name)
+            msg = (
+                f"🎯 **{player.name}** ({team_name}) — your veto link:\n"
+                f"{link}\n"
+                f"Single-use. Click to claim your captain seat."
+            )
+            try:
+                ok = discord_bot.bot_dm_user(did, msg)
+                if ok:
+                    results[team] = True
+                    core.log(f"[discord] DM'd captain {team} ({player.name}) at id={did}")
+                else:
+                    core.log(f"[discord] DM to captain {team} ({player.name}) failed "
+                             f"(blocked? unknown id? bot offline?) — falling back to "
+                             "Copy-for-Discord")
+            except Exception as exc:
+                core.log(f"[discord] DM raise: {type(exc).__name__}: {exc}")
+        return results
+
     def _post_discord_finale_webhook(history_entry: dict, matchzy_result: dict) -> None:
         """v0.10.2 — POST a Discord embed to the operator's webhook URL
         when a finale completes.  Fire-and-forget.  10-second timeout;
@@ -1408,11 +1464,17 @@ def create_flask(core: AppCore) -> Flask:
                 "map_pool":      list(s.map_pool),
                 "team_a_name":   s.team_a_name,
                 "team_b_name":   s.team_b_name,
-                "roster":        [{"name": p.name, "steam_id": p.steam_id}
+                # v0.11.0: include discord_id so the SPA roster grid can
+                # round-trip the field on re-render.  Players without one
+                # serialise as empty string.
+                "roster":        [{"name": p.name, "steam_id": p.steam_id,
+                                   "discord_id": p.discord_id}
                                   for p in s.roster],
-                "team_a":        [{"name": p.name, "steam_id": p.steam_id}
+                "team_a":        [{"name": p.name, "steam_id": p.steam_id,
+                                   "discord_id": p.discord_id}
                                   for p in s.team_a],
-                "team_b":        [{"name": p.name, "steam_id": p.steam_id}
+                "team_b":        [{"name": p.name, "steam_id": p.steam_id,
+                                   "discord_id": p.discord_id}
                                   for p in s.team_b],
                 "votes_a":       dict(s.votes_a),
                 "votes_b":       dict(s.votes_b),
@@ -1530,6 +1592,11 @@ def create_flask(core: AppCore) -> Flask:
                 RosterPlayer(
                     name=str(p.get("name", "")).strip()[:_NAME_MAX_LEN],
                     steam_id=str(p.get("steam_id", "")).strip()[:64],
+                    # v0.11.0: per-player Discord user ID for auto-DM of
+                    # captain links.  Optional; blank if operator didn't
+                    # collect it.  Capped + digits-only validation in
+                    # discord_bot.bot_dm_user before any API call.
+                    discord_id=str(p.get("discord_id", "")).strip()[:32],
                 )
                 for p in raw_players
             ]
@@ -1639,12 +1706,24 @@ def create_flask(core: AppCore) -> Flask:
             elif public_ip:
                 urls["public"] = f"http://{public_ip}:{port}/veto?join={token}"
             return urls
+        # v0.11.0 Layer 1A — auto-DM captain links via Discord bot.  Both
+        # captains' Discord IDs come from RosterPlayer.discord_id; the
+        # share-base URL is preferred (online use) with LAN fallback.
+        # Failure (bot not running, ID missing, DM blocked) is non-fatal:
+        # the SPA still gets the URLs in the response so the operator's
+        # existing Copy-for-Discord button works as before.
+        dm_results = _attempt_captain_dms(tokens, _urls)
+
         _veto_broadcast()
         # Include the raw token alongside the URLs so the SPA can build
         # /api/veto/qr?token=… without re-parsing it out of the LAN URL.
+        # `dm_sent` per team tells the SPA whether to dim the Copy-for-
+        # Discord button (already delivered) or keep it primary.
         return jsonify({
-            "A": {"token": tokens["A"], **_urls(tokens["A"])},
-            "B": {"token": tokens["B"], **_urls(tokens["B"])},
+            "A": {"token": tokens["A"], "dm_sent": dm_results.get("A", False),
+                  **_urls(tokens["A"])},
+            "B": {"token": tokens["B"], "dm_sent": dm_results.get("B", False),
+                  **_urls(tokens["B"])},
         })
 
     @app.route("/api/veto/revoke_token", methods=["POST"])
