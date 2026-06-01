@@ -36,10 +36,20 @@ def t(name, fn):
 
 # ─── Fixtures ─────────────────────────────────────────────────────────────
 def _new_app():
-    """Fresh AppCore + Flask app + test client.  Admin PIN set to '0000'."""
+    """Fresh AppCore + Flask app + test client.  Admin PIN set to '0000'.
+
+    Day 6: the MatchZy handoff in `/api/veto/finale` writes a JSON config
+    under `<csgo>/cfg/MatchZy/`.  We redirect `_csgo_dir` to a per-app
+    tempdir so tests never touch the real CS2 install dir on the user's
+    machine.  Without this, repeated test runs would litter
+    `D:\steamcmd\…\game\csgo\cfg\MatchZy\` with `oblivion-veto-*.json`
+    files.
+    """
     ac = AppCore()
     ac.admin_pin = '0000'
     ac.guest_pin = '9999'      # so we can test guest-role rejection
+    _fake_csgo = tempfile.mkdtemp(prefix='oblivion_veto_csgo_')
+    ac._csgo_dir = lambda: _fake_csgo  # type: ignore[method-assign]
     app = create_flask(ac)
     return ac, app, app.test_client()
 
@@ -537,6 +547,160 @@ def t_revoke_includes_token_in_response():
             and body['token'] != tk['A']['token']
             and body['token'] in body['urls']['lan']), f'body={body}'
 t('revoke: response includes new raw token', t_revoke_includes_token_in_response)
+
+
+# ─── MatchZy handoff (v0.10.0 Day 6) ──────────────────────────────────────
+def _drive_to_finale(c, app):
+    """Drive a fresh session all the way to state=finale.  Returns the
+    pool so callers can hit /finale and inspect the result."""
+    c.post('/api/veto/create', json={'mode': 'BO3'})
+    c.post('/api/veto/roster', json={
+        'team_a_name': 'Alpha', 'team_b_name': 'Bravo',
+        'players': _ten_player_payload(),
+    })
+    c.post('/api/veto/distribute'); c.post('/api/veto/start_voting')
+    for team in ('A','B'):
+        for v in range(5):
+            c.post('/api/veto/vote', json={'team':team,'voter_idx':v,'votee_idx':0})
+    c.post('/api/veto/resolve_captains')
+    tk = c.post('/api/veto/tokens').get_json()
+    cap_a, cap_b = app.test_client(), app.test_client()
+    cap_a.post('/api/veto/claim', json={'token': tk['A']['token']})
+    cap_b.post('/api/veto/claim', json={'token': tk['B']['token']})
+    pool = c.get('/api/veto/state').get_json()['session']['map_pool']
+    cap_a.post('/api/veto/step', json={'map_id': pool[0]})
+    cap_b.post('/api/veto/step', json={'map_id': pool[1]})
+    cap_a.post('/api/veto/step', json={'map_id': pool[2]})
+    cap_b.post('/api/veto/step', json={'map_id': pool[3]})
+    cap_a.post('/api/veto/step', json={'map_id': pool[4]})
+    cap_b.post('/api/veto/step', json={'map_id': pool[5]})
+    return pool
+
+
+def t_finale_writes_match_config_to_disk():
+    ac, app, c = _new_app()
+    _login(c)
+    _drive_to_finale(c, app)
+    r = c.post('/api/veto/finale', json={'load_match': False})
+    body = r.get_json()
+    assert r.status_code == 200, f'status={r.status_code} body={body}'
+    written_to = body.get('matchzy', {}).get('written_to', '')
+    if not written_to or not os.path.isfile(written_to):
+        return False, f'written_to missing or file not on disk: {written_to!r}'
+    with open(written_to, 'r', encoding='utf-8') as f:
+        on_disk = json.load(f)
+    # Verify the JSON contains the expected MatchZy keys and the
+    # _oblivion_meta sidecar was STRIPPED from the disk write.
+    needs = {'matchid', 'num_maps', 'maplist', 'players_per_team', 'team1', 'team2'}
+    return (needs.issubset(on_disk.keys())
+            and '_oblivion_meta' not in on_disk
+            and on_disk['num_maps'] == 3
+            and len(on_disk['maplist']) == 3), \
+           f'on-disk keys={sorted(on_disk.keys())} num_maps={on_disk.get("num_maps")}'
+t('finale: writes MatchZy match config to disk, strips _oblivion_meta', t_finale_writes_match_config_to_disk)
+
+
+def t_finale_response_includes_oblivion_meta():
+    """The on-disk file strips `_oblivion_meta` (so MatchZy's schema
+    doesn't reject the unknown key) but the API response keeps it so the
+    SPA can show the veto audit trail in the finale view."""
+    ac, app, c = _new_app()
+    _login(c)
+    _drive_to_finale(c, app)
+    r = c.post('/api/veto/finale', json={'load_match': False})
+    body = r.get_json()
+    return ('_oblivion_meta' in body.get('config', {})
+            and 'vetoes' in body['config']['_oblivion_meta']
+            and len(body['config']['_oblivion_meta']['vetoes']) == 6), \
+           f"config meta missing or wrong shape: {body.get('config', {}).get('_oblivion_meta')}"
+t('finale: API response preserves _oblivion_meta audit trail', t_finale_response_includes_oblivion_meta)
+
+
+def t_finale_no_rcon_when_server_not_running():
+    """`load_match=True` but server isn't running → file still written,
+    response has matchzy.error explaining what to do."""
+    ac, app, c = _new_app()
+    _login(c)
+    _drive_to_finale(c, app)
+    assert not ac.running, 'precondition: server should not be running'
+    r = c.post('/api/veto/finale', json={'load_match': True})
+    body = r.get_json()
+    mz = body.get('matchzy', {})
+    return (r.status_code == 200
+            and mz.get('loaded') is False
+            and 'error' in mz
+            and 'not running' in mz['error']
+            and mz.get('written_to')), f'matchzy={mz}'
+t('finale: server-not-running surfaces error in response but still writes config', t_finale_no_rcon_when_server_not_running)
+
+
+def t_finale_completes_session_even_on_rcon_failure():
+    """File written + RCON failure → session still transitions to
+    `complete` so the SPA isn't stuck on the finale page."""
+    ac, app, c = _new_app()
+    _login(c)
+    _drive_to_finale(c, app)
+    # Pretend the server is up but make the RCON call raise.
+    ac.running = True
+    class _BoomRCON:
+        def execute(self, cmd):
+            raise ConnectionError(f"refused: {cmd}")
+    ac.rcon = _BoomRCON()
+    r = c.post('/api/veto/finale', json={'load_match': True})
+    body = r.get_json()
+    state = c.get('/api/veto/state').get_json()
+    return (r.status_code == 200
+            and body['matchzy'].get('loaded') is False
+            and 'error' in body['matchzy']
+            and 'refused' in body['matchzy']['error']
+            and state['state'] == 'complete'), \
+           f'body.matchzy={body.get("matchzy")} state={state["state"]}'
+t('finale: RCON failure → 200 + error + session still completes', t_finale_completes_session_even_on_rcon_failure)
+
+
+def t_finale_calls_rcon_with_correct_filename_when_running():
+    """File written + server running + RCON OK → matchzy.loaded=True
+    and the RCON call was matchzy_loadmatch with the matchid-derived
+    filename (sanitised, .json suffix)."""
+    ac, app, c = _new_app()
+    _login(c)
+    _drive_to_finale(c, app)
+    ac.running = True
+    calls: list[str] = []
+    class _RecRCON:
+        def execute(self, cmd):
+            calls.append(cmd)
+            return "match config loaded"
+    ac.rcon = _RecRCON()
+    r = c.post('/api/veto/finale', json={'load_match': True})
+    body = r.get_json()
+    if r.status_code != 200 or not body['matchzy'].get('loaded'):
+        return False, f'unexpected outcome: status={r.status_code} matchzy={body.get("matchzy")}'
+    if len(calls) != 1 or not calls[0].startswith('matchzy_loadmatch '):
+        return False, f'expected one matchzy_loadmatch call, got {calls}'
+    # Filename matches the on-disk file basename.
+    written = body['matchzy'].get('written_to', '')
+    expected_basename = os.path.basename(written)
+    actual_arg = calls[0].split(' ', 1)[1]
+    return actual_arg == expected_basename, f'rcon arg {actual_arg!r} ≠ basename {expected_basename!r}'
+t('finale: load_match=True + running → matchzy_loadmatch <basename> issued', t_finale_calls_rcon_with_correct_filename_when_running)
+
+
+def t_finale_load_match_false_skips_rcon():
+    ac, app, c = _new_app()
+    _login(c)
+    _drive_to_finale(c, app)
+    ac.running = True
+    calls: list[str] = []
+    class _RecRCON:
+        def execute(self, cmd): calls.append(cmd); return ""
+    ac.rcon = _RecRCON()
+    r = c.post('/api/veto/finale', json={'load_match': False})
+    return (r.status_code == 200
+            and r.get_json()['matchzy'].get('loaded') is False
+            and 'error' not in r.get_json()['matchzy']
+            and len(calls) == 0), f'calls={calls}'
+t('finale: load_match=False → no RCON call even when server running', t_finale_load_match_false_skips_rcon)
 
 
 # ─── Auto-generated pytest cases ──────────────────────────────────────────

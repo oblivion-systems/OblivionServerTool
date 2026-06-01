@@ -136,7 +136,12 @@ Ship a simple, robust core first; each later layer is additive and optional.
    + `_CAPTAIN_PATHS` allowlist + `claim_captain()` enforcement *(Day 2)*
 4. ✅ Copy + **QR** link delivery — segno-backed `/api/veto/qr` returning SVG *(Day 4)*
 5. ✅ Cinematic finale — title rise, decider glow, confetti *(Day 5)*
-6. ⏳ MatchZy match-config write + `matchzy_loadmatch` RCON handoff *(Day 6, pending)*
+6. ✅ MatchZy match-config write + `matchzy_loadmatch` RCON handoff — `/api/veto/finale`
+   atomically writes `<csgo>/cfg/MatchZy/<matchid>.json` (with `_oblivion_meta` stripped
+   from the disk file but preserved in the API response for the SPA's audit trail), then
+   issues `matchzy_loadmatch <basename>` via RCON.  Three-way outcome: file fails → 500;
+   RCON fails → 200 + `matchzy.error` + session still completes so SPA isn't stuck;
+   success → 200 + `matchzy.loaded: true`. *(Day 6)*
 7. ⏳ Polish + smoke + tag *(Day 7, pending)*
 
 **Layer 1 — Discord bot (v0.11.0):** pull roster from a voice channel + DM the captain
