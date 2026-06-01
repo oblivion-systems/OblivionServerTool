@@ -1999,6 +1999,17 @@ function _renderVeto() {
   const state = _vetoState.state;
   const sess  = _vetoState.session;
 
+  // Defence against keystroke loss: if the user is actively focused on
+  // a text input inside the veto tree (roster names, team names, SteamIDs,
+  // anywhere), don't rebuild the DOM out from under them.  The snapshot
+  // is already cached in _vetoState — the next render trigger (user click
+  // elsewhere, stage change, SSE ping after blur) will reflect it.
+  const ae = document.activeElement;
+  if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')
+      && root.contains(ae)) {
+    return;
+  }
+
   // ── Day 5: session-scoped animation state resets on idle ──────────────
   // When the operator hits Reset, the snapshot flips back to state=idle.
   // Clear the finale-already-played + seq-len trackers so a fresh session
@@ -2134,12 +2145,27 @@ function _renderVetoRoster(root, sess) {
       </div>
     </div>
   `;
-  // Wire input handlers
+  // Wire input handlers.
+  // CRITICAL: do NOT call _renderVeto() on every keystroke — innerHTML
+  // rebuilds blow away the input element + the user's caret position,
+  // so they can only type one character before focus is lost.  Instead
+  // we update the counter ring + slot class + Save button in place.
   document.querySelectorAll('#veto-roster-grid input.veto-name').forEach(inp => {
     inp.addEventListener('input', (e) => {
       const i = parseInt(e.target.dataset.i, 10);
       _vetoLocalRoster[i].name = e.target.value;
-      _renderVeto(); // re-render to update progress ring
+      // Targeted DOM updates so focus + caret stay put.
+      const slot = e.target.closest('.veto-roster-slot');
+      if (slot) slot.classList.toggle('filled', !!e.target.value.trim());
+      const filledNow = _vetoLocalRoster.filter(p => p.name.trim()).length;
+      const readyNow  = (filledNow === 10);
+      const ring = document.querySelector('.veto-roster-progress .veto-ring');
+      if (ring) {
+        ring.textContent = String(filledNow);
+        ring.classList.toggle('full', readyNow);
+      }
+      const saveBtn = el('veto-roster-save');
+      if (saveBtn) saveBtn.disabled = !readyNow;
     });
   });
   document.querySelectorAll('#veto-roster-grid input.veto-steam').forEach(inp => {

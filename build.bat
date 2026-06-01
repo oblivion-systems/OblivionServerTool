@@ -26,11 +26,13 @@ pyinstaller ^
   --hidden-import keyring ^
   --hidden-import keyring.backends ^
   --hidden-import keyring.backends.Windows ^
+  --hidden-import segno ^
   --hidden-import cs2servergui.config ^
   --hidden-import cs2servergui.rcon ^
   --hidden-import cs2servergui.core ^
   --hidden-import cs2servergui.web ^
   --hidden-import cs2servergui._netutils ^
+  --hidden-import cs2servergui.veto ^
   --add-data "emblem.ico;." ^
   --add-data "cs2servergui/plugins;cs2servergui/plugins" ^
   --add-data "cs2servergui/templates;cs2servergui/templates" ^
