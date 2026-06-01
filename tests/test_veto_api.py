@@ -331,6 +331,103 @@ def t_sse_stream_responds():
 t('SSE: /api/veto/stream returns 200 + text/event-stream', t_sse_stream_responds)
 
 
+def t_sse_broadcasts_on_mutation():
+    """Subscribe in one thread; mutate via a second client; verify the
+    subscriber receives a non-keepalive frame within 2 seconds."""
+    import threading, time
+    _, app, c = _new_app()
+    _login(c)
+
+    received: list[str] = []
+    done = threading.Event()
+
+    def subscriber():
+        # Use a fresh client so cookies don't collide
+        sc = app.test_client()
+        _login(sc)
+        r = sc.get('/api/veto/stream', buffered=False)
+        # Read up to a few chunks then signal done
+        deadline = time.time() + 3
+        for chunk in r.response:
+            if chunk and not chunk.startswith(b':'):   # ignore keepalives
+                received.append(chunk.decode('utf-8', errors='replace'))
+                if len(received) >= 2:   # initial + mutation
+                    break
+            if time.time() > deadline:
+                break
+        done.set()
+
+    th = threading.Thread(target=subscriber, daemon=True)
+    th.start()
+    # Give the subscriber a moment to subscribe + receive the initial snapshot
+    time.sleep(0.3)
+    # Trigger a mutation
+    c.post('/api/veto/create', json={'mode': 'BO1'})
+    done.wait(timeout=3)
+    return len(received) >= 2 and 'idle' in received[0] and 'roster' in received[1], \
+           f'received={len(received)} initial-has-idle={"idle" in (received[0] if received else "")} second-has-roster={"roster" in (received[1] if len(received)>1 else "")}'
+t('SSE: mutation triggers a fresh snapshot frame to subscribers', t_sse_broadcasts_on_mutation)
+
+
+# ─── Day-2 polish ─────────────────────────────────────────────────────────
+def t_create_refuses_overwrite():
+    _, _, c = _new_app()
+    _login(c)
+    r1 = c.post('/api/veto/create', json={'mode': 'BO3'})
+    assert r1.status_code == 200
+    r2 = c.post('/api/veto/create', json={'mode': 'BO1'})
+    body = r2.get_json() or {}
+    return (r2.status_code == 409 and body.get('current_state') == 'roster'), \
+           f'status={r2.status_code} body={body}'
+t('create: 409 when a session is already active (operator must reset first)', t_create_refuses_overwrite)
+
+
+def t_snapshot_has_current_step_detail():
+    """Snapshot in `veto` state should include current_step_detail + legal_moves."""
+    _, app, c = _new_app()
+    _login(c)
+    c.post('/api/veto/create', json={'mode': 'BO3'})
+    c.post('/api/veto/roster', json={
+        'team_a_name': 'A', 'team_b_name': 'B',
+        'players': _ten_player_payload(),
+    })
+    c.post('/api/veto/distribute')
+    c.post('/api/veto/start_voting')
+    for team in ('A', 'B'):
+        for v in range(5):
+            c.post('/api/veto/vote', json={'team': team, 'voter_idx': v, 'votee_idx': 0})
+    c.post('/api/veto/resolve_captains')
+    tk = c.post('/api/veto/tokens').get_json()
+    cap_a = app.test_client(); cap_b = app.test_client()
+    cap_a.post('/api/veto/claim', json={'token': tk['A']['lan'].split('join=')[-1]})
+    cap_b.post('/api/veto/claim', json={'token': tk['B']['lan'].split('join=')[-1]})
+    snap = c.get('/api/veto/state').get_json()
+    sess = snap['session']
+    step = sess.get('current_step_detail')
+    legal = sess.get('legal_moves')
+    return (step == {'index': 0, 'kind': 'BAN', 'team': 'A'}
+            and len(legal) == 7  # nothing banned yet, all 7 maps legal
+            and set(legal) == set(sess['map_pool'])), \
+           f'step={step} legal={legal}'
+t('snapshot: current_step_detail + legal_moves present in veto state', t_snapshot_has_current_step_detail)
+
+
+def t_snapshot_idle_step_none():
+    _, _, c = _new_app()
+    _login(c)
+    snap = c.get('/api/veto/state').get_json()
+    return snap['state'] == 'idle' and snap['session'] is None, f'snap={snap}'
+t('snapshot: idle session has state=idle, session=None', t_snapshot_idle_step_none)
+
+
+def t_captain_can_hit_api_state():
+    """Captain role's allowlist includes /api/state."""
+    c, cap_a, cap_b, pool = _setup_to_veto()
+    r = cap_a.get('/api/state')
+    return r.status_code == 200, f'status={r.status_code}'
+t('captain: GET /api/state → 200 (in _CAPTAIN_PATHS)', t_captain_can_hit_api_state)
+
+
 # ─── Auto-generated pytest cases ──────────────────────────────────────────
 def _slug(name):
     out = ''.join(c if c.isalnum() else '_' for c in name).strip('_').lower()
