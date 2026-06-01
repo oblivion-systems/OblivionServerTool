@@ -18,6 +18,7 @@ import sys
 import threading
 import time
 import shutil
+import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
@@ -496,6 +497,11 @@ class AppCore:
 
         # Runtime state
         self.public_ip:           str                      = ""
+        # v0.10.2: last user-visible "why did Start fail" — joined preflight
+        # error strings, cleared on successful start or stop.  Surfaced in
+        # /api/state so a remote admin's Start click that gets silently
+        # blocked at preflight has a visible reason.
+        self.last_start_error:    str                      = ""
         self._uptime_start:       float | None             = None   # set when server is ready
         self._map_name_cache:     dict[str, str]           = {}
         self._map_tag_cache:      dict[str, list[str]]    = {}  # wid → lowercase tags
@@ -930,30 +936,32 @@ class AppCore:
             self.rcon.host = fresh
 
     def _preflight_checks(self, map_name: str, mode: str,
-                          is_workshop: bool) -> bool:
+                          is_workshop: bool) -> tuple[bool, list[str]]:
         """Pre-flight: validate prerequisites before we light up cs2.exe.
 
-        Logs every finding so the operator sees *why* a Start was blocked or what
-        looks dodgy.  Returns False on any HARD failure (server would not boot
-        cleanly).  Soft warnings still return True.
+        v0.10.2: returns `(ok, errors)` — was just `bool`.  The errors list
+        carries every hard-fail reason as a one-line operator-friendly
+        string so the HTTP layer can surface them to a remote admin who
+        otherwise wouldn't see why their Start click did nothing.  Logs
+        still emit as before (for the log drawer + history).
 
-        Hard failures:
+        Hard failures (each becomes one entry in `errors`):
         - Port 27015 already held by a non-cs2.exe process (binding will fail).
         - CS2 not installed (CS2_PATH missing).
         - Mode's plugin source folders missing from the bundle.
 
-        Soft warnings:
+        Soft warnings (logged only — not in `errors`):
         - Workshop map but no Steam credentials saved.
         - DepotDownloader missing (auto-downloads on first workshop dl, but warn).
-        - gameinfo.gi missing MetaMod patch for a plugin mode that needs it.
         """
-        ok = True
+        errors: list[str] = []
 
         # ── CS2 install present ──────────────────────────────────────────────
         if not os.path.isfile(_config.CS2_PATH):
-            self.log(f"[preflight] ✗ CS2 not installed: {_config.CS2_PATH}")
+            msg = f"CS2 is not installed (expected at {_config.CS2_PATH})"
+            self.log(f"[preflight] ✗ {msg}")
             self.log("[preflight]   → Config → Server Installation → Install / Reinstall")
-            ok = False
+            errors.append(msg)
 
         # ── Port 27015 conflict ──────────────────────────────────────────────
         try:
@@ -967,9 +975,11 @@ class AppCore:
                         capture_output=True, text=True, timeout=5,
                     )
                     if "cs2.exe" not in tl.stdout.lower():
-                        self.log(f"[preflight] ✗ Port {RCON_PORT} held by a non-CS2 process")
-                        self.log(f"[preflight]   → close whatever is on {RCON_PORT} (run `netstat -ano | findstr :{RCON_PORT}`)")
-                        ok = False
+                        msg = (f"Port {RCON_PORT} is held by a non-CS2 process — "
+                               f"close it first (run `netstat -ano | findstr :{RCON_PORT}` "
+                               "to identify the owner)")
+                        self.log(f"[preflight] ✗ {msg}")
+                        errors.append(msg)
         except Exception as exc:
             self.log(f"[preflight] ⚠  Port check failed: {exc}")
 
@@ -978,8 +988,9 @@ class AppCore:
         for name in needed:
             src = os.path.join(_PLUGINS_BASE, name)
             if not os.path.isdir(src):
-                self.log(f"[preflight] ✗ Plugin '{name}' missing from bundle: {src}")
-                ok = False
+                msg = f"Plugin bundle '{name}' missing — reinstall the app"
+                self.log(f"[preflight] ✗ {msg}: {src}")
+                errors.append(msg)
 
         # ── Soft warnings ────────────────────────────────────────────────────
         if is_workshop and not (self.steam_username and self.steam_password):
@@ -988,7 +999,7 @@ class AppCore:
         if not os.path.isfile(_config.DEPOTDL_PATH):
             self.log(f"[preflight] ⚠  DepotDownloader missing: {_config.DEPOTDL_PATH} "
                      "(will auto-download on first workshop request)")
-        return ok
+        return (not errors), errors
 
     def start_server(self, map_name: str, mode: str,
                      is_workshop: bool = False) -> None:
@@ -998,9 +1009,15 @@ class AppCore:
         # would lose the cooldown that's supposed to throttle a boot loop.
         self._stop_event.clear()
         # ── Pre-flight checks (port, install, bundle, creds) ─────────────────
-        if not self._preflight_checks(map_name, mode, is_workshop):
+        ok, _errors = self._preflight_checks(map_name, mode, is_workshop)
+        if not ok:
             self.log("[!] Pre-flight checks failed — fix the issues above and try again.")
+            # v0.10.2: store the errors so a remote-admin Start click can
+            # surface them in /api/state.boot_error.  Cleared on next successful
+            # start or on stop.
+            self.last_start_error = "; ".join(_errors) or "Pre-flight checks failed"
             return
+        self.last_start_error = ""        # clear stale error on successful start
         # Refresh the LAN IP so RCON connects to the right interface (see
         # _resolve_rcon_host).
         self._resolve_rcon_host()
@@ -1266,6 +1283,9 @@ class AppCore:
             self.boot_state    = "offline"
             self.player_count  = 0
             self._uptime_start = None
+            # v0.10.2: clear any stale preflight-error from the previous failed
+            # Start.  The /api/state.boot_error field only shows fresh errors.
+            self.last_start_error = ""
         # Wake any crash-restart backoff sleeping on `_stop_event` so a
         # user-initiated Stop during a 5/15/45s delay cancels the restart
         # instead of being silently overridden by the timer firing later.
@@ -1689,8 +1709,17 @@ class AppCore:
                 self.app_latest_version   = tag
                 if self.on_app_update_checked:
                     self.on_app_update_checked(available, APP_VERSION, tag, url)
+            except urllib.error.HTTPError as he:
+                # v0.10.2: private GitHub repo returns 404 to anonymous API
+                # calls.  Quietly suppress THAT specific case — the badge
+                # would never fire anyway, and a noisy log line every
+                # update-check interval is just clutter.  Other HTTP errors
+                # (rate limit, transient 5xx) still log so we can debug.
+                if he.code == 404:
+                    return    # repo private OR no releases yet — quietly stop
+                self.log(f"App update check skipped: HTTP {he.code}: {he.reason}")
             except Exception as exc:
-                # Silently swallow — private repo / offline / etc.
+                # Silently swallow — offline / DNS / etc.
                 self.log(f"App update check skipped: {exc}")
 
         threading.Thread(target=_do, daemon=True).start()

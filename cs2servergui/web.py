@@ -392,6 +392,12 @@ def create_flask(core: AppCore) -> Flask:
             "sv_password_set":    bool(core.sv_password),
             "dl_active":          core._active_dl_proc is not None,
             "dl_progress":        core._dl_progress or None,
+            # v0.10.2: last "why did Start fail" string from the most recent
+            # failed preflight; empty when nothing relevant has happened or
+            # after the next successful start / stop.  SPA reads this and
+            # renders a banner so remote admins see why their Start did
+            # nothing instead of staring at a frozen "Offline" pill.
+            "boot_error":         core.last_start_error or "",
         })
 
     # ── Server control ─────────────────────────────────────────────────────────
@@ -416,6 +422,18 @@ def create_flask(core: AppCore) -> Flask:
                 return jsonify({"error": "Invalid workshop map ID — digits only"}), 400
         elif not _MAP_NAME_RE.match(map_name):
             return jsonify({"error": "Invalid map name"}), 400
+        # v0.10.2 — pre-flight first so a remote admin's failed Start gets a
+        # useful error instead of a 200 OK + silently-stuck "Booting" pill.
+        # start_server() ALSO runs the preflight internally as defence-in-
+        # depth; calling it twice is cheap (port socket + tasklist + fs
+        # stat).  On hard fail we return 422 (semantically: request
+        # well-formed but the system can't fulfil it right now).
+        preflight_ok, preflight_errors = core._preflight_checks(map_name, mode, workshop)
+        if not preflight_ok:
+            return jsonify({
+                "error": "Pre-flight checks failed — fix the issues below and try again.",
+                "preflight_errors": preflight_errors,
+            }), 422
         core.start_server(map_name, mode, is_workshop=workshop)
         return jsonify({"ok": True})
 

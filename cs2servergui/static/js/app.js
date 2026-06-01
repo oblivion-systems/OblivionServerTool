@@ -126,6 +126,50 @@ const appSettings = {
   },
 };
 
+// v0.10.2 — Boot-error banner.  Renders a sticky top-of-content card
+// when /api/state.boot_error is non-empty (= the most recent Start was
+// blocked by a preflight failure).  Auto-clears when the next state
+// snapshot has empty boot_error (Stop or successful Start).  Without
+// this, a remote admin's Start click silently fails and they're left
+// staring at a frozen "Offline" pill with no idea what to do.
+let _lastBootError = '';
+function _renderBootError(msg) {
+  // Don't churn the DOM on every poll — only rebuild when the message changes
+  if (msg === _lastBootError) return;
+  _lastBootError = msg;
+  let banner = el('boot-error-banner');
+  if (!msg) {
+    if (banner) banner.remove();
+    return;
+  }
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'boot-error-banner';
+    banner.className = 'boot-error-banner';
+    // Insert at the top of #content so it's the first thing the operator sees
+    const content = el('content');
+    if (content && content.parentNode) {
+      content.parentNode.insertBefore(banner, content);
+    }
+  }
+  // Split on '; ' so each preflight error becomes its own bullet line
+  const parts = msg.split('; ').filter(Boolean);
+  banner.innerHTML = `
+    <div class="boot-error-head">
+      <span class="boot-error-icon">⚠</span>
+      <strong>Server start was blocked by pre-flight checks</strong>
+      <button class="boot-error-dismiss" type="button" aria-label="Dismiss">×</button>
+    </div>
+    <ul class="boot-error-list">
+      ${parts.map(p => `<li>${esc(p)}</li>`).join('')}
+    </ul>
+  `;
+  banner.querySelector('.boot-error-dismiss').addEventListener('click', () => {
+    banner.remove();
+    _lastBootError = '';  // allow re-render if a fresh error arrives
+  });
+}
+
 function loadAppSettings() {
   try {
     const s = JSON.parse(localStorage.getItem(_SETTINGS_KEY) || '{}');
@@ -349,12 +393,65 @@ function applyState(s) {
 
   // Update badges — toggle (not show-only), so they clear live after an update
   // completes instead of lingering until the app is relaunched.
+  // v0.10.2: Hide BOTH badges for non-local sessions.  The underlying actions
+  // (CS2 update via steamcmd, app self-update) are @require_local — a remote
+  // admin clicking them gets a generic 403 toast with no recovery path.
+  // The CS2-update flow is also a 15+ minute foreground download with the
+  // server stopped; not safe to expose to remote.
   const appBadge = el('app-update-badge');
   const cs2Badge = el('cs2-update-badge');
-  if (s.app_update) { appBadge.textContent = `⬆ App ${s.app_version}`; appBadge.classList.remove('hidden'); }
+  if (s.is_local && s.app_update) { appBadge.textContent = `⬆ App ${s.app_version}`; appBadge.classList.remove('hidden'); }
   else appBadge.classList.add('hidden');
-  if (s.update_available) { cs2Badge.textContent = '⬆ CS2 Update'; cs2Badge.classList.remove('hidden'); }
+  if (s.is_local && s.update_available) { cs2Badge.textContent = '⬆ CS2 Update'; cs2Badge.classList.remove('hidden'); }
   else cs2Badge.classList.add('hidden');
+
+  // v0.10.2 — Hide log drawer entirely for guest role + captain role.
+  // Captains shouldn't see log lines about other captains authenticating
+  // (their IPs leak via the auth log); guests get the same EventSource
+  // 401-then-12-retries hammer that the audit caught.  Admin/local: visible.
+  const logDrawer = el('log-drawer');
+  if (logDrawer) {
+    const showLogs = (s.role === 'admin');
+    logDrawer.style.display = showLogs ? '' : 'none';
+  }
+  // Hide the log Save button for non-local (it's @require_local backed).
+  // Save writes to oblivion_log_*.txt in the operator's config dir; the
+  // operator IS local, so saving from remote would just toast a 403.
+  const logSave = el('log-drawer-save');
+  if (logSave) logSave.style.display = s.is_local ? '' : 'none';
+
+  // v0.10.2 — Role pill: small badge near the state pill showing the
+  // current session's authentication level.  Captain/guest sessions
+  // benefit most (they're remote and have no other visual cue of what
+  // they're allowed to do).  Hidden until /api/state populates a role.
+  const rolePill = el('hdr-role-pill');
+  if (rolePill) {
+    const role = (s.role || '').toLowerCase();
+    if (!role) {
+      rolePill.classList.add('hidden');
+    } else {
+      rolePill.classList.remove('hidden');
+      rolePill.textContent = role;
+      rolePill.classList.remove('role-admin', 'role-captain', 'role-guest');
+      rolePill.classList.add(`role-${role}`);
+      // captain-team suffix for captains so they remember which team
+      if (role === 'captain' && s.captain_team) {
+        rolePill.textContent = `captain ${s.captain_team}`;
+      }
+    }
+  }
+
+  // v0.10.2 — Hide the LAN row in the status bar for non-local viewers.
+  // Remote captains/guests would otherwise see a `connect 192.168.x.x`
+  // copy button that can't possibly work from outside the LAN.
+  const sbLan = el('sb-lan');
+  if (sbLan) sbLan.style.display = s.is_local ? '' : 'none';
+
+  // v0.10.2 — Surface the latest preflight error to the operator if a
+  // Start attempt was just refused.  Renders as a sticky top banner that
+  // the operator can dismiss; auto-clears when next /api/state has empty
+  // boot_error (e.g. after a successful Start or a Stop).
+  _renderBootError(s.boot_error || '');
   // Pulse the Config update button when an update was detected (it stays a
   // normal forced-update button when not pulsing — the glow is just a cue).
   el('cfg-update-btn')?.classList.toggle('update-pending', !!s.update_available);
