@@ -20,6 +20,15 @@ env/
 
 # ── User config (may contain passwords / personal paths) ─────────────────────
 oblivion_config.json
+# v0.10.2 match history + v0.10.0 plugin manifest — local state, not source
+oblivion_matches.json
+oblivion_plugins.json
+# v0.11.0 — operator may stash a Discord bot token / webhook URL locally
+# before pasting into the SPA.  Keep secrets out of git regardless of name.
+bot_token.txt
+*_token.txt
+*_secret.txt
+.env
 
 # ── IDE / OS ──────────────────────────────────────────────────────────────────
 .idea/
