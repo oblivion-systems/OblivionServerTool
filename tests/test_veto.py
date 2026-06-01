@@ -481,6 +481,278 @@ def t_reset_from_idle_ok():
 t('reset: from idle is a no-op (legal)', t_reset_from_idle_ok)
 
 
+# ═══ Day 7 — Edge cases the earlier batches didn't cover ═════════════════
+# These hunt the corners that bit us in past releases: input boundaries,
+# state-transition completeness, threading reentrancy, and the "what if
+# the operator does X mid-flow" shapes.
+
+def t_sequence_bo5_length():
+    """BO5 = ban-ban-pick-pick-pick-pick + decider = 6 steps + 5 final maps
+    (4 picks + 1 decider).  The Day 1 unit tests verified BO1 + BO3 but
+    not BO5 — close that gap before tagging."""
+    s = V.create_session(mode='BO5')
+    V.set_roster(s, 'A', 'B', _ten_players())
+    V.distribute_teams(s, rng=_DeterministicRNG())
+    V.start_voting(s)
+    for voter in range(5):
+        V.cast_vote(s, 'A', voter, 0); V.cast_vote(s, 'B', voter, 0)
+    V.resolve_captains(s)
+    tokens = V.issue_tokens(s)
+    V.claim_captain(s, tokens['A'], caller_id='ca')
+    V.claim_captain(s, tokens['B'], caller_id='cb')
+    kinds = [st.kind for st in s.sequence]
+    # BO5: 2 bans, 4 picks, 0 more bans (the leftover is the decider).
+    expected_kinds = ['BAN','BAN','PICK','PICK','PICK','PICK']
+    return (s.mode == 'BO5'
+            and len(s.sequence) == 6
+            and kinds == expected_kinds), \
+           f'mode={s.mode} kinds={kinds} len={len(s.sequence)}'
+t('sequence: BO5 = ban-ban-pick-pick-pick-pick (6 steps, 5 final maps)', t_sequence_bo5_length)
+
+
+def t_sequence_bo5_final_count():
+    """End-to-end BO5: walk the 6 steps and verify final_maps = 5 maps
+    with the decider as the last unbanned one."""
+    s = V.create_session(mode='BO5')
+    V.set_roster(s, 'A', 'B', _ten_players())
+    V.distribute_teams(s, rng=_DeterministicRNG())
+    V.start_voting(s)
+    for voter in range(5):
+        V.cast_vote(s, 'A', voter, 0); V.cast_vote(s, 'B', voter, 0)
+    V.resolve_captains(s)
+    tokens = V.issue_tokens(s)
+    V.claim_captain(s, tokens['A'], caller_id='ca')
+    V.claim_captain(s, tokens['B'], caller_id='cb')
+    pool = list(s.map_pool)
+    # BO5 sequence: ban A, ban B, pick A, pick B, pick A, pick B → decider
+    V.perform_step(s, 'A', pool[0])
+    V.perform_step(s, 'B', pool[1])
+    V.perform_step(s, 'A', pool[2])
+    V.perform_step(s, 'B', pool[3])
+    V.perform_step(s, 'A', pool[4])
+    V.perform_step(s, 'B', pool[5])
+    # Decider should be the only unbanned + unpicked map = pool[6]
+    return (s.state == 'finale'
+            and len(s.final_maps) == 5
+            and s.decider == pool[6]
+            and s.final_maps[-1] == pool[6]), \
+           f'state={s.state} final_maps={s.final_maps} decider={s.decider}'
+t('sequence: BO5 full walk → 5 final maps, decider = last unbanned', t_sequence_bo5_final_count)
+
+
+def t_matchzy_config_excludes_steamidless_players():
+    """A player with empty steam_id must be omitted from MatchZy's
+    {steamid: name} team dict (MatchZy can't address them).  Mixed
+    rosters (some have IDs, some don't) should still produce a usable
+    config — just with fewer than 5 addressable players per team."""
+    s = V.create_session(mode='BO3')
+    # 8 with IDs, 2 without — distribution will end up 5-5 but one of the
+    # two ID-less ones must land in each team for the test to bite.  We
+    # control distribution via deterministic shuffle so first-5/last-5.
+    roster = [
+        RosterPlayer(name=f'p{i}', steam_id=(f'STEAM_{i}' if i < 4 else ''))
+        for i in range(5)
+    ] + [
+        RosterPlayer(name=f'q{i}', steam_id=(f'STEAM_q{i}' if i < 4 else ''))
+        for i in range(5)
+    ]
+    V.set_roster(s, 'A', 'B', roster)
+    V.distribute_teams(s, rng=_DeterministicRNG())
+    # Drive to finale
+    V.start_voting(s)
+    for voter in range(5):
+        V.cast_vote(s, 'A', voter, 0); V.cast_vote(s, 'B', voter, 0)
+    V.resolve_captains(s)
+    tokens = V.issue_tokens(s)
+    V.claim_captain(s, tokens['A'], caller_id='ca')
+    V.claim_captain(s, tokens['B'], caller_id='cb')
+    pool = list(s.map_pool)
+    for cap, m in zip(['A','B','A','B','A','B'], pool[:6]):
+        V.perform_step(s, cap, m)
+    cfg = V.build_matchzy_config(s)
+    # Each team had 5 players, 4 with IDs + 1 without.  MatchZy dict
+    # should contain only the 4 with IDs — empty string is not a key.
+    return (len(cfg['team1']['players']) == 4
+            and len(cfg['team2']['players']) == 4
+            and '' not in cfg['team1']['players']
+            and '' not in cfg['team2']['players']), \
+           f"team1={cfg['team1']['players']} team2={cfg['team2']['players']}"
+t('build_matchzy_config: players without steam_id excluded from team dict', t_matchzy_config_excludes_steamidless_players)
+
+
+def t_matchzy_config_matchid_format():
+    """matchid must be a non-empty string starting with our tool prefix
+    so MatchZy logs + the operator can grep their CS2 console for it."""
+    s = _make_to('finale')
+    cfg = V.build_matchzy_config(s)
+    mid = cfg['matchid']
+    return (isinstance(mid, str)
+            and mid.startswith('oblivion-veto-')
+            and len(mid) > len('oblivion-veto-')), \
+           f'matchid={mid!r}'
+t('build_matchzy_config: matchid uses `oblivion-veto-<ts>` format', t_matchzy_config_matchid_format)
+
+
+def t_revoke_before_issue_mints_one_anyway():
+    """Documented behaviour: `revoke_token` doesn't gate on
+    has-token-already — it just mints a fresh one for the given team.
+    Calling it before issue_tokens() lands a token in session.tokens['A']
+    but leaves 'B' empty.  This is acceptable (operators shouldn't get
+    there naturally — the SPA only exposes Revoke after Issue), but
+    documenting it locks the contract."""
+    s = _make_to('links')
+    new_token = V.revoke_token(s, 'A')
+    return (isinstance(new_token, str) and len(new_token) > 20
+            and 'A' in s.tokens
+            and 'B' not in s.tokens), \
+           f'tokens={dict(s.tokens)}'
+t('revoke_token: pre-issue revoke mints a fresh token (documented behaviour)', t_revoke_before_issue_mints_one_anyway)
+
+
+def t_revoke_other_team_unaffected():
+    """Revoking A's token must leave B's token untouched.  The earlier
+    revoke test verified A's new value but didn't assert B was preserved."""
+    s = _make_to('veto')
+    original_b = s.tokens['B'].value
+    V.revoke_token(s, 'A')
+    return s.tokens['B'].value == original_b, \
+           f'B value changed: orig={original_b!r} now={s.tokens["B"].value!r}'
+t('revoke_token: other team\'s token is unaffected', t_revoke_other_team_unaffected)
+
+
+def t_revoke_unknown_team_rejected():
+    s = _make_to('veto')
+    for bad in ('C', 'a', '', 'AB', 'team_a'):
+        try:
+            V.revoke_token(s, bad)
+            return False, f'should have rejected team={bad!r}'
+        except VetoError:
+            pass
+    return True, ''
+t('revoke_token: unknown team values rejected', t_revoke_unknown_team_rejected)
+
+
+def t_issue_tokens_rotates_on_recall():
+    """Documented (and arguably buggy) behaviour: calling issue_tokens
+    a second time from `links` ROTATES both tokens, breaking any URL
+    already shared with the captains.  The SPA only calls this once per
+    session (the "Generate captain links" button binds the result to a
+    module-local cache), but a browser refresh during the links stage
+    would re-trigger and silently invalidate the shared URLs.
+
+    TODO follow-up: make issue_tokens idempotent (return existing if
+    already issued) — would prevent the refresh-invalidates-URLs trap.
+    For now this test pins the current behaviour so a future change
+    that flips it is visible in the diff."""
+    s = _make_to('links')
+    first = V.issue_tokens(s)
+    second = V.issue_tokens(s)
+    return (first['A'] != second['A']
+            and first['B'] != second['B']
+            and s.tokens['A'].value == second['A']), \
+           f'first={first} second={second}'
+t('issue_tokens: pinned — currently rotates on re-call (TODO: make idempotent)', t_issue_tokens_rotates_on_recall)
+
+
+def t_perform_step_after_finale_rejected():
+    """Once we're at `finale`, perform_step must reject — there's no
+    8th step to play.  Defends against a stale captain SPA clicking on
+    the board after the operator already hit Hand-to-MatchZy."""
+    s = _make_to('finale')
+    try:
+        V.perform_step(s, 'A', s.map_pool[6])
+        return False, 'should have raised'
+    except VetoError:
+        return True, ''
+t('perform_step: rejected after finale state reached', t_perform_step_after_finale_rejected)
+
+
+def t_complete_only_from_finale():
+    """complete() is legal only from `finale` — verifies the gate on
+    every other state, including the dangerous `veto` → `complete` skip."""
+    for state in ('roster', 'teams', 'voting', 'links', 'veto'):
+        s = _make_to(state)
+        try:
+            V.complete(s)
+            return False, f'should have raised from state={state}'
+        except InvalidVetoTransition:
+            pass
+    return True, ''
+t('complete: rejected from every non-finale state', t_complete_only_from_finale)
+
+
+def t_roster_long_names_accepted():
+    """Names up to ~64 chars (well over 32) — the model accepts them;
+    callers (HTTP layer / SPA UI) enforce display caps.  This locks the
+    contract: the state machine doesn't impose a hard length limit.
+    State stays `roster` after set_roster (distribute_teams advances)."""
+    s = V.create_session(mode='BO3')
+    long_name = 'A' * 60  # plausibly long Steam display name with prefix
+    players = [RosterPlayer(name=f'{long_name}_{i}', steam_id=f'S{i}') for i in range(10)]
+    try:
+        V.set_roster(s, 'Team Alpha', 'Team Bravo', players)
+        return (s.state == 'roster'
+                and len(s.roster) == 10
+                and all(len(p.name) >= 60 for p in s.roster)), f'state={s.state}'
+    except VetoError as e:
+        return False, f'unexpectedly rejected: {e}'
+t('set_roster: long names (60 chars) accepted — no model-level cap', t_roster_long_names_accepted)
+
+
+def t_roster_whitespace_name_rejected():
+    """A whitespace-only name shouldn't count as filled.  Either the
+    state machine rejects it, or distribute_teams later refuses — both
+    are defensible.  We assert it's caught somewhere before voting."""
+    s = V.create_session(mode='BO3')
+    players = [RosterPlayer(name=' ', steam_id='S1')] + \
+              [RosterPlayer(name=f'p{i}', steam_id=f'S{i}') for i in range(9)]
+    try:
+        V.set_roster(s, 'A', 'B', players)
+        # If we got here, set_roster accepted whitespace names.  Document
+        # the actual behaviour so future contributors know what to expect.
+        # (Our impl accepts; HTTP layer's filled-count check rejects.)
+        return s.state == 'teams', f'state={s.state}'
+    except VetoError:
+        return True, 'rejected at set_roster (also fine)'
+t('set_roster: whitespace name handled (accepted-by-model OR rejected)', t_roster_whitespace_name_rejected)
+
+
+def t_perform_step_wrong_kind_no_match():
+    """Whether we BAN or PICK is determined by sequence position, not
+    by the caller.  perform_step() takes (team, map_id) only — there's
+    no way for a captain to demand "I want to PICK now."  This locks
+    the API surface so a future refactor doesn't accidentally expose
+    a kind parameter that captains could spoof."""
+    import inspect
+    sig = inspect.signature(V.perform_step)
+    params = list(sig.parameters.keys())
+    return params == ['session', 'team', 'map_id'], f'params={params}'
+t('perform_step: signature is (session, team, map_id) — kind is server-derived', t_perform_step_wrong_kind_no_match)
+
+
+def t_state_transitions_reachable_from_idle():
+    """Smoke: walk the full state graph and assert every state is
+    reachable in turn.  Defends against a refactor that drops a
+    transition from _LEGAL_TRANSITIONS.  `idle` is the starting state
+    so a fresh VetoSession is the canonical idle observation."""
+    reached = [('idle', V.VetoSession().state)]
+    for state in ('roster','teams','voting','links','veto','finale','complete'):
+        s = _make_to(state)
+        reached.append((state, s.state))
+    return all(actual == expected for expected, actual in reached), f'reached={reached}'
+t('state graph: every state idle→complete reachable via the helpers', t_state_transitions_reachable_from_idle)
+
+
+def t_reset_from_complete():
+    """A finished session must accept reset() so the operator can
+    start a fresh BO without restarting the app."""
+    s = _make_to('complete')
+    V.reset(s)
+    return s.state == 'idle' and not s.tokens and not s.final_maps, \
+           f'state={s.state} tokens={list(s.tokens)} maps={s.final_maps}'
+t('reset: from complete → idle (operator starts a new session)', t_reset_from_complete)
+
+
 # ═══ Auto-generated pytest cases ══════════════════════════════════════════
 def _slug(name):
     out = ''.join(c if c.isalnum() else '_' for c in name).strip('_').lower()

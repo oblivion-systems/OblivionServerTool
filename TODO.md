@@ -80,7 +80,7 @@ deferred loose ends. Full prose in [CHANGELOG.md](CHANGELOG.md) → v0.9.1.*
   lock, the `_stop_event` edge-window cancel race, and the Warcraft `ReferenceEquals` → SteamID
   equality fix in three deferred-menu sites.
 
-### Currently shipping — v0.10.0 (map-veto match setup), Days 1-5 of 7 done
+### Shipped — v0.10.0 (map-veto match setup, released 2026-06-01)
 *Full spec in [VETO.md](VETO.md); detailed prose in [CHANGELOG.md](CHANGELOG.md) → v0.10.0.
 Layered build plan with v0.10.0 = Layer 0 (core veto), v0.11.0 = Layer 1 (Discord bot).*
 
@@ -110,12 +110,25 @@ Layered build plan with v0.10.0 = Layer 0 (core veto), v0.11.0 = Layer 1 (Discor
   Three-way outcome (file fail → 500; RCON fail → 200 + `matchzy.error` + session
   still completes; full success → 200 + `matchzy.loaded`).  SPA finale updated
   with real-time status + retry button.
-- [ ] **Day 7: Polish + smoke + tag v0.10.0** — full regression, release notes, tag,
-  GitHub release with binary.
-- [ ] **Installer .spec regeneration note:** when next regenerating
-  `OblivionServerTool.spec` for an installer build, add `segno` and
-  `cs2servergui.veto` to `hiddenimports` (the file is gitignored, so the
-  segno+veto hidden-imports must be re-applied each regeneration).
+- [x] **Day 7: Polish + extra unit tests + tag v0.10.0** — `APP_VERSION` 0.9.2.1 →
+  0.10.0, `installer.iss` version bumped, +15 edge-case unit tests in `test_veto.py`
+  (BO5 sequence, steamidless players, matchid format, revoke edge cases, perform_step
+  post-finale, complete-state gate, state-graph reachability) and +6 in
+  `test_veto_api.py` (QR public-no-IP, finale double-call, snapshot shape, distribute
+  pre-roster, concurrent finale).  Real bug fixed by adversarial test: finale called
+  twice on `complete` session was 500 (uncaught `InvalidVetoTransition`) — now clean
+  400.  108/108 tests green.
+- [x] **Build hardening:** `OblivionServerTool.spec` + `build.bat` now include `segno`
+  and `cs2servergui.veto` in `--hidden-import`.  PyInstaller's static analyser misses
+  both (segno is lazy-imported inside `/api/veto/qr`; `cs2servergui.veto` enters via
+  `from . import veto as _veto` inside a function in `web.py`).
+- [ ] **Follow-up: `issue_tokens` idempotency.**  Currently re-calling
+  `issue_tokens` from `links` ROTATES both tokens, silently invalidating
+  any URL already shared with captains.  The SPA only calls it once per
+  session, but a browser refresh during the links stage would trigger
+  the rotation.  Make it return the existing tokens if already issued
+  (test_veto.py pins the current rotating behaviour so the fix shows up
+  cleanly in the diff).
 
 ### Shipped in v0.9.1 — confirmed in-game
 - [x] **Jailbreak crash fixed** — dropped CS2Fixes (`zombie`) from the Jailbreak mode; native

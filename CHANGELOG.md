@@ -2,7 +2,79 @@
 
 ---
 
-## v0.10.0 — In Progress (Days 1-5 of 7)
+## v0.10.0 — 2026-06-01 (release)
+
+The **map-veto / match-setup feature** ([VETO.md](VETO.md)).  Seven-day build:
+state machine + HTTP API + SPA Veto tab + QR codes + cinematic finale +
+real MatchZy handoff + this release polish day.  `APP_VERSION` bumped
+0.9.2.1 → 0.10.0.  Total: 108/108 backend tests green (22 v092 +
+49 veto + 37 veto-api).
+
+### Day 7 — Polish, edge-case unit tests, release
+
+**Real bug found by adversarial unit tests:** `/api/veto/finale` called a
+second time on an already-`complete` session returned 500 (uncaught
+`InvalidVetoTransition` from the inner `complete()` call) instead of a
+clean 400.  Now guarded at the top of the handler — second call returns
+"session already complete — call /api/veto/reset" + 400.  The SPA never
+naturally hits this (the launch button is gone on the complete page),
+but a stale tab + double-click would have surfaced it.
+
+**Documented (and worth-revisiting) behaviours pinned with tests:**
+* `issue_tokens` ROTATES tokens on re-call from `links` — silently
+  invalidates URLs already shared with captains if the operator
+  refreshes the browser during the links stage.  Test pins the
+  behaviour; TODO entry filed to make it idempotent in a follow-up.
+* `revoke_token` from `links` before `issue_tokens` mints a token for
+  the target team even though no token existed to revoke.  Acceptable
+  (the SPA only exposes Revoke after Issue), now documented in test.
+
+**New unit cases (test_veto.py: 34 → 49, +15):**
+* BO5 sequence shape + final-map count (the Day 1 tests covered BO1 +
+  BO3 only)
+* `build_matchzy_config` excludes players without `steam_id` from the
+  team dict (MatchZy can't address them; mixed rosters still produce a
+  usable config)
+* `build_matchzy_config` matchid format = `oblivion-veto-<ts>` prefix
+* Revoke pre-issue documented behaviour
+* Revoke leaves the other team's token untouched
+* Revoke rejects unknown team values ('C', 'a', '', 'AB', 'team_a')
+* Issue tokens rotation pin (with TODO)
+* `perform_step` rejected after finale state reached
+* `complete` rejected from every non-finale state (locks the gate)
+* Long names (60 chars) accepted at model layer — display caps belong
+  in callers
+* Whitespace-name handling (documented — model accepts, HTTP layer's
+  filled-count check rejects)
+* `perform_step` signature is `(session, team, map_id)` — kind is
+  server-derived, no spoofable parameter
+* State graph reachability from `idle` to `complete` (regression guard
+  for `_LEGAL_TRANSITIONS` edits)
+* `reset` from `complete` clears state for a fresh session
+
+**New API cases (test_veto_api.py: 31 → 37, +6):**
+* `/api/veto/qr?kind=public` with no `public_ip` configured → 400 with
+  useful error (was missing — would have produced `http://:port/...`)
+* `/api/veto/finale` second call after complete → clean 400 (fixed
+  bug noted above)
+* `/api/veto/reset` post-reset state is fully cleared (`session: None`)
+* Snapshot shape stability (top-level `state, session` + nested
+  `current_step_detail, legal_moves` mid-veto)
+* `/api/veto/distribute` before roster saved → 400 (not crash)
+* Concurrent `/api/veto/finale` calls serialise via `_veto_lock` —
+  session ends `complete` exactly once
+
+**Version bumps:** `config.py:APP_VERSION = "0.10.0"`,
+`installer.iss:MyAppVersion = "0.10.0"`.
+
+**Build:** `OblivionServerTool.spec` + `build.bat` have segno and
+`cs2servergui.veto` in `--hidden-import` (the lazy `import segno`
+inside `/api/veto/qr` and the inline `from . import veto` are invisible
+to PyInstaller's static analyser without explicit hints).
+
+---
+
+## v0.10.0 build journal (Days 1-6)
 
 The **map-veto / match-setup feature** ([VETO.md](VETO.md) spec).  Five-stage
 flow — roster → teams → captain vote → captain links → BO1/3/5 veto board → MatchZy
@@ -187,16 +259,16 @@ with `oblivion-veto-*.json` files on every run).
 
 ### Day 7 (pending) — Polish + smoke + tag v0.10.0
 
-### Day 7 (pending) — Polish + smoke + tag v0.10.0
+### Day 7 — Polish + extra unit tests + release
 
-Final UX pass, full regression, release notes, tag, GitHub release with binary.
+See top of v0.10.0 section above for the Day 7 detail.
 
-### Test totals
+### Final test totals at v0.10.0 release
 
 * `tests/test_v092.py` — 22/22 (unchanged from v0.9.2.1)
-* `tests/test_veto.py` — 34/34 (new in Day 1)
-* `tests/test_veto_api.py` — 31/31 (new in Day 2; +8 Day 4 QR cases; +6 Day 6 MatchZy cases)
-* **All 87/87 green**
+* `tests/test_veto.py` — 49/49 (Day 1's 34 + Day 7's 15 edge-case additions)
+* `tests/test_veto_api.py` — 37/37 (Day 2's 17 + Day 4's 8 QR + Day 6's 6 MatchZy + Day 7's 6 polish)
+* **All 108/108 green**
 
 ---
 

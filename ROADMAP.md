@@ -7,7 +7,15 @@
 
 ---
 
-## Where We Are — v0.9.2.1 (released 2026-06-01, hotfix on v0.9.2)
+## Where We Are — v0.10.0 (released 2026-06-01)
+
+The **map-veto / match-setup feature** is live: server-side state machine
++ HTTP API + SPA Veto tab + QR captain links + cinematic finale + real
+`matchzy_loadmatch` RCON handoff.  108/108 backend tests green (22 v092
++ 49 veto + 37 veto-api).  Full prose in [CHANGELOG.md](CHANGELOG.md);
+spec in [VETO.md](VETO.md).
+
+## Previously — v0.9.2.1 (released 2026-06-01, hotfix on v0.9.2)
 
 Core features are stable.  Since v0.9.1 the focus has shifted from feature work to
 **correctness, observability, and resilience under real load**.
@@ -61,26 +69,24 @@ Core features are stable.  Since v0.9.1 the focus has shifted from feature work 
 - ✅ Packaging polish: `_netutils` hidden-import, werkzeug pin, WebView2
   bootstrapper docs, explicit icons, `--noconfirm`
 
-**Currently shipping — v0.10.0 (map veto + match setup):**
+**Shipped 2026-06-01 — v0.10.0:**
 
-In flight on master.  Days 1-5 of 7 done; Day 6 (real MatchZy
-`matchzy_loadmatch` handoff) + Day 7 (polish + tag) remain.  Full spec
-[VETO.md](VETO.md); detailed prose [CHANGELOG.md](CHANGELOG.md) → v0.10.0.
+Seven-day build of the map-veto / match-setup feature.  All days complete:
 
-| Day | Status | Scope |
-|---|---|---|
-| 1 | ✅ | `VetoSession` state machine + 34 unit tests (`cs2servergui/veto.py`) |
-| 2 | ✅ | 15 HTTP routes + SSE live mirror + captain role + 17 integration tests |
-| 3 | ✅ | SPA Veto tab + 8 stage renderers + `api.veto.*` namespace |
-| 4 | ✅ | QR codes for captain links (segno, `/api/veto/qr`) + 8 more tests |
-| 5 | ✅ | Cinematic finale (title rise, decider glow pulse, 30-piece confetti) |
-| 6 | ✅ | MatchZy match config to disk + `matchzy_loadmatch` RCON handoff + 6 tests |
-| 7 | ⏳ | Polish + smoke + tag v0.10.0 + GitHub release with binary |
+| Day | Scope |
+|---|---|
+| 1 | `VetoSession` state machine + 34 unit tests (`cs2servergui/veto.py`) |
+| 2 | 15 HTTP routes + SSE live mirror + captain role + 17 integration tests |
+| 3 | SPA Veto tab + 8 stage renderers + `api.veto.*` namespace |
+| 4 | QR codes for captain links (segno, `/api/veto/qr`) + 8 more tests |
+| 5 | Cinematic finale (title rise, decider glow pulse, 30-piece confetti) |
+| 6 | MatchZy match config to disk + `matchzy_loadmatch` RCON handoff + 6 tests |
+| 7 | Polish + 15+6 edge-case unit tests + finale double-call bug fix + tag |
 
-Decisions locked in (from VETO.md): dedicated "Veto" tab, LAN + Public
-captain links, per-veto override starting from active-duty 7, Steam IDs
-collected at roster for MatchZy strict mode.  All 87/87 backend tests
-green (22 v092 + 34 veto + 31 veto-api).
+All decisions from VETO.md resolved: dedicated Veto tab, LAN + Public
+captain links, per-veto pool override starting from active-duty 7,
+Steam IDs collected at roster for MatchZy strict mode.  108/108
+backend tests green (22 v092 + 49 veto + 37 veto-api).
 
 **v0.11.0+ — Discord bot integration:**
 

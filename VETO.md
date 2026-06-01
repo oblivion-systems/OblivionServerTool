@@ -1,7 +1,7 @@
 # VETO — Map Veto / Match Setup
 
 > Quick-reference spec for the in-app **Veto** feature.
-> Status: **v0.10.0 in flight, Days 1-5 of 7 done on master, Days 6-7 pending.**
+> Status: **v0.10.0 RELEASED 2026-06-01.**  All 7 days complete.
 > Implementation lives in [`cs2servergui/veto.py`](cs2servergui/veto.py) (state machine,
 > 365 lines), the `/api/veto/*` routes in [`cs2servergui/web.py`](cs2servergui/web.py), and
 > the Veto tab in [`cs2servergui/static/js/app.js`](cs2servergui/static/js/app.js) +
@@ -142,7 +142,9 @@ Ship a simple, robust core first; each later layer is additive and optional.
    issues `matchzy_loadmatch <basename>` via RCON.  Three-way outcome: file fails → 500;
    RCON fails → 200 + `matchzy.error` + session still completes so SPA isn't stuck;
    success → 200 + `matchzy.loaded: true`. *(Day 6)*
-7. ⏳ Polish + smoke + tag *(Day 7, pending)*
+7. ✅ Polish + edge-case unit tests + tag — `APP_VERSION` bumped to 0.10.0; +15 unit
+   tests + 6 API tests including a real bug found (finale double-call 500 → 400).
+   108/108 tests green at release. *(Day 7)*
 
 **Layer 1 — Discord bot (v0.11.0):** pull roster from a voice channel + DM the captain
 links. Falls back to manual/QR when not configured. (See Discord section above.)
