@@ -881,6 +881,16 @@ class AppCore:
         except Exception as exc:
             self.log(f"[rcon] could not re-resolve LAN IP: {exc}")
             return
+        # If _lan_ip() couldn't reach 8.8.8.8 it falls back to 127.0.0.1.
+        # CS2 doesn't bind RCON to loopback, so writing 127.0.0.1 here would
+        # break the very bug v0.9.2 fixed (workshop maps stuck on dust2).
+        # Keep the previous value when the fresh probe is the loopback fallback
+        # — _post_launch_sanity_check's netstat-based recovery is the actual
+        # safety net for when the primary LAN IP doesn't work either.
+        if fresh == "127.0.0.1" and _config.RCON_HOST != "127.0.0.1":
+            self.log(f"[rcon] _lan_ip() returned loopback fallback "
+                     f"(network blip?) — keeping last-known {_config.RCON_HOST}")
+            return
         if fresh != _config.RCON_HOST:
             self.log(f"[rcon] LAN IP changed {_config.RCON_HOST} → {fresh} (re-resolving)")
             _config.RCON_HOST = fresh
@@ -1416,7 +1426,11 @@ class AppCore:
                     self._pending_workshop_map = None
                     try:
                         self.rcon.execute_retry(f"host_workshop_map {wk}")
-                        self.current_map = wk
+                        # Lock around the write — _post_launch_sanity_check
+                        # writes the same field under the lock; v0.9.2.1 makes
+                        # this path consistent (was bare assign).
+                        with self._lifecycle_lock:
+                            self.current_map = wk
                         self.log(f"[workshop] Workshop map {wk} loaded via fallback ✓")
                     except Exception as exc:
                         self.log(f"[workshop] Fallback auto-load failed: {exc}")
@@ -1457,7 +1471,10 @@ class AppCore:
                         time.sleep(1)
                         try:
                             self.rcon.execute_retry(f"host_workshop_map {wk}")
-                            self.current_map = wk
+                            # Lock the write for consistency with the sanity-
+                            # check + fallback paths (v0.9.2.1).
+                            with self._lifecycle_lock:
+                                self.current_map = wk
                             self.log(f"[workshop] Workshop map {wk} loaded ✓")
                         except Exception as exc:
                             self.log(f"[workshop] Auto map switch failed: {exc}")
@@ -1514,8 +1531,11 @@ class AppCore:
                 rcon_cmd = (f"host_workshop_map {map_name}"
                             if is_workshop else f"changelevel {map_name}")
                 resp = self.rcon.execute_retry(rcon_cmd)
-                self.current_map  = map_name
-                self.current_mode = mode
+                # Lock the writes for consistency with the other sites
+                # (v0.9.2.1 — was bare assigns).
+                with self._lifecycle_lock:
+                    self.current_map  = map_name
+                    self.current_mode = mode
                 self.log(f"[{caller}] Map → {map_name} ({mode})  {resp.strip() or 'OK'}")
                 if self.on_state_change:
                     self.on_state_change()
@@ -2637,6 +2657,15 @@ class AppCore:
             # briefly re-show the bar before the worker's finally runs.
             self._dl_progress    = {}
             self._active_dl_proc = None
+        # `proc` may be the `True` sentinel reservation set by
+        # workshop_download (web.py) when a cancel races a brand-new
+        # download before the worker has had a chance to swap in its real
+        # Popen handle.  In that case there's no process to terminate yet —
+        # the reservation clear above is enough; the worker will see
+        # _active_dl_proc=None on its first lock acquire and bail.
+        if not hasattr(proc, "terminate"):
+            self.log("Cancelling download — pre-spawn reservation cleared")
+            return
         self.log("Cancelling download — terminating steamcmd…")
         try:
             proc.terminate()
@@ -2877,7 +2906,30 @@ class AppCore:
                         proc = subprocess.Popen(
                             ["x-terminal-emulator", "-e"] + cmd)
 
-                self._active_dl_proc = proc
+                # Lock the assign so a concurrent cancel_download / workshop_download
+                # 409-check sees a consistent value (v0.9.2.1 hotfix — the v0.9.2 fix
+                # for the workshop-download race only locked cancel, leaving the
+                # worker's assign + clear unlocked, so two clicks could both observe
+                # None and both spawn workers).
+                # ALSO check the reservation hasn't been cancelled: web.py
+                # reserves _active_dl_proc with a `True` sentinel before we get
+                # here.  If cancel_download ran in the meantime it cleared the
+                # reservation to None — at which point we need to terminate the
+                # process we just spawned and bail, otherwise the user sees
+                # "Cancel" do nothing and a runaway steamcmd in the background.
+                with self._dl_lock:
+                    if self._active_dl_proc is None:
+                        cancelled_pre_spawn = True
+                    else:
+                        cancelled_pre_spawn = False
+                        self._active_dl_proc = proc
+                if cancelled_pre_spawn:
+                    self.log("  Cancelled before spawn — terminating new process.")
+                    try: proc.terminate(); proc.wait(timeout=5)
+                    except Exception:
+                        try: proc.kill()
+                        except Exception: pass
+                    return
 
                 # ── Drain captured output (silent path only) ─────────────────
                 # On a background thread so the main wait-loop below can still
@@ -2990,8 +3042,10 @@ class AppCore:
             except Exception as exc:
                 self.log(f"  DepotDownloader error: {exc}")
             finally:
-                self._active_dl_proc = None
-                self._dl_progress = {}
+                # Lock the clear — see the assign at 2884.  v0.9.2.1.
+                with self._dl_lock:
+                    self._active_dl_proc = None
+                    self._dl_progress = {}
                 # Belt-and-braces: never leave a staging folder behind.
                 if not success:
                     shutil.rmtree(os.path.join(_config.WORKSHOP_DIR,
@@ -3505,6 +3559,14 @@ class AppCore:
                 # the sleep.  Returns True if Stop was requested.
                 if self._stop_event.wait(timeout=delay):
                     self.log("[!] Auto-restart cancelled — Stop requested during backoff.")
+                    _restart_count = 0
+                    return
+                # Re-check the event AFTER the wait too (v0.9.2.1): Stop
+                # pressed in the tiny window between wait-returning-False and
+                # start_server's clear() would otherwise be swallowed by the
+                # clear and the unwanted respawn would proceed.
+                if self._stop_event.is_set():
+                    self.log("[!] Auto-restart cancelled — Stop requested at wait-edge.")
                     _restart_count = 0
                     return
                 self.log(

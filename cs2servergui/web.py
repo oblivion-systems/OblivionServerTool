@@ -752,10 +752,19 @@ def create_flask(core: AppCore) -> Flask:
         # call and overwrites core._active_dl_proc, so two simultaneous clicks
         # (or two guests) would orphan the first process; cancel_download
         # would only kill the latest and the staging dirs would collide.
-        if core._active_dl_proc is not None:
-            return jsonify({
-                "error": "A download is already in progress — cancel it first or wait.",
-            }), 409
+        # Atomic check-and-reserve under core._dl_lock so two clicks can't
+        # both observe None concurrently (v0.9.2.1 — v0.9.2's bare check had
+        # the TOCTOU the lock was supposed to fix).  We set a sentinel here
+        # and depotdl_download's worker overwrites with the real Popen handle.
+        with core._dl_lock:
+            if core._active_dl_proc is not None:
+                return jsonify({
+                    "error": "A download is already in progress — cancel it first or wait.",
+                }), 409
+            # Reserve the slot — `True` is a sentinel; the worker swaps in
+            # the real subprocess.Popen handle once it's spawned.  Both the
+            # worker's assign and `cancel_download` re-acquire the same lock.
+            core._active_dl_proc = True  # type: ignore[assignment]
         core.depotdl_download(
             wid,
             on_done=lambda ok: core.log(

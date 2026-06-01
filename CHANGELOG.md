@@ -2,8 +2,73 @@
 
 ---
 
+## v0.9.2.1 — 2026-06-01 (hotfix)
+
+A four-agent re-audit of the v0.9.2 fix code (not the original bugs) surfaced one
+**critical regression** and four other issues worth fixing before any operator actually
+runs the v0.9.2 binary in earnest. All landed here.
+
+### 🚨 Critical: 5-second RCON command stall
+
+`rcon.py`'s multi-packet sentinel had a speculative trailing `_recv(s)` that waited for a
+"trailing empty-response packet some Source builds emit after the sentinel" — except CS2
+doesn't emit it, so every `execute()` blocked for the full 5-second socket timeout waiting
+for a phantom packet.  **Every RCON-touching path** — status polling, broadcasts, kicks,
+bans, map changes — gained +5 s. The smoke test missed it because the mock socket pre-
+queued the phantom packet that real CS2 doesn't send.  v0.9.2.1 drops the speculative
+drain; the sentinel id arrival already proves the real response is complete.
+
+### 🔒 Workshop-download race actually fixed
+
+The v0.9.2 fix locked `cancel_download` but left the worker's assign/clear and the web
+route's 409-check unlocked. Two clicks could both observe `None` and both spawn
+workers. v0.9.2.1: web.py atomically check-and-reserves under `_dl_lock`; worker
+swaps the reservation for the real Popen handle (also under lock); cancel-before-spawn
+race correctly terminates the late-arriving process.
+
+### 🌐 `_resolve_rcon_host` won't clobber good IP with `127.0.0.1`
+
+If `_lan_ip()` momentarily falls back to its loopback default (UDP probe to 8.8.8.8
+fails), v0.9.2 would overwrite `_config.RCON_HOST` with `127.0.0.1` and break the
+very bug v0.9.2 was supposed to fix. v0.9.2.1 keeps the last-known-good value when
+the fresh probe is the loopback fallback. `_post_launch_sanity_check`'s netstat-based
+recovery remains the safety net.
+
+### 🔐 Two more `current_map` writes under `_lifecycle_lock`
+
+`_poll_rcon_ready:1474` (workshop trigger success) and `change_map:1534` were the two
+remaining bare writes; v0.9.2 had locked the recovery path but not these. Now all four
+sites are consistent.
+
+### ⏸ Stop during crash-restart backoff: edge-window cancel
+
+Stop pressed in the tiny window between `_stop_event.wait()` returning False and
+`start_server`'s `clear()` was swallowed by the clear, so the unwanted respawn proceeded.
+Now re-checks `_stop_event.is_set()` after the wait, before `start_server`.
+
+### 🧙 Warcraft: SteamID equality instead of `ReferenceEquals`
+
+The v0.9.2 Warcraft audit follow-ups used `ReferenceEquals(fresh, wcPlayer)` to verify
+the queued menu was still for the same player. But `WarcraftPlugin.SetWcPlayer` legitimately
+installs a brand-new `WarcraftPlayer` object on class change — same human, same slot, but
+the reference comparison silently fails and the menu drops. v0.9.2.1 compares by SteamID
+(`slotController.SteamID != capturedSteamId`) so a queued menu survives a class change.
+
+Three sites fixed: `WarcraftPlugin.cs` (`!reset` follow-up), `Events/EventSystem.cs`
+(round-start auto-open), `Menu/WarcraftMenu/SkillsMenu.cs` (recursive reopen after pick).
+
+Rebuilt `WarcraftPlugin.dll` bundled.
+
+### Test battery still 22/22
+
+The v0.9.2 isolated-behaviour battery (`tests/test_v092.py`) is unchanged and continues
+to pass under the hotfixed code. Mocks were correct; the bug was in the integration with
+real CS2 — discoverable only via second-pass code review.
+
+---
+
 ## Unreleased
-*Post-v0.9.2 polish. Will fold into v0.9.3 when there's a meaningful change worth tagging.*
+*Post-v0.9.2.1 polish. Will fold into v0.9.3 when there's a meaningful change worth tagging.*
 
 ### 📦 Installer / Build Hardening
 
