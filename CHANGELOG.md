@@ -2,6 +2,219 @@
 
 ---
 
+## v0.10.2 — In Progress (Mon → Thu, target Friday testing)
+
+**The "make-it-pleasant-online" phase.**  After v0.10.0 + v0.10.1 shipped the
+veto feature and the Cloudflare-friendly captain handoff, a five-agent audit
+(mobile responsiveness, online workflow, feature integration, pre-v0.10.0
+surface, cross-cutting concerns) surfaced ~35 actionable findings: ~10 blockers,
+~17 gaps, ~8 polish items.  v0.10.2 takes the BLOCKERs from all five audits
++ the top three cross-cutting investments + the most-valuable workflow gaps
+into a single release, scoped to four working days so Friday is real testing
+not finishing.
+
+### Day 1 (Mon) — Mobile + two workflow blockers
+Mobile responsiveness was identified as **fundamentally broken** by the audit
+(only 2 `@media` queries in 2856 lines of CSS, none below 700 px; sidebar
+permanently 192 px wide; login card + connect popover overflow iPhone-width
+viewports; captain READY button requires scroll on 375 px width).  Day 1
+adds a focused `@media (max-width: 640px)` block:
+* sidebar collapses to a hamburger drawer
+* `.login-card`, `.connect-popover`, `.palette` clamped to
+  `min(380px, calc(100vw - 16px))`
+* all `.btn` min-height 44 px (Apple HIG touch target)
+* `clamp()` on big finale titles so they don't overflow
+* `visibilitychange` SSE-reconnect handler — without it, phone screen-lock
+  permanently kills the veto stream after one minute
+
+Plus two workflow gaps:
+* **Captain finale page embeds `connect <ip:port>; password X`** with a
+  one-click "Copy invite for team" button.  Was missing entirely — captains
+  finished veto + ready but had no way to tell their team where to join.
+* **`/api/veto/finale` refuses with helpful error if server isn't in
+  MatchZy mode** (3v3 / 4v4 / 5v5 / Competitive).  Was silently writing
+  the config and firing the RCON regardless; matches played under wrong
+  ruleset.  New response shape carries `matchzy.precheck.{ok, mode, want}`.
+
+### Day 2 (Tue) — Pre-flight error surfacing + local-only signposting + role pill
+The audit caught a pattern: many endpoints return 200 OK before doing the
+actual work, then log the real status to the in-app buffer.  Remote admin has
+no signal.  Day 2 fixes the worst cases:
+* `/api/server/start` returns 4xx with the preflight reason when the boot
+  can't begin (port held / plugin missing / Steam creds expired / etc.)
+* `boot_error` field in `/api/state` so a stuck post-spawn boot becomes
+  visible to remote viewers
+* App self-updater swallows GitHub Releases 404 silently (the repo is
+  private; anonymous GitHub API returns 404; the badge was firing pointless
+  log lines on every poll)
+* CS2-update + App-update badges + CS2 server-update modal hidden from
+  non-local sessions (clicking from remote hit `@require_local`'s 403)
+* Log drawer hidden for guest-role users (their `EventSource` was 401-ing
+  in a 12-retry loop, hammering the endpoint for ~60 s)
+* **Role pill in header** showing `admin` / `guest` / `captain` so remote
+  users have visual confirmation of their session role
+* LAN IP row hidden in status bar + Connect popover for `!is_local`
+  viewers (they'd otherwise see `connect 192.168.x.x:27015` that can't
+  possibly work from the internet)
+
+### Day 3 (Wed) — Cross-cutting investments (the structural fixes)
+Three changes that touch multiple features at once and pay off across the
+whole tool:
+
+1. **Unified SSE transport** (`_oblivionSSE` shared module).  Replaces the
+   two divergent SSE reconnect strategies (log drawer caps at 12 retries
+   then dies; veto stream uses fixed 5 s and only while `currentPage ==
+   'veto'`).  New module uses exponential backoff (1→2→4→8→30 s capped),
+   re-arms on `online`/`visibilitychange` events, and emits a header
+   status pill (`Live` / `Reconnecting…` / `Offline`) so users know the
+   difference between "quiet" and "broken."
+2. **`/api/capabilities` endpoint** + consistent role-aware affordances.
+   Returns `{role, is_local, can: [...]}`.  Local-only buttons (Steam
+   login, install, RCON console, log save, scan, cmdfilter override,
+   directory picker) render `disabled` with a `title="Local only — ask
+   the host"` tooltip instead of being clickable-but-403-on-click.
+3. **`api.js` retry / timeout layer.**  Single bottleneck: 10 s
+   `AbortController` timeout, one retry on network error (NOT on 4xx),
+   sticky error toasts for failures, auto-dismiss only for success.
+   Fixes the "one network blip = silent stuck UI" pattern caught by the
+   cross-cutting audit.
+
+Plus: push `/api/state` over SSE instead of polling.  Previously every
+client polled every 3 s — 7 connected users meant 140 round-trips per
+minute through the tunnel.  After Day 3 most clients receive state via
+SSE and the polling interval moves to 30 s as a fallback only.
+
+### Day 4 (Thu) — Workflow polish + history + Discord webhook + ship
+Final batch of pleasant additions, then full regression + tag.
+
+* **Captain limbo screen** — when a captain joins before voting is
+  resolved, show "Operator is collecting votes — Team A: 3/5 in" instead
+  of the previous "Current stage: voting" placeholder
+* **Rematch (same teams)** button on the Complete page.  Preserves
+  `team_a`, `team_b`, both team names; resets vote/links/veto/sequence
+  state for a fresh BO with the same 10 players.  Saves retyping 10
+  names for repeat-use evenings
+* **Last-action attribution** in `/api/state` — `{who, what, when}`
+  field showing the most recent state-changing API call + its caller IP
+  + 60 s freshness window.  Free audit trail for "who changed the
+  hostname" questions
+* **Match history** — last 5 completed sessions persisted to
+  `oblivion_matches.json` (teams, players, maplist, decider, matchid,
+  timestamp).  New "History" pane in the Veto tab shows them; future
+  Rematch can also load from history
+* **Discord webhook on finale** — operator pastes a webhook URL in
+  Config → Veto / Match Setup.  When finale completes, the tool POSTs
+  an embed (teams, maplist, decider, connect string) to the channel.
+  Captures most of the "spectators see results" value with 20 lines of
+  code — full bot stays as v0.11.0
+* Full regression (123/123 → target ~145 with new cases), rebuild
+  .exe, tag v0.10.2, GitHub release with binary, refresh `pull-latest.bat`
+
+### Explicitly cut from v0.10.2
+* Animation rewrite (parked — operator confirmed skip for now)
+* "Go Online" header panel with cloudflared command generator
+  (operators already have TONIGHT.md)
+* Public read-only spectator URL (deferred — adds testing surface)
+* OBS-overlay broadcast view
+* Roster presets save/load
+* MatchZy cvar editor (overtime / max-rounds)
+* Bulk SteamID paste
+* Tournament brackets
+* iOS Safari < 16.2 graceful fallbacks (document minimum instead)
+* Magic-link auth replacing PINs
+* Limited remote RCON
+
+These either lack obvious value for the immediate online use case, add
+significant scope, or are better paired with the v0.11.0 Discord bot.
+
+---
+
+## v0.10.1 — 2026-06-01 (online-primary improvements)
+
+**Captain Ready button + Public URL override + Copy-for-Discord.**  After
+v0.10.0 shipped, operator feedback clarified that LAN use is secondary —
+primary use is online matches over a Cloudflare tunnel.  This release
+addresses the three biggest gaps that surfaced from that lens.
+
+### Captain Ready button (the gap that prompted the release)
+v0.10.0's captain finale view showed the admin's "Hand to MatchZy" button,
+which captains literally couldn't click — role gate blocked it.  They saw a
+button that gave them an error toast.  Fixed:
+
+* **Captain finale view** has its own renderer (`_renderVetoFinaleCaptain`).
+  Shows the maplist + decider + opponent's ready state + a big READY toggle.
+  Tick to ready up; click again to un-tick.
+* **Admin finale view** shows both teams' ready slots in a row.  When both
+  green-checkmark, the launch button changes class to `.veto-launch-armed`
+  (pulsing green box-shadow) and the label flips to "⚡ Hand series to
+  MatchZy →".  Until then it's disabled with "Waiting for both captains…"
+* **Admin can ack-on-behalf** by clicking either ready slot — useful when
+  a captain went AFK or is on a flaky phone
+* **Shift+Click** on the launch button overrides the both-ready gate
+* Optional **Config toggle: "Auto-launch when both captains ready"**
+  (defaults OFF — admin clicks GO manually so they can verify the server
+  is in the right mode first)
+
+### Public URL override (the bigger online-primary fix)
+v0.10.0's "Public" captain URL was built from `core.public_ip + port`,
+which assumes port-forward.  Operators using Cloudflare tunnel (the
+recommended remote-access path per [TONIGHT.md](TONIGHT.md)) had a URL
+that couldn't reach their captains at all.
+
+* New config field `public_share_url` in the new "Veto / Match Setup"
+  Config card.  Operator pastes their tunnel URL there (e.g.
+  `https://random-words.trycloudflare.com`)
+* When set, `/api/veto/tokens` + `/api/veto/revoke_token` + `/api/veto/qr`
+  build captain links from THIS base instead of `public_ip + port`
+* Falls back to `public_ip + port` when blank (existing behaviour)
+* Validates `http://` or `https://` prefix on save; rejects malformed
+* Empty string clears it
+
+### Copy-for-Discord button
+Each captain link card now has a second copy button that copies a
+pre-formatted, captain-addressed message:
+
+```
+🎯 Captain Phoenix (Team Alpha) — your veto link:
+https://random-words.trycloudflare.com/veto?join=AbC...
+Single-use. Click to claim your captain seat.
+```
+
+Operator pastes straight into a Discord DM — already addressed, has
+context, ready to send.  No actual Discord integration — that's
+v0.11.0's job (real bot DM delivery).
+
+### Test additions
+* `test_veto.py` — 49 → 54 (+5 unit cases for ready state machine)
+* `test_veto_api.py` — 37 → 47 (+10 API cases including captain
+  spoof-protection, admin ack-on-behalf, public URL validation)
+* 123/123 green total
+
+### Build infrastructure also fixed
+* `build.bat` now routes through `python -m PyInstaller` instead of
+  bare `pyinstaller`.  Previous machines with multiple Python installs
+  (e.g. 3.11 + 3.14) could land on the wrong Python whose site-packages
+  doesn't have `segno`, and PyInstaller silently dropped it from the
+  bundle.  This is the root cause of QR codes not rendering in the
+  v0.10.0 first build.
+* `--collect-all segno` (instead of `--hidden-import segno`) bundles
+  all 6 segno submodules.  Top-level `import segno` succeeded but
+  `segno.make()` raised `ImportError` for `segno.encoder` at runtime
+* Defensive `try/except ImportError` around `import segno` in
+  `web.py:veto_qr` so any future bundling regression returns useful
+  JSON instead of a silent broken-image icon
+
+### `pull-latest.bat` self-service updater (released with v0.10.1)
+New repo-root script for operators to grab the latest .exe without
+rebuilding.  Uses the operator's authenticated `gh` CLI to fetch from
+the private repo's GitHub Release.  Safety: refuses to overwrite a
+running .exe; always backs up to `.exe.bak`; uses single-line
+`if X goto :label` instead of multi-line `if (..)` blocks (cmd.exe
+parser fragility with `:` characters inside parenthesised blocks);
+forced CRLF line endings via `.gitattributes`.
+
+---
+
 ## v0.10.0.1 — 2026-06-01 (hotfix)
 
 **One bug: captain-link QR codes failed to render in the frozen `.exe`.**
