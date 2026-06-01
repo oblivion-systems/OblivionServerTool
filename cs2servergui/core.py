@@ -431,6 +431,17 @@ class AppCore:
         # cleared at the top of every fresh start_server.
         self._stop_event = threading.Event()
 
+        # ── Map-veto session (v0.10.0) ──────────────────────────────────────
+        # At most ONE active session at a time per AppCore (one server, one
+        # match-setup flow at a time).  `_veto_lock` serialises every public
+        # operation on the session because Flask is threaded and the SSE
+        # mirror means concurrent state reads happen continuously.  The
+        # session itself is None until create_veto_session() is called.
+        from . import veto as _veto_module
+        self._veto = _veto_module           # bound for callers; avoids re-import per method
+        self._veto_session: _veto_module.VetoSession | None = None
+        self._veto_lock = threading.Lock()
+
         self.update_available:      bool = False
         self.app_update_available:  bool = False
         self.app_latest_version:    str  = ""

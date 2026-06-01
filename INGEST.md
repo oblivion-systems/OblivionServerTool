@@ -29,6 +29,60 @@ each with a one-sentence summary. No code, no behavioural changes — reference 
 
 ---
 
+## `cs2servergui/veto.py` (NEW — 365 lines)
+
+Backend state machine for the v0.10.0 map-veto / match-setup feature.
+AppCore owns at most one `VetoSession` at a time, serialised by
+`AppCore._veto_lock`.  Web routes in `web.py` are thin wrappers over the
+functions here; SSE streams state changes to the SPA mirror.
+
+### Dataclasses
+
+| Symbol | Summary |
+|--------|---------|
+| `RosterPlayer(name, steam_id="")` | One roster slot.  `steam_id` collected at roster time for MatchZy strict team assignment. |
+| `VetoStep(kind, team, map_id="")` | One slot in the veto sequence.  `kind` is `"BAN"` / `"PICK"`; `map_id` filled when the captain acts. |
+| `CaptainToken(team, value, issued_at, claimed_by="", used=False)` | Scoped, single-use credential for a captain's web link.  `secrets.token_urlsafe(32)` value (~256 bits entropy). |
+| `VetoSession` | Whole match-setup session.  States: `idle → roster → teams → voting → links → veto → finale → complete`. |
+
+### State-machine functions
+
+| Symbol | Summary |
+|--------|---------|
+| `create_session(mode="BO3", map_pool=None) -> VetoSession` | Builds a fresh session in `roster` state.  Default pool = `config.ACTIVE_DUTY_POOL` (7 maps); per-veto override accepted. |
+| `set_roster(s, a_name, b_name, players)` | Saves the 10-player roster.  Validates non-empty unique names. |
+| `distribute_teams(s, rng=None)` | Random 5-5 split.  Re-callable in `teams` state to reshuffle (clears any pending votes). |
+| `start_voting(s)` | Move `teams` → `voting`.  Operator-driven. |
+| `cast_vote(s, team, voter_idx, votee_idx)` | Record one captain vote.  Re-cast overwrites previous. |
+| `voting_complete(s) -> bool` | True if both teams have 5 votes in. |
+| `resolve_captains(s) -> str` | Tally → either `'elected'` (state advances to `links`) or `'revote_a'` / `'revote_b'` / `'revote_both'`.  Clears tied side's votes; preserves the clean side. |
+| `issue_tokens(s) -> dict[str, str]` | Mint two single-use captain tokens. |
+| `claim_captain(s, token, caller_id="") -> str` | Validate + bind a token to its caller.  Idempotent for the same `caller_id`; rejected for anyone else once used.  Builds the veto sequence + advances to `veto` when BOTH tokens are claimed. |
+| `revoke_token(s, team) -> str` | Re-issue a fresh token for `team` (operator action when a captain loses their link).  Drops state back to `links` if in `veto`. |
+| `current_step(s) -> VetoStep \| None` | The next step in the sequence, or `None` if veto is complete. |
+| `remaining_maps(s) -> list[str]` | Maps still in the pool after bans so far. |
+| `perform_step(s, team, map_id)` | Captain performs the current step.  Validates: state, team's turn, map still legal.  Identifies the decider + advances to `finale` on the last step. |
+| `build_matchzy_config(s) -> dict` | Generates MatchZy `match.json` shape — `matchid`, `maplist`, `players_per_team`, `team1` / `team2` with SteamID→name maps, `cvars`, `_oblivion_meta` audit trail. |
+| `complete(s)` | Mark session complete (after MatchZy hand-off). |
+| `reset(s)` | Return to `idle` with all per-session state cleared.  Legal from any state. |
+
+### Exceptions
+
+| Symbol | Summary |
+|--------|---------|
+| `VetoError` | Base class — web.py returns 400 on any subclass. |
+| `InvalidVetoTransition` | State machine refused the requested transition. |
+| `VetoStageError` | Stage-specific validation failure (incomplete roster, wrong turn, etc.). |
+
+### Module-level constants
+
+| Symbol | Summary |
+|--------|---------|
+| `_VETO_SEQUENCES` | Maps mode (`"BO1"`/`"BO3"`/`"BO5"`) → list of `(kind, team)` tuples.  Decider computed at runtime, not stored. |
+| `_LEGAL_TRANSITIONS` | Maps current state → frozenset of legal next states.  Enforced by `VetoSession._transition()`. |
+
+---
+
 ## `cs2servergui/_netutils.py` (98 lines)
 
 | Symbol | Summary |

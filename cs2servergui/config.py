@@ -171,6 +171,15 @@ OFFICIAL_MAPS = [
     "de_overpass", "de_train",
 ]
 
+# Competitive active-duty pool — the seven maps a default veto board starts
+# with.  Operators can swap any slot to a workshop map at veto-create time
+# (per-veto override starting from active-duty); the default mirrors the
+# Valve competitive matchmaking pool.  Used by `VetoSession` in `veto.py`.
+ACTIVE_DUTY_POOL = [
+    "de_mirage", "de_inferno", "de_ancient", "de_anubis",
+    "de_nuke", "de_overpass", "de_vertigo",
+]
+
 # Panorama sub-path within any CS2 install (server or game client).
 # Flask serves these via GET /api/maps/thumb/<map_name> → falls back to 404
 # so the browser shows the placeholder icon when files aren't present.
