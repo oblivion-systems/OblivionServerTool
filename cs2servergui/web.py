@@ -1420,6 +1420,17 @@ def create_flask(core: AppCore) -> Flask:
         with core._veto_lock:
             if core._veto_session is None:
                 return jsonify({"error": "no active veto session"}), 400
+            # Guard against a second /api/veto/finale after the session has
+            # already transitioned to `complete` — without this the handler
+            # would re-write the file (fine), re-issue the RCON call (also
+            # mostly fine — MatchZy ignores reload of the same matchid),
+            # but then crash with InvalidVetoTransition inside the final
+            # `complete()` call → 500.  Clean rejection is friendlier.
+            if core._veto_session.state == "complete":
+                return jsonify({
+                    "error": "session already complete — call /api/veto/reset "
+                             "before starting a new finale handoff."
+                }), 400
             try:
                 cfg = _veto.build_matchzy_config(core._veto_session)
             except Exception as e:

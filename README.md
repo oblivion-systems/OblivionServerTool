@@ -3,16 +3,15 @@
 A desktop application for managing a **Counter-Strike 2 dedicated server** on Windows.  
 Built with Python + Flask + pywebview (Edge WebView2). Ships as a single `.exe` with an optional installer.
 
-> **Status: v0.9.2.1 (released) — v0.10.0 in progress (Days 1-5 of 7 done).**  Core features
-> are stable.  Post-v0.9.1 shipped a remote-guest role, split team-size modes
-> (1v1 / 2v2 / 3v3 / 4v4 / 5v5), Warcraft menu/chat dispatchers (recv-queue-overflow fix),
-> a 20-bug audit sweep, and the workshop-maps root-cause fix.  v0.9.2.1 fixes a 5-second
-> RCON regression introduced by v0.9.2's multi-packet sentinel, plus five other re-audit
-> findings.  **v0.10.0** (in flight on master) adds the map-veto / match-setup flow:
-> server-side state machine, HTTP API + SSE live mirror, captain role, SPA Veto tab, QR
-> codes for captain links, and a cinematic finale.  Day 6 (MatchZy `matchzy_loadmatch`
-> handoff) and Day 7 (polish + tag) are the remaining work before release.  Full spec in
-> [VETO.md](VETO.md), changelog in [CHANGELOG.md](CHANGELOG.md).
+> **Status: v0.10.0 (released).**  Adds the **map-veto / match-setup feature** —
+> guided 5-stage flow (roster → teams → captain vote → captain links with QR codes →
+> BO1/BO3/BO5 veto board) where captains veto from their own devices and the
+> operator's UI is a live SSE mirror.  Finale writes a MatchZy match config and
+> issues `matchzy_loadmatch` via RCON so MatchZy runs the series natively.
+> Core features (v0.9.x) remain stable: remote-guest role, split team-size modes
+> (1v1 / 2v2 / 3v3 / 4v4 / 5v5), Warcraft menu/chat dispatchers, atomic config
+> save, multi-packet RCON sentinel.  Full spec in [VETO.md](VETO.md), prose in
+> [CHANGELOG.md](CHANGELOG.md).  108/108 backend tests green.
 
 ---
 
@@ -132,7 +131,7 @@ Vanilla modes (Competitive, Casual, Wingman, etc.) run with no managed plugins a
 - Full **RCON command console** — send any command, see the response
 - **RCON diagnostic** tool — tests TCP connectivity and auth, shows actionable error messages
 
-### Map Veto / Match Setup *(v0.10.0 — Days 1-5 of 7 in master, not yet released)*
+### Map Veto / Match Setup *(v0.10.0)*
 A guided match-setup flow ending in a CS2 map veto, with **captains vetoing from their own
 devices** while the operator's UI mirrors the session live over SSE:
 - **Five stages:** roster (10 players + team names + optional SteamIDs) → random 5+5 teams
@@ -144,9 +143,12 @@ devices** while the operator's UI mirrors the session live over SSE:
   session cookie on claim; revoke + reissue if a token leaks.
 - **Cinematic finale** — title slide-up, staggered map reveal, accent-glow pulse on the
   decider, 30-piece confetti shower.  Plays exactly once per session.
-- **MatchZy handoff** *(Day 6, pending)* — auto-generates a MatchZy match config from the
-  veto result and issues `matchzy_loadmatch`; MatchZy then runs the series (map order,
-  knife, scoring, map-end → next).
+- **MatchZy handoff** — auto-generates a MatchZy match config from the veto result,
+  writes it atomically to `csgo/cfg/MatchZy/<matchid>.json`, and issues
+  `matchzy_loadmatch <basename>` via RCON.  MatchZy then runs the series natively
+  (map order, knife, scoring, map-end → next).  Three-way outcome: file write fails →
+  500; RCON fails → 200 + status panel with the file path so the operator can run
+  the load manually; full success → 200 + green ✓.
 
 Full spec in [VETO.md](VETO.md); implementation map in [INGEST.md](INGEST.md) → "API — map
 veto" + "Frontend — Veto tab".
