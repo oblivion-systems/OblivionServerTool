@@ -229,6 +229,7 @@ def create_flask(core: AppCore) -> Flask:
         "/api/veto/state",
         "/api/veto/stream",
         "/api/veto/step",
+        "/api/veto/ready",        # v0.10.1: captains toggle their ready flag
     })
     _PUBLIC_PATHS = frozenset({
         "/api/ping", "/api/auth/login", "/api/auth/logout",
@@ -356,9 +357,14 @@ def create_flask(core: AppCore) -> Flask:
         session  = _current_session()
         is_local = bool(session and session.get("is_local"))
         role     = "admin" if is_local else ((session or {}).get("role") or "guest")
+        # v0.10.1: surface the captain's team letter for captain-role sessions
+        # so the SPA's captain-finale view knows which team's ready flag it's
+        # toggling.  Empty string for non-captain sessions.
+        captain_team = (session or {}).get("captain_team", "") if role == "captain" else ""
         return jsonify({
             "running":            core.running,
             "role":               role,
+            "captain_team":       captain_team,
             "guest_pin_set":      bool(core.guest_pin),
             "is_installed":       core.is_installed,
             "boot_state":         core.boot_state,
@@ -609,6 +615,11 @@ def create_flask(core: AppCore) -> Flask:
             "bot_difficulty":        core.bot_difficulty,
             "bots_enabled":          core.bots_enabled,
             "max_players_override":  core.max_players_override,
+            # v0.10.1 online-primary veto config (safe to expose to remote —
+            # the tunnel URL isn't a secret, the captain join URL would
+            # leak it anyway, and auto-launch is a UX toggle not a credential)
+            "public_share_url":             core.public_share_url,
+            "veto_auto_launch_on_ready":    core.veto_auto_launch_on_ready,
             "admin_pin":             core.admin_pin     if is_local else "***",
             "guest_pin":             core.guest_pin     if is_local else "***",
             "rcon_password":         core.rcon_password  if is_local else "***",
@@ -636,6 +647,18 @@ def create_flask(core: AppCore) -> Flask:
         if "bot_difficulty"        in d: core.bot_difficulty        = str(d["bot_difficulty"])
         if "bots_enabled"          in d: core.bots_enabled          = bool(d["bots_enabled"])
         if "max_players_override"  in d: core.max_players_override  = str(d["max_players_override"])
+        # v0.10.1 — online-primary veto knobs
+        if "public_share_url" in d:
+            # Light validation: strip trailing slashes, accept blank to clear.
+            v = str(d["public_share_url"]).strip()
+            if v and not (v.startswith("http://") or v.startswith("https://")):
+                return jsonify({
+                    "error": "public_share_url must start with http:// or https:// "
+                             "(or be blank to clear)"
+                }), 400
+            core.public_share_url = v.rstrip("/")
+        if "veto_auto_launch_on_ready" in d:
+            core.veto_auto_launch_on_ready = bool(d["veto_auto_launch_on_ready"])
 
         # Local-only fields (security-sensitive). The admin PIN protects the whole
         # panel, so only the trusted local window may change it.
@@ -1075,6 +1098,11 @@ def create_flask(core: AppCore) -> Flask:
                 "legal_moves":   list(legal),
                 "decider":       s.decider,
                 "final_maps":    list(s.final_maps),
+                # v0.10.1: captain ready flags + convenience derived bool so
+                # the SPA admin button doesn't have to AND them client-side
+                "ready_a":       s.ready_a,
+                "ready_b":       s.ready_b,
+                "both_ready":    _veto.both_captains_ready(s),
                 "updated_at":    s.updated_at,
             },
         }
@@ -1256,17 +1284,24 @@ def create_flask(core: AppCore) -> Flask:
                 tokens = _veto.issue_tokens(core._veto_session)
             except Exception as e:
                 return _veto_error_response(e)
-        # Build the LAN + Public links per captain — mirrors the Connect
-        # popover's dual-display so the operator can hand the right link to
-        # the right captain (LAN for in-house, Public if the captain is on
-        # the internet via the existing port-forward).
-        lan_ip   = _config._lan_ip()
-        public   = core.public_ip or ""
-        port     = _config.FLASK_PORT
+        # Build the LAN + Public links per captain.  v0.10.1: when the
+        # operator has set `public_share_url` (typically their Cloudflare
+        # tunnel URL like https://random-words.trycloudflare.com), the
+        # Public link is built from THAT base instead of
+        # http://<public_ip>:<port>/.  This is the difference between a
+        # working URL (cloudflared / reverse proxy) and a dead one
+        # (port-forward but operator didn't set it up).  For online matches
+        # the tunnel URL is what reaches the captain.
+        lan_ip       = _config._lan_ip()
+        public_ip    = core.public_ip or ""
+        port         = _config.FLASK_PORT
+        share_base   = (getattr(core, "public_share_url", "") or "").rstrip("/")
         def _urls(token: str) -> dict:
             urls = {"lan": f"http://{lan_ip}:{port}/veto?join={token}"}
-            if public:
-                urls["public"] = f"http://{public}:{port}/veto?join={token}"
+            if share_base:
+                urls["public"] = f"{share_base}/veto?join={token}"
+            elif public_ip:
+                urls["public"] = f"http://{public_ip}:{port}/veto?join={token}"
             return urls
         _veto_broadcast()
         # Include the raw token alongside the URLs so the SPA can build
@@ -1288,12 +1323,15 @@ def create_flask(core: AppCore) -> Flask:
                 new_token = _veto.revoke_token(core._veto_session, team)
             except Exception as e:
                 return _veto_error_response(e)
-        lan_ip = _config._lan_ip()
-        public = core.public_ip or ""
-        port   = _config.FLASK_PORT
+        lan_ip     = _config._lan_ip()
+        public_ip  = core.public_ip or ""
+        port       = _config.FLASK_PORT
+        share_base = (getattr(core, "public_share_url", "") or "").rstrip("/")
         urls   = {"lan": f"http://{lan_ip}:{port}/veto?join={new_token}"}
-        if public:
-            urls["public"] = f"http://{public}:{port}/veto?join={new_token}"
+        if share_base:
+            urls["public"] = f"{share_base}/veto?join={new_token}"
+        elif public_ip:
+            urls["public"] = f"http://{public_ip}:{port}/veto?join={new_token}"
         _veto_broadcast()
         # Include raw token (mirrors /api/veto/tokens) so the SPA can build
         # the QR URL without parsing the token out of the LAN link.
@@ -1391,6 +1429,117 @@ def create_flask(core: AppCore) -> Flask:
                 return _veto_error_response(e)
         _veto_broadcast()
         return jsonify(snap)
+
+    @app.route("/api/veto/ready", methods=["POST"])
+    @require_auth
+    def veto_ready():
+        """Set the calling captain's ready flag.  v0.10.1.
+
+        Body: {"ready": true|false}.  Team is INFERRED from the session
+        cookie's captain_team so a captain can't toggle the other team's
+        ready state.  Admins can pass an explicit `team` to set either.
+
+        Returns the updated snapshot fragment {ready_a, ready_b, both_ready}.
+        Broadcasts via SSE so both screens update live.
+
+        If `core.config_get("veto_auto_launch_on_ready")` is True and both
+        flags are now True after this set, the handler also fires the
+        finale handoff inline (calling the same code path as
+        POST /api/veto/finale).  Otherwise the admin must hit the button
+        manually — which is the recommended default.
+        """
+        d = request.get_json() or {}
+        ready_val = bool(d.get("ready", True))
+        sess_role = request.session.get("role")  # type: ignore[attr-defined]
+        # Resolve which team's flag we're setting.
+        # - Admin/local: can pass "team": "A"|"B" explicitly (e.g. to ack on
+        #   behalf of a captain who can't reach their phone).
+        # - Captain role: team is locked to the team they claimed.
+        if sess_role == "captain":
+            team = request.session.get("captain_team", "")  # type: ignore[attr-defined]
+            if not team:
+                return jsonify({"error": "captain session has no team"}), 403
+            # If body included a different team, REFUSE — that's a spoof
+            # attempt and we want it visible in the logs.
+            body_team = str(d.get("team", "")).upper()
+            if body_team and body_team != team:
+                core.log(f"[veto] ready: captain {team} tried to spoof team={body_team!r}")
+                return jsonify({"error": "captains can only set their own team's ready"}), 403
+        else:
+            team = str(d.get("team", "")).upper()
+            if team not in ("A", "B"):
+                return jsonify({"error": "team must be 'A' or 'B'"}), 400
+
+        with core._veto_lock:
+            if core._veto_session is None:
+                return jsonify({"error": "no active veto session"}), 400
+            try:
+                _veto.set_ready(core._veto_session, team, ready_val)
+            except Exception as e:
+                return _veto_error_response(e)
+            both = _veto.both_captains_ready(core._veto_session)
+            ra, rb = core._veto_session.ready_a, core._veto_session.ready_b
+        _veto_broadcast()
+        core.log(f"[veto] team {team} ready={ready_val} (A={ra}, B={rb})")
+
+        # Auto-launch path — config opt-in only.  Same lock + handoff as the
+        # admin's /api/veto/finale button, but only when BOTH flags are now
+        # True AND the operator turned the auto-launch toggle on.  Refuses
+        # silently otherwise (operator hits the button manually).
+        auto = bool(getattr(core, "veto_auto_launch_on_ready", False))
+        if auto and both:
+            core.log("[veto] both captains ready + auto-launch enabled → firing finale")
+            # Build the finale call by reusing the existing handler body — we
+            # don't want to duplicate the matchzy_loadmatch logic in two places.
+            # Easiest is to internally redirect, but Flask's test_client mode
+            # makes this awkward.  Instead we call the underlying veto.py +
+            # file-write + RCON logic directly here.  Kept short — full
+            # three-way outcome handling stays in /api/veto/finale for the
+            # admin button.
+            try:
+                with core._veto_lock:
+                    if core._veto_session is None:
+                        return jsonify({"team": team, "ready": ready_val,
+                                        "ready_a": ra, "ready_b": rb, "both_ready": both,
+                                        "auto_launch": "session vanished"})
+                    if core._veto_session.state != "finale":
+                        return jsonify({"team": team, "ready": ready_val,
+                                        "ready_a": ra, "ready_b": rb, "both_ready": both,
+                                        "auto_launch": f"wrong state {core._veto_session.state}"})
+                    cfg = _veto.build_matchzy_config(core._veto_session)
+                disk_cfg = {k: v for k, v in cfg.items() if not k.startswith("_")}
+                matchid = str(cfg.get("matchid", f"oblivion-veto-{int(time.time())}"))
+                safe_filename = re.sub(r'[^a-zA-Z0-9_.-]', '_', matchid) + ".json"
+                cfg_dir = os.path.join(core._csgo_dir(), "cfg", "MatchZy")
+                os.makedirs(cfg_dir, exist_ok=True)
+                target = os.path.join(cfg_dir, safe_filename)
+                tmp = target + ".tmp"
+                with open(tmp, "w", encoding="utf-8") as f:
+                    json.dump(disk_cfg, f, indent=2, ensure_ascii=False)
+                    f.flush()
+                    try: os.fsync(f.fileno())
+                    except OSError: pass
+                os.replace(tmp, target)
+                core.log(f"[veto] auto-launch wrote MatchZy config → {target}")
+                if core.running:
+                    try:
+                        resp = core.rcon.execute(f"matchzy_loadmatch {safe_filename}")
+                        core.log(f"[veto] auto-launch matchzy_loadmatch → {resp.strip()[:80]}")
+                    except Exception as exc:
+                        core.log(f"[veto] auto-launch RCON failed: {exc}")
+                else:
+                    core.log("[veto] auto-launch: server not running, config written only")
+                with core._veto_lock:
+                    if core._veto_session is not None and core._veto_session.state == "finale":
+                        _veto.complete(core._veto_session)
+                _veto_broadcast()
+            except Exception as exc:
+                core.log(f"[veto] auto-launch failed: {exc}")
+
+        return jsonify({
+            "team": team, "ready": ready_val,
+            "ready_a": ra, "ready_b": rb, "both_ready": both,
+        })
 
     @app.route("/api/veto/finale", methods=["POST"])
     @require_auth
@@ -1567,14 +1716,23 @@ def create_flask(core: AppCore) -> Flask:
             if not valid:
                 return jsonify({"error": "unknown token"}), 404
         # Build the URL the same way veto_tokens / veto_revoke_token do.
+        # v0.10.1: kind=public prefers the operator-set public_share_url
+        # (e.g. Cloudflare tunnel) over the raw public IP + port.
         port = _config.FLASK_PORT
         if kind == "lan":
-            host = _config._lan_ip()
+            url = f"http://{_config._lan_ip()}:{port}/veto?join={token}"
         else:
-            host = core.public_ip or ""
-            if not host:
-                return jsonify({"error": "no public IP — cannot build URL"}), 400
-        url = f"http://{host}:{port}/veto?join={token}"
+            share_base = (getattr(core, "public_share_url", "") or "").rstrip("/")
+            if share_base:
+                url = f"{share_base}/veto?join={token}"
+            elif core.public_ip:
+                url = f"http://{core.public_ip}:{port}/veto?join={token}"
+            else:
+                return jsonify({
+                    "error": "no public URL configured — set public_share_url "
+                             "in Config (Cloudflare tunnel URL) or wait for "
+                             "public IP detection."
+                }), 400
         # error='M' gives ~15% damage tolerance — fine for a phone scan at
         # close range; lower error level would shrink the QR but a wet/glare
         # phone screen is the realistic enemy here.  scale=8 (~200 px) is the

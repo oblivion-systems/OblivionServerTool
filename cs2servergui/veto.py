@@ -178,6 +178,14 @@ class VetoSession:
     final_maps:    list[str]    = field(default_factory=list)   # ordered list MatchZy will load
     matchzy_config: dict | None  = None                          # generated at finale
 
+    # Stage 5 — Captain ready flags (v0.10.1)
+    # Set by each captain on the SPA finale page; the admin's Hand-to-MatchZy
+    # button lights up green when BOTH are True.  Operator can also configure
+    # auto-launch (in app config) so the handoff fires automatically when
+    # both go green.  Reset on session reset / new finale arrival.
+    ready_a:       bool          = False
+    ready_b:       bool          = False
+
     # Audit
     created_at:  float = field(default_factory=time.time)
     updated_at:  float = field(default_factory=time.time)
@@ -532,6 +540,36 @@ def perform_step(session: VetoSession, team: str, map_id: str) -> None:
         session._transition("finale")
 
 
+def set_ready(session: VetoSession, team: str, ready: bool) -> None:
+    """Set a captain's ready flag at the finale stage.
+
+    v0.10.1: lets captains signal readiness from their phone/laptop before
+    the operator pulls the matchzy_loadmatch trigger.  Only legal once the
+    veto board work is done and we're sitting on the finale page — i.e.
+    `state == "finale"`.  Captains untick by setting ready=False.
+
+    `team` must be "A" or "B"; the HTTP layer is responsible for verifying
+    the caller's captain-role matches the team they're updating (prevents
+    captain B from spoofing team A's ready flag).
+    """
+    if team not in ("A", "B"):
+        raise VetoStageError(f"team must be 'A' or 'B' (got {team!r})")
+    if session.state != "finale":
+        raise InvalidVetoTransition(
+            f"set_ready legal only in finale (now {session.state})"
+        )
+    if team == "A":
+        session.ready_a = bool(ready)
+    else:
+        session.ready_b = bool(ready)
+    session.updated_at = time.time()
+
+
+def both_captains_ready(session: VetoSession) -> bool:
+    """Convenience for the HTTP layer + SPA snapshot: both flags True."""
+    return bool(session.ready_a and session.ready_b)
+
+
 def build_matchzy_config(session: VetoSession) -> dict:
     """Generate a MatchZy match-config dict from the completed veto.
 
@@ -611,4 +649,6 @@ def reset(session: VetoSession) -> None:
     session.decider = ""
     session.final_maps.clear()
     session.matchzy_config = None
+    session.ready_a = False
+    session.ready_b = False
     session.updated_at = time.time()

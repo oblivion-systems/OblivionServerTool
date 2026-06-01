@@ -2366,7 +2366,13 @@ function _renderVetoLinks(root, sess) {
           <div class="veto-url" title="${esc(urls.public)}">${esc(urls.public)}</div>
           <button class="btn btn-ghost btn-sm" data-copy="${esc(urls.public)}">Copy</button>
         </div>` : ''}
-        <button class="btn btn-ghost btn-sm" data-revoke="${team}" style="margin-top:10px">Revoke + reissue</button>
+        <div class="veto-link-actions">
+          <button class="btn btn-ghost btn-sm" data-copy-discord="${team}"
+                  title="Copy a formatted message ready to paste into Discord DM">
+            ${urls.public ? '📋 Copy for Discord' : '📋 Copy for Discord (LAN only)'}
+          </button>
+          <button class="btn btn-ghost btn-sm" data-revoke="${team}">Revoke + reissue</button>
+        </div>
       </div>
     `;
   };
@@ -2388,6 +2394,24 @@ function _renderVetoLinks(root, sess) {
   `;
   document.querySelectorAll('[data-copy]').forEach(b => {
     b.addEventListener('click', () => copyText(b.dataset.copy, 'Captain link'));
+  });
+  // v0.10.1: Discord-friendly copy — bundles team + captain + URL + a short
+  // intro in one paste-ready block.  Prefers the Public URL (online captains)
+  // but falls back to LAN if no public is configured (lets operators still
+  // use it on LAN).  No actual Discord integration here — operator pastes
+  // into whatever DM channel they want.  Real Discord-bot delivery is the
+  // v0.11.0 Layer 1 work.
+  document.querySelectorAll('[data-copy-discord]').forEach(b => {
+    b.addEventListener('click', () => {
+      const team = b.dataset.copyDiscord;
+      const urls = _vetoTokenUrls[team];
+      const teamName = (team === 'A' ? sess.team_a_name : sess.team_b_name);
+      const capObj   = (team === 'A' ? captainA : captainB);
+      const capName  = capObj?.name || `Captain ${team}`;
+      const url      = urls.public || urls.lan;
+      const text = `🎯 ${capName} (${teamName}) — your veto link:\n${url}\nSingle-use. Click to claim your captain seat.`;
+      copyText(text, 'Discord-ready message');
+    });
   });
   document.querySelectorAll('[data-revoke]').forEach(b => {
     b.addEventListener('click', async (e) => {
@@ -2488,8 +2512,18 @@ function _renderVetoBoard(root, sess) {
 
 /* ── Finale ────────────────────────────────────────────────────────────── */
 function _renderVetoFinale(root, sess) {
+  // v0.10.1: captain role sees a different finale — own Ready toggle,
+  // status of opponent, NO matchzy launch button (admin owns the trigger).
+  // state_ is the global server-status snapshot exposing role.
+  const isCap = (state_ && state_.server && state_.server.role === 'captain');
+  if (isCap) return _renderVetoFinaleCaptain(root, sess);
+
   const maps = sess.final_maps || [];
   const decider = sess.decider;
+  // v0.10.1: ready state lives on the snapshot (ready_a / ready_b / both_ready)
+  const readyA = !!sess.ready_a;
+  const readyB = !!sess.ready_b;
+  const bothReady = !!sess.both_ready;
   // ── Day 5: cinematic entry only the first time we land on finale ─────
   // SSE pings on the same state would otherwise re-trigger the confetti
   // and decider zoom every few seconds — once is exactly enough.
@@ -2522,8 +2556,21 @@ function _renderVetoFinale(root, sess) {
           </div>
         `).join('')}
       </div>
-      <button class="btn btn-accent" id="veto-launch-btn" style="font-size:14px;padding:14px 32px">
-        Hand series to MatchZy →
+      <div class="veto-ready-row">
+        <div class="veto-ready-slot ${readyA ? 'ready' : ''}">
+          <div class="veto-ready-team">${esc(sess.team_a_name)}</div>
+          <div class="veto-ready-state">${readyA ? '✓ READY' : '… waiting'}</div>
+        </div>
+        <div class="veto-ready-slot ${readyB ? 'ready' : ''}">
+          <div class="veto-ready-team">${esc(sess.team_b_name)}</div>
+          <div class="veto-ready-state">${readyB ? '✓ READY' : '… waiting'}</div>
+        </div>
+      </div>
+      <button class="btn ${bothReady ? 'btn-accent veto-launch-armed' : 'btn-ghost'}"
+              id="veto-launch-btn"
+              style="font-size:14px;padding:14px 32px"
+              title="${bothReady ? 'Both captains ready — fire matchzy_loadmatch' : 'Waiting for both captains to ready up'}">
+        ${bothReady ? '⚡ Hand series to MatchZy →' : 'Waiting for both captains…'}
       </button>
       <div id="veto-matchzy-status" style="margin-top:14px;font-family:var(--font-mono);font-size:11px;color:var(--text-4)">
         Writes a MatchZy match config under <code>csgo/cfg/MatchZy/</code> and issues
@@ -2531,9 +2578,17 @@ function _renderVetoFinale(root, sess) {
       </div>
     </div>
   `;
-  el('veto-launch-btn').addEventListener('click', async () => {
+  el('veto-launch-btn').addEventListener('click', async (ev) => {
     const btn = el('veto-launch-btn');
     const status = el('veto-matchzy-status');
+    // Guard: refuse to fire unless both captains have ticked Ready.
+    // Shift+Click overrides for the "captain went AFK, I'm acking on
+    // their behalf" case — admin can also just click each team's ready
+    // slot to mark them ready manually, but this is the quick path.
+    if (!bothReady && !ev.shiftKey) {
+      toast('Waiting for both captains to tick Ready. Hold Shift+Click to override.', 'var(--accent)');
+      return;
+    }
     btn.disabled = true; btn.textContent = 'Handing off…';
     try {
       const r = await api.veto.finale(true);
@@ -2569,6 +2624,79 @@ function _renderVetoFinale(root, sess) {
       btn.textContent = 'Hand series to MatchZy →';
       btn.disabled = false;
     }
+  });
+
+  // Admin can ack-on-behalf by clicking a team's ready slot.  Toggles
+  // that team's ready flag (so re-clicking un-acks too — useful if you
+  // misclicked).  The API has team-spoof protection for captains; admins
+  // can pass any team explicitly.
+  document.querySelectorAll('.veto-ready-slot').forEach((slot, idx) => {
+    slot.addEventListener('click', async () => {
+      const team = idx === 0 ? 'A' : 'B';
+      const currently = (team === 'A') ? readyA : readyB;
+      try {
+        await api.veto.ready(!currently, team);
+        toast(`${team === 'A' ? sess.team_a_name : sess.team_b_name}: ${currently ? 'un-readied' : 'READY'} (by admin)`);
+      } catch (err) { toast(err.message, 'var(--bad)'); }
+    });
+    slot.style.cursor = 'pointer';
+    slot.title = 'Click to toggle this team\'s ready state (admin ack-on-behalf)';
+  });
+}
+
+/* ── Captain finale view (v0.10.1) ────────────────────────────────────── */
+// Simpler than the admin's: just the maplist + decider + a big Ready toggle
+// + status of the OTHER captain.  No matchzy launch button (admin owns the
+// trigger).  When both captains are ready, captain sees "Waiting for admin
+// to launch" / when admin fires, the snapshot flips to complete and the
+// SPA renders the Complete page.
+function _renderVetoFinaleCaptain(root, sess) {
+  const maps    = sess.final_maps || [];
+  const decider = sess.decider;
+  // Determine which team this captain is on, from their server-status role
+  const myTeam  = (state_ && state_.server && state_.server.captain_team) || '';
+  const myReady    = myTeam === 'A' ? sess.ready_a : sess.ready_b;
+  const otherReady = myTeam === 'A' ? sess.ready_b : sess.ready_a;
+  const otherName  = myTeam === 'A' ? sess.team_b_name : sess.team_a_name;
+  const myName     = myTeam === 'A' ? sess.team_a_name : sess.team_b_name;
+  root.innerHTML = `
+    <div class="veto-stage veto-finale">
+      <div class="veto-finale-title">${esc(sess.mode)} &middot; LOCKED IN</div>
+      <div class="veto-finale-sub">${esc(sess.team_a_name)} vs ${esc(sess.team_b_name)}</div>
+      <div class="veto-finale-maps">
+        ${maps.map((m, i) => `
+          <div class="veto-finale-map ${m === decider ? 'decider' : ''}">
+            <span class="veto-finale-label">${m === decider ? 'DECIDER' : `MAP ${i+1}`}</span>
+            ${esc(m)}
+          </div>
+        `).join('')}
+      </div>
+
+      <div class="veto-captain-ready-block">
+        <div class="veto-captain-opponent">
+          <strong>${esc(otherName)}</strong>:
+          <span class="${otherReady ? 'is-ready' : 'is-waiting'}">
+            ${otherReady ? '✓ READY' : '… not ready yet'}
+          </span>
+        </div>
+        <button class="btn ${myReady ? 'btn-ghost' : 'btn-accent'}"
+                id="veto-cap-ready-btn"
+                style="font-size:14px;padding:14px 32px;margin-top:14px">
+          ${myReady ? '✓ READY — click to un-ready' : `READY UP (${esc(myName)})`}
+        </button>
+        <div style="margin-top:14px;font-family:var(--font-mono);font-size:11px;color:var(--text-4)">
+          ${(myReady && otherReady)
+            ? 'Both ready — operator will start the match shortly.'
+            : 'Tick READY when you and your team are in the server and prepared.'}
+        </div>
+      </div>
+    </div>
+  `;
+  el('veto-cap-ready-btn').addEventListener('click', async () => {
+    try {
+      const r = await api.veto.ready(!myReady);
+      toast(myReady ? 'Un-readied' : 'Ready! Waiting for opponent / operator.');
+    } catch (err) { toast(err.message, 'var(--bad)'); }
   });
 }
 
@@ -2697,6 +2825,32 @@ pages['config'] = async function() {
           <button class="btn btn-accent btn-full mt-16" id="cfg-server-save">Save Server Settings</button>
         </div>
 
+        <div class="config-label">Veto / Match Setup</div>
+        <div class="card mb-16">
+          <div class="field">
+            <label>Public Share URL (for captain links on the internet)</label>
+            <input class="input" id="cfg-public-share-url" type="text"
+                   value="${esc(cfg.public_share_url || '')}"
+                   placeholder="https://random-words.trycloudflare.com">
+            <small style="color:var(--text-3);font-size:11px;line-height:1.5;display:block;margin-top:6px">
+              When set, captain join URLs use this base instead of <code>http://&lt;public_ip&gt;:&lt;port&gt;</code>.
+              Paste your Cloudflare tunnel URL here (see <a href="https://github.com/jacquesvniekerk-eng/OblivionServerTool/blob/master/TONIGHT.md">TONIGHT.md</a> for the tunnel setup).
+              Leave blank to fall back to <code>public_ip + port</code> (which requires a port-forward).
+            </small>
+          </div>
+          <div class="toggle-row" style="margin-top:14px">
+            <div class="toggle-info">
+              <strong>Auto-launch when both captains ready</strong>
+              <small>Fire <code>matchzy_loadmatch</code> automatically when both captains tick Ready on the finale page.  Off by default — operator clicks GO manually so they can verify mode/server first.</small>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="cfg-veto-auto-launch" ${cfg.veto_auto_launch_on_ready?'checked':''}>
+              <span class="toggle-track"></span><span class="toggle-thumb"></span>
+            </label>
+          </div>
+          <button class="btn btn-accent btn-full mt-16" id="cfg-veto-save">Save Veto Settings</button>
+        </div>
+
         ${isLocal ? `
         <div class="config-label">Security</div>
         <div class="card mb-16">
@@ -2793,6 +2947,25 @@ pages['config'] = async function() {
     </div>`;
 
   // Wire up saves
+  const vetoSaveBtn = el('cfg-veto-save');
+  if (vetoSaveBtn) vetoSaveBtn.addEventListener('click', async () => {
+    // Light client-side validation: must be http:// or https:// or blank.
+    // Server validates again — this is just to catch the typo before the
+    // round-trip.
+    const raw = el('cfg-public-share-url').value.trim();
+    if (raw && !/^https?:\/\//i.test(raw)) {
+      toast('Public Share URL must start with http:// or https:// (or be blank)', 'var(--bad)');
+      return;
+    }
+    try {
+      await api.setConfig({
+        public_share_url:          raw,
+        veto_auto_launch_on_ready: el('cfg-veto-auto-launch').checked,
+      });
+      toast('Veto settings saved');
+    } catch (e) { toast(e.message, 'var(--bad)'); }
+  });
+
   el('cfg-server-save').addEventListener('click', async () => {
     const data = {
       hostname:              el('cfg-hostname').value,
