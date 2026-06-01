@@ -220,25 +220,39 @@ def create_flask(core: AppCore) -> Flask:
         "/api/request_workshop",
         "/api/setup/status",
     })
+    # Captain role (v0.10.0): only the veto live-mirror + step endpoints.
+    # Created by /api/veto/claim with a valid single-use token (no PIN).
+    _CAPTAIN_PATHS = frozenset({
+        "/api/state",             # captains see basic server status too
+        "/api/veto/state",
+        "/api/veto/stream",
+        "/api/veto/step",
+    })
     _PUBLIC_PATHS = frozenset({
         "/api/ping", "/api/auth/login", "/api/auth/logout",
+        "/api/veto/claim",        # token IS the credential; PIN-free entry
     })
 
     @app.before_request
     def _role_gate():
         p = request.path
         if not p.startswith("/api/"):
-            return None                      # SPA shell, static, /auth/auto
-        if p in _PUBLIC_PATHS or p in _GUEST_PATHS:
+            return None                      # SPA shell, static, /auth/auto, /veto
+        if p in _PUBLIC_PATHS:
             return None
         if p.startswith("/api/data/") or p.startswith("/api/maps/thumb/"):
             return None                      # static reference data + thumbnails
-        # Everything else is admin-only. Let require_auth issue the 401 when there
-        # is no session at all; only downgrade an authenticated *guest* to 403.
         session = _current_session()
-        if session and not (session.get("is_local") or session.get("role") == "admin"):
-            return jsonify({"error": "admin access only"}), 403
-        return None
+        if not session:
+            return None                      # let require_auth issue 401
+        if session.get("is_local") or session.get("role") == "admin":
+            return None                      # admins / local pass everything
+        role = session.get("role")
+        if role == "guest" and p in _GUEST_PATHS:
+            return None
+        if role == "captain" and p in _CAPTAIN_PATHS:
+            return None
+        return jsonify({"error": f"{role or 'unknown'} role cannot access {p}"}), 403
 
     # ── SPA shell ──────────────────────────────────────────────────────────────
 
@@ -989,6 +1003,398 @@ def create_flask(core: AppCore) -> Flask:
                 return send_file(p, mimetype=mime)
 
         abort(404)
+
+    # ── Map-veto session (v0.10.0) ────────────────────────────────────────────
+    # Thin HTTP wrappers over cs2servergui.veto.  Every mutation acquires
+    # core._veto_lock so SSE listeners + concurrent admin/captain requests
+    # can't tear the session state.  Veto exceptions translate to 400.
+    from . import veto as _veto
+    from .veto import VetoError, RosterPlayer
+
+    # Pub/sub for the live-mirror SSE stream.  Same pattern as the existing
+    # log-stream queues: subscribers register a Queue; every state-change
+    # broadcasts a JSON snapshot to all of them.
+    _veto_subs: list[queue.Queue] = []
+    _veto_subs_lock = threading.Lock()
+
+    def _veto_snapshot() -> dict:
+        """Serialise the current session to a JSON-safe dict.  Tokens are
+        REDACTED from the snapshot — captains learn their token via the
+        one-time tokens response or by clicking their join URL; the snapshot
+        only ever exposes which tokens are claimed, not their values."""
+        s = core._veto_session
+        if s is None:
+            return {"state": "idle", "session": None}
+        return {
+            "state": s.state,
+            "session": {
+                "mode":          s.mode,
+                "map_pool":      list(s.map_pool),
+                "team_a_name":   s.team_a_name,
+                "team_b_name":   s.team_b_name,
+                "roster":        [{"name": p.name, "steam_id": p.steam_id}
+                                  for p in s.roster],
+                "team_a":        [{"name": p.name, "steam_id": p.steam_id}
+                                  for p in s.team_a],
+                "team_b":        [{"name": p.name, "steam_id": p.steam_id}
+                                  for p in s.team_b],
+                "votes_a":       dict(s.votes_a),
+                "votes_b":       dict(s.votes_b),
+                "captain_a_idx": s.captain_a_idx,
+                "captain_b_idx": s.captain_b_idx,
+                "revote_count":  s.revote_count,
+                "tokens_claimed": {team: tok.used
+                                   for team, tok in s.tokens.items()},
+                "sequence":      [{"kind": st.kind, "team": st.team, "map_id": st.map_id}
+                                  for st in s.sequence],
+                "current_step":  s.current_step,
+                "decider":       s.decider,
+                "final_maps":    list(s.final_maps),
+                "updated_at":    s.updated_at,
+            },
+        }
+
+    def _veto_broadcast() -> None:
+        """Push a fresh snapshot to every SSE subscriber.  Non-blocking —
+        if a subscriber's queue is full, drop the message for that client."""
+        snap = _veto_snapshot()
+        payload = "data: " + __import__("json").dumps(snap) + "\n\n"
+        with _veto_subs_lock:
+            subs = list(_veto_subs)
+        for q in subs:
+            try: q.put_nowait(payload)
+            except Exception: pass
+
+    def _veto_error_response(exc: Exception):
+        """Map VetoError subclasses to 400; everything else to 500."""
+        if isinstance(exc, VetoError):
+            return jsonify({"error": str(exc), "type": type(exc).__name__}), 400
+        core.log(f"[veto] unexpected error: {type(exc).__name__}: {exc}")
+        return jsonify({"error": "internal server error"}), 500
+
+    @app.route("/api/veto/state")
+    @require_auth        # captain-allowed (see _CAPTAIN_PATHS)
+    def veto_state():
+        with core._veto_lock:
+            return jsonify(_veto_snapshot())
+
+    @app.route("/api/veto/stream")
+    @require_auth        # captain-allowed
+    def veto_stream():
+        q: queue.Queue = queue.Queue(maxsize=32)
+        # Push the current state immediately so a fresh subscriber renders
+        # without waiting for the next event.
+        try: q.put_nowait("data: " + __import__("json").dumps(_veto_snapshot()) + "\n\n")
+        except Exception: pass
+        with _veto_subs_lock: _veto_subs.append(q)
+        def gen():
+            try:
+                while True:
+                    try: yield q.get(timeout=25)
+                    except queue.Empty: yield ": keepalive\n\n"
+            finally:
+                with _veto_subs_lock:
+                    if q in _veto_subs: _veto_subs.remove(q)
+        return Response(gen(), mimetype="text/event-stream",
+                        headers={"Cache-Control": "no-cache",
+                                 "X-Accel-Buffering": "no"})
+
+    @app.route("/api/veto/create", methods=["POST"])
+    @require_auth
+    def veto_create():
+        d = request.get_json() or {}
+        mode = d.get("mode", "BO3")
+        map_pool = d.get("map_pool")
+        with core._veto_lock:
+            try:
+                core._veto_session = _veto.create_session(mode=mode, map_pool=map_pool)
+            except Exception as e:
+                return _veto_error_response(e)
+            snap = _veto_snapshot()
+        _veto_broadcast()
+        core.log(f"[veto] session created — mode={mode} pool=({len(snap['session']['map_pool'])} maps)")
+        return jsonify(snap)
+
+    @app.route("/api/veto/roster", methods=["POST"])
+    @require_auth
+    def veto_roster():
+        d = request.get_json() or {}
+        # Validate inputs before grabbing the lock so we don't hold it for
+        # bad-input parsing.
+        team_a_name = str(d.get("team_a_name", "")).strip()[:64]
+        team_b_name = str(d.get("team_b_name", "")).strip()[:64]
+        raw_players = d.get("players", [])
+        if not isinstance(raw_players, list):
+            return jsonify({"error": "players must be a list"}), 400
+        try:
+            players = [
+                RosterPlayer(
+                    name=str(p.get("name", "")).strip()[:_NAME_MAX_LEN],
+                    steam_id=str(p.get("steam_id", "")).strip()[:64],
+                )
+                for p in raw_players
+            ]
+        except Exception:
+            return jsonify({"error": "malformed player entry"}), 400
+        with core._veto_lock:
+            if core._veto_session is None:
+                return jsonify({"error": "no active veto session"}), 400
+            try:
+                _veto.set_roster(core._veto_session, team_a_name, team_b_name, players)
+                snap = _veto_snapshot()
+            except Exception as e:
+                return _veto_error_response(e)
+        _veto_broadcast()
+        return jsonify(snap)
+
+    @app.route("/api/veto/distribute", methods=["POST"])
+    @require_auth
+    def veto_distribute():
+        with core._veto_lock:
+            if core._veto_session is None:
+                return jsonify({"error": "no active veto session"}), 400
+            try:
+                _veto.distribute_teams(core._veto_session)
+                snap = _veto_snapshot()
+            except Exception as e:
+                return _veto_error_response(e)
+        _veto_broadcast()
+        return jsonify(snap)
+
+    @app.route("/api/veto/start_voting", methods=["POST"])
+    @require_auth
+    def veto_start_voting():
+        with core._veto_lock:
+            if core._veto_session is None:
+                return jsonify({"error": "no active veto session"}), 400
+            try:
+                _veto.start_voting(core._veto_session)
+                snap = _veto_snapshot()
+            except Exception as e:
+                return _veto_error_response(e)
+        _veto_broadcast()
+        return jsonify(snap)
+
+    @app.route("/api/veto/vote", methods=["POST"])
+    @require_auth
+    def veto_vote():
+        d = request.get_json() or {}
+        team = str(d.get("team", ""))
+        try:
+            voter_idx = int(d.get("voter_idx", -1))
+            votee_idx = int(d.get("votee_idx", -1))
+        except (TypeError, ValueError):
+            return jsonify({"error": "voter_idx/votee_idx must be integers"}), 400
+        with core._veto_lock:
+            if core._veto_session is None:
+                return jsonify({"error": "no active veto session"}), 400
+            try:
+                _veto.cast_vote(core._veto_session, team, voter_idx, votee_idx)
+                snap = _veto_snapshot()
+            except Exception as e:
+                return _veto_error_response(e)
+        _veto_broadcast()
+        return jsonify(snap)
+
+    @app.route("/api/veto/resolve_captains", methods=["POST"])
+    @require_auth
+    def veto_resolve_captains():
+        with core._veto_lock:
+            if core._veto_session is None:
+                return jsonify({"error": "no active veto session"}), 400
+            try:
+                outcome = _veto.resolve_captains(core._veto_session)
+                snap = _veto_snapshot()
+            except Exception as e:
+                return _veto_error_response(e)
+        _veto_broadcast()
+        snap["outcome"] = outcome
+        return jsonify(snap)
+
+    @app.route("/api/veto/tokens", methods=["POST"])
+    @require_auth
+    def veto_tokens():
+        with core._veto_lock:
+            if core._veto_session is None:
+                return jsonify({"error": "no active veto session"}), 400
+            try:
+                tokens = _veto.issue_tokens(core._veto_session)
+            except Exception as e:
+                return _veto_error_response(e)
+        # Build the LAN + Public links per captain — mirrors the Connect
+        # popover's dual-display so the operator can hand the right link to
+        # the right captain (LAN for in-house, Public if the captain is on
+        # the internet via the existing port-forward).
+        lan_ip   = _config._lan_ip()
+        public   = core.public_ip or ""
+        port     = _config.FLASK_PORT
+        def _urls(token: str) -> dict:
+            urls = {"lan": f"http://{lan_ip}:{port}/veto?join={token}"}
+            if public:
+                urls["public"] = f"http://{public}:{port}/veto?join={token}"
+            return urls
+        _veto_broadcast()
+        return jsonify({
+            "A": _urls(tokens["A"]),
+            "B": _urls(tokens["B"]),
+        })
+
+    @app.route("/api/veto/revoke_token", methods=["POST"])
+    @require_auth
+    def veto_revoke_token():
+        d = request.get_json() or {}
+        team = str(d.get("team", ""))
+        with core._veto_lock:
+            if core._veto_session is None:
+                return jsonify({"error": "no active veto session"}), 400
+            try:
+                new_token = _veto.revoke_token(core._veto_session, team)
+            except Exception as e:
+                return _veto_error_response(e)
+        lan_ip = _config._lan_ip()
+        public = core.public_ip or ""
+        port   = _config.FLASK_PORT
+        urls   = {"lan": f"http://{lan_ip}:{port}/veto?join={new_token}"}
+        if public:
+            urls["public"] = f"http://{public}:{port}/veto?join={new_token}"
+        _veto_broadcast()
+        return jsonify({"team": team, "urls": urls})
+
+    @app.route("/api/veto/claim", methods=["POST"])
+    def veto_claim():
+        """Public endpoint — token IS the credential.  On success, mints a
+        captain session cookie scoped to the team the token belongs to."""
+        d = request.get_json() or {}
+        token = str(d.get("token", "")).strip()
+        if not token:
+            return jsonify({"error": "missing token"}), 400
+        # caller_id = client IP so re-opens from the same browser are idempotent.
+        caller_ip = request.remote_addr or ""
+        with core._veto_lock:
+            if core._veto_session is None:
+                return jsonify({"error": "no active veto session"}), 400
+            try:
+                team = _veto.claim_captain(core._veto_session, token, caller_id=caller_ip)
+            except Exception as e:
+                return _veto_error_response(e)
+        # Mint a captain session.  Reuse _create_session but extend with the
+        # `captain_team` field so /api/veto/step can authorise per-team.
+        session_token = _create_session(caller_ip, is_local=False, role="captain")
+        # Annotate the session record with the captain team.
+        sess = _get_session(session_token)
+        if sess is not None:
+            sess["captain_team"] = team
+        core.log(f"[veto] captain {team} claimed from {caller_ip}")
+        _veto_broadcast()
+        resp = jsonify({"ok": True, "team": team})
+        resp.set_cookie("session", session_token, httponly=True, samesite="Strict")
+        return resp
+
+    @app.route("/veto")
+    def veto_share_landing():
+        """Captain-link landing page.  `/veto?join=<token>` performs the
+        claim server-side, sets the cookie, and renders the SPA shell which
+        navigates itself to the veto board.  Without `?join=`, just renders
+        the SPA (the admin / a guest can still reach the live mirror)."""
+        token = request.args.get("join", "").strip()
+        if token:
+            caller_ip = request.remote_addr or ""
+            with core._veto_lock:
+                try:
+                    if core._veto_session is not None:
+                        team = _veto.claim_captain(core._veto_session, token, caller_id=caller_ip)
+                    else:
+                        team = None
+                except Exception as e:
+                    core.log(f"[veto] share-link claim failed: {e}")
+                    team = None
+            if team is not None:
+                session_token = _create_session(caller_ip, is_local=False, role="captain")
+                sess = _get_session(session_token)
+                if sess is not None:
+                    sess["captain_team"] = team
+                _veto_broadcast()
+                resp = redirect("/#veto")
+                resp.set_cookie("session", session_token, httponly=True, samesite="Strict")
+                return resp
+        # Fall through — render the SPA shell; the frontend handles the rest.
+        return redirect("/#veto")
+
+    @app.route("/api/veto/step", methods=["POST"])
+    @require_auth        # captain-allowed
+    def veto_step():
+        d = request.get_json() or {}
+        map_id = str(d.get("map_id", "")).strip()[:64]
+        if not map_id:
+            return jsonify({"error": "missing map_id"}), 400
+        session = _current_session() or {}
+        # Captains can only act on their own team's turn.  Admins can act
+        # for either team (operator override / local testing).
+        is_admin = session.get("is_local") or session.get("role") == "admin"
+        captain_team = session.get("captain_team")
+        with core._veto_lock:
+            if core._veto_session is None:
+                return jsonify({"error": "no active veto session"}), 400
+            step = _veto.current_step(core._veto_session)
+            if step is None:
+                return jsonify({"error": "veto already complete"}), 400
+            team_to_act = (str(d.get("team", "")) or captain_team or "").strip()
+            if not is_admin and team_to_act != captain_team:
+                return jsonify({"error": "captains can only act for their own team"}), 403
+            if team_to_act != step.team:
+                return jsonify({
+                    "error": f"not team {team_to_act}'s turn — current step is team {step.team}",
+                }), 400
+            try:
+                _veto.perform_step(core._veto_session, team_to_act, map_id)
+                snap = _veto_snapshot()
+            except Exception as e:
+                return _veto_error_response(e)
+        _veto_broadcast()
+        return jsonify(snap)
+
+    @app.route("/api/veto/finale", methods=["POST"])
+    @require_auth
+    def veto_finale():
+        """Generate the MatchZy config + hand it to the server.  Caller
+        chooses whether to actually fire `matchzy_loadmatch` via the
+        `load_match` flag — useful for previewing the config in dev."""
+        d = request.get_json() or {}
+        load_match = bool(d.get("load_match", True))
+        with core._veto_lock:
+            if core._veto_session is None:
+                return jsonify({"error": "no active veto session"}), 400
+            try:
+                cfg = _veto.build_matchzy_config(core._veto_session)
+            except Exception as e:
+                return _veto_error_response(e)
+        # MatchZy handoff is a real RCON call → can be slow.  We've released
+        # the veto lock; the RCON layer has its own retries.
+        if load_match and core.running:
+            try:
+                # MatchZy supports matchzy_loadmatch_url for fetching a JSON,
+                # or matchzy_loadmatch for a local file.  Detailed wiring
+                # comes on Day 6 (MatchZy handoff); for now we just log.
+                core.log(f"[veto] would issue matchzy_loadmatch — config keys: "
+                         f"{sorted(cfg.keys())}")
+            except Exception as exc:
+                core.log(f"[veto] matchzy handoff failed: {exc}")
+        with core._veto_lock:
+            if core._veto_session is not None:
+                _veto.complete(core._veto_session)
+        _veto_broadcast()
+        return jsonify({"ok": True, "config": cfg})
+
+    @app.route("/api/veto/reset", methods=["POST"])
+    @require_auth
+    def veto_reset():
+        with core._veto_lock:
+            if core._veto_session is not None:
+                _veto.reset(core._veto_session)
+            core._veto_session = None
+        _veto_broadcast()
+        core.log("[veto] session reset")
+        return jsonify({"ok": True, "state": "idle"})
 
     # ── Log SSE ────────────────────────────────────────────────────────────────
 
