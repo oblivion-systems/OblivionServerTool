@@ -1263,38 +1263,57 @@ def create_flask(core: AppCore) -> Flask:
         """v0.11.0 Layer 1A — Try to DM each captain their join URL via the
         Discord bot.  Returns {team: True} per team that received a DM.
 
-        Best-effort: silently skips a team when:
-          - the bot isn't running / configured (no token in config)
-          - the captain has no discord_id on their roster entry
-          - DM delivery fails (user has DMs disabled, blocked the bot, etc.)
+        Best-effort: every fall-through path now logs ONE diagnostic line
+        (v0.11.0 Tue fix — silent skips were untriageable).  Possible
+        outcomes per team:
+          - bot not running / not connected   → "Layer 1A: bot not connected"
+          - no veto session                   → "Layer 1A: no session"
+          - captain index unset               → "Layer 1A: captain X not elected"
+          - captain has no discord_id         → "Layer 1A: captain X (Name) has no discord_id"
+          - URL build returned empty          → "Layer 1A: no URL for X"
+          - DM call failed                    → "DM to captain X failed ..."
+          - DM call succeeded                 → "DM'd captain X ..."
 
-        On the silent-skip path the operator's Copy-for-Discord button
-        in the SPA Links stage remains the workflow as before.
+        Operator can read the log drawer right after Generate captain
+        links and know exactly which path the code took.
         """
         results = {}
         try:
             from . import discord_bot
-            if not discord_bot.bot_status().get("connected"):
-                return results       # bot not configured or not connected
-        except Exception:
+            status = discord_bot.bot_status()
+            if not status.get("connected"):
+                core.log(f"[discord] Layer 1A: bot not connected "
+                         f"(configured={status.get('configured')}) — skipping DM")
+                return results
+        except Exception as exc:
+            core.log(f"[discord] Layer 1A: bot module unavailable: {exc}")
             return results
-        # Resolve captain Discord IDs from the live session
         s = core._veto_session
         if s is None:
+            core.log("[discord] Layer 1A: no active veto session — skipping DM")
             return results
+        # Resolve captain Discord IDs from the live session
         captains = {}
         if s.captain_a_idx is not None and 0 <= s.captain_a_idx < len(s.team_a):
             captains["A"] = s.team_a[s.captain_a_idx]
+        else:
+            core.log("[discord] Layer 1A: captain A index unset — skipping team A DM")
         if s.captain_b_idx is not None and 0 <= s.captain_b_idx < len(s.team_b):
             captains["B"] = s.team_b[s.captain_b_idx]
+        else:
+            core.log("[discord] Layer 1A: captain B index unset — skipping team B DM")
         for team, player in captains.items():
             did = (player.discord_id or "").strip()
             if not did:
+                core.log(f"[discord] Layer 1A: captain {team} ({player.name}) has no "
+                         "discord_id in roster — skipping DM (operator: paste their "
+                         "Discord User ID into the Discord ID column of their roster slot)")
                 continue
             token = tokens.get(team, "")
             url_obj = urls_builder(token)
             link = url_obj.get("public") or url_obj.get("lan") or ""
             if not link:
+                core.log(f"[discord] Layer 1A: no URL for {team} — skipping DM")
                 continue
             team_name = (s.team_a_name if team == "A" else s.team_b_name)
             msg = (
@@ -1302,11 +1321,12 @@ def create_flask(core: AppCore) -> Flask:
                 f"{link}\n"
                 f"Single-use. Click to claim your captain seat."
             )
+            core.log(f"[discord] Layer 1A: DMing captain {team} ({player.name}) at id={did}…")
             try:
                 ok = discord_bot.bot_dm_user(did, msg)
                 if ok:
                     results[team] = True
-                    core.log(f"[discord] DM'd captain {team} ({player.name}) at id={did}")
+                    core.log(f"[discord] DM'd captain {team} ({player.name}) at id={did} ✓")
                 else:
                     core.log(f"[discord] DM to captain {team} ({player.name}) failed "
                              f"(blocked? unknown id? bot offline?) — falling back to "
