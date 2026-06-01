@@ -2,6 +2,156 @@
 
 ---
 
+## v0.10.0 — In Progress (Days 1-5 of 7)
+
+The **map-veto / match-setup feature** ([VETO.md](VETO.md) spec).  Five-stage
+flow — roster → teams → captain vote → captain links → BO1/3/5 veto board → MatchZy
+handoff — with captains vetoing from their own devices, the operator's UI mirroring
+the session live.  Backend is authoritative; the prototype's browser-only state is gone.
+
+Days 1-5 committed and pushed to master.  Day 6 (real `matchzy_loadmatch` RCON
+handoff) and Day 7 (polish + smoke + tag) are the only remaining work before
+v0.10.0 ships.
+
+### Day 1 — `VetoSession` model + state machine (`c5bd7b8`)
+
+`cs2servergui/veto.py` (365 lines) — the whole match lifecycle as a pure
+state machine with no I/O, no Flask, no RCON.  Public surface mirrors the
+prototype's transitions verbatim, but with server-side authority:
+
+* States: `idle → roster → teams → voting → links → veto → finale → complete`,
+  guarded by `_LEGAL_TRANSITIONS` (frozensets per state, mutation-rejected).
+* Dataclasses: `RosterPlayer`, `VetoStep` (kind: BAN|PICK, team, map_id),
+  `CaptainToken` (`secrets.token_urlsafe(32)`, single-use, idempotent same caller),
+  `VetoSession` holds the lot.
+* BO1/BO3/BO5 sequence templates in `_VETO_SEQUENCES` — BO1 = 6 bans + decider,
+  BO3 = ban/ban/pick/pick/ban/ban + decider, BO5 = ban/ban/pick/pick/pick/pick + decider.
+* Exception hierarchy `VetoError → InvalidVetoTransition / VetoStageError` so the
+  HTTP layer maps cleanly to 400 vs. 409.
+* `tests/test_veto.py` (34 cases) covers every legal/illegal transition, captain
+  election ties, token reuse, single-use enforcement, full BO3 walkthrough.
+
+### Day 2 — HTTP API + SSE live mirror + captain role (`8e1add4`, polish `9877b15`)
+
+`cs2servergui/web.py` (15 new routes).  Every mutation runs under `core._veto_lock`
+so SSE subscribers and concurrent admin/captain requests never see torn state.
+
+| Route | Purpose |
+|---|---|
+| `GET /api/veto/state` | Read-only snapshot for the SPA's initial fetch |
+| `GET /api/veto/stream` | SSE pub/sub via `queue.Queue` per subscriber (non-blocking `put_nowait`) |
+| `POST /api/veto/create` | `create_session(mode, map_pool)`.  409 if a session is already active. |
+| `POST /api/veto/roster` | 10 players (name + optional SteamID) + team names |
+| `POST /api/veto/distribute` | Random 5+5 split (admin reshuffles) |
+| `POST /api/veto/start_voting` | Locks teams, opens captain ballot |
+| `POST /api/veto/vote` | Per-team votes (5 each); ties auto-revote |
+| `POST /api/veto/resolve_captains` | Picks captains, transitions to `links` |
+| `POST /api/veto/tokens` | Mints scoped single-use tokens (LAN + Public URLs returned per captain) |
+| `POST /api/veto/revoke_token` | Revoke + reissue if a token leaked |
+| `POST /api/veto/claim` | Public — token IS the credential; mints a captain session cookie |
+| `POST /api/veto/step` | Captain bans/picks for their team (admin can act for either) |
+| `POST /api/veto/finale` | `build_matchzy_config()` + `complete()` (Day 6 wires the real handoff) |
+| `POST /api/veto/reset` | Clear and return to `idle` |
+| `GET /veto?join=<token>` | Captain-link landing page — server-side claim + cookie + redirect to `/#veto` |
+
+**New captain role.**  `_role_gate` allowlist `_CAPTAIN_PATHS = {/api/state,
+/api/veto/state, /api/veto/stream, /api/veto/step}`.  Claim is PIN-free
+(token IS the credential, single-use).  Wrong-turn = 400; team-spoof = 403.
+
+**SSE snapshot enrichment** — every snapshot now carries `current_step_detail`
+(index / kind / team) + `legal_moves`, so the SPA doesn't need to re-derive
+the next action from the raw `sequence` array on every render.
+
+`tests/test_veto_api.py` (17 cases initially, 25 after Day 4) covers the full
+happy path, captain wrong-team rejection (400 vs 403), token reuse, SSE
+broadcast verification, and the 409-on-existing-session create guard.
+
+### Day 3 — SPA Veto tab + 8 stage renderers (`74c0f49`)
+
+Frontend port of the prototype's 5-stage flow into the SPA as a dedicated
+**Veto** tab in the sidebar (between Maps and Appearance).  Single
+`pages['veto']` entry point in `cs2servergui/static/js/app.js`; state comes
+from `/api/veto/state` + the SSE stream.
+
+* Per-stage renderers: `_renderVetoIdle / Roster / Teams / Voting / Links /
+  Board / Finale / Complete` + `_renderVetoCaptain` (captain-role simplified
+  view).
+* `api.veto.*` namespace in `api.js` (12 methods covering every endpoint).
+* SSE subscribe on tab open, 5 s reconnect on error, cleanup on hashchange
+  away from `#veto` (same pattern as the log drawer).
+* `_vetoLocalRoster` buffer holds unsaved operator edits before the Save
+  Roster button commits — survives in-flight SSE re-renders so the
+  operator's typing isn't clobbered by snapshot pushes.
+* ~270 lines of new CSS under "VETO (v0.10.0)" — reuses existing palette
+  tokens (`--accent`, `--ok`, `--bad`, `--blue`).
+
+### Day 4 — QR codes for captain links (`7561d1b`)
+
+Captains on phones can scan instead of typing the URL.
+
+* New dep: `segno >= 1.6` (pure-Python QR encoder, no Pillow / no native).
+  Picked over `qrcode + Pillow` because Pillow is a 40 MB bundle for a 70 KB
+  library's worth of features.
+* New route `GET /api/veto/qr?token=…&kind=lan|public` returns SVG.
+  Validates the token against the live session (refuses unknown so the
+  endpoint isn't a free QR proxy for anyone with a session cookie);
+  admin/local only; `Cache-Control: private, max-age=300`.
+* `/api/veto/tokens` + `/api/veto/revoke_token` now return the raw `token`
+  field alongside the LAN/Public URLs so the SPA can build QR URLs without
+  re-parsing tokens out of the LAN link.
+* SPA Links stage gains two QR slots per captain card (LAN + Public,
+  Public only if a public IP is configured).  Mandatory white background —
+  phone cameras need the high-contrast quiet zone against the dark veto
+  page or they won't lock the code.
+* 8 new tests added to `test_veto_api.py` (now 25/25): token shape, SVG
+  return, unknown-token rejection, missing/bad-kind 400s, unauth 401,
+  no-session 400, revoke includes new raw token.
+
+### Day 5 — Cinematic finale animation (`b32be7e`)
+
+Pure CSS animations layered on the existing renderers — no state-machine
+change, no HTTP routes, no new tests.  Three independent JS gates ensure
+each animation fires exactly once at the right moment, not on every SSE
+re-render:
+
+| Gate | What it controls |
+|---|---|
+| `_vetoLastRenderedState` | Stage-fade plays on state CHANGE only |
+| `_vetoLastSeqLen` | Stamp slam-in + card shake only on the freshly-acted map |
+| `_vetoFinaleShownThisSession` | Confetti + decider reveal play once per session; reset on `idle` |
+
+The choreography (per arrival at finale): title slide-up + letter-spacing
+expand (480 ms) → subtitle fade (380 ms, delay 220 ms) → maps pop in
+staggered every 80 ms → **decider** gets a bigger pop + 1.8 s accent-glow
+pulse × 2 (delay 700-900 ms) → launch button fade (delay 900 ms) → 30-piece
+CSS confetti shower (2.6 s, 5-colour rotation, pointer-events: none so
+the Hand-to-MatchZy button stays clickable beneath).
+
+Decider glow uses `color-mix(in srgb, var(--accent) 55%, transparent)` to
+alpha-fade the oklch accent token without converting to RGB.  Modern
+WebView2 supports it natively; old WebView drops just the glow and keeps
+the rest.
+
+### Day 6 (pending) — MatchZy match-config write + `matchzy_loadmatch` handoff
+
+Currently `build_matchzy_config()` returns a dict that the finale endpoint
+only logs.  Day 6 writes the JSON to a known path under the server's
+`cfg/` and issues `matchzy_loadmatch <path>` via RCON; failures surface to
+the operator without dropping the veto state.
+
+### Day 7 (pending) — Polish + smoke + tag v0.10.0
+
+Final UX pass, full regression, release notes, tag, GitHub release with binary.
+
+### Test totals
+
+* `tests/test_v092.py` — 22/22 (unchanged from v0.9.2.1)
+* `tests/test_veto.py` — 34/34 (new in Day 1)
+* `tests/test_veto_api.py` — 25/25 (new in Day 2, extended in Day 4)
+* **All 81/81 green**
+
+---
+
 ## v0.9.2.1 — 2026-06-01 (hotfix)
 
 A four-agent re-audit of the v0.9.2 fix code (not the original bugs) surfaced one

@@ -3,12 +3,16 @@
 A desktop application for managing a **Counter-Strike 2 dedicated server** on Windows.  
 Built with Python + Flask + pywebview (Edge WebView2). Ships as a single `.exe` with an optional installer.
 
-> **Status: v0.9.2.1 (hotfix release).** Core features are stable.  Post-v0.9.1
-> shipped a remote-guest role, split team-size modes (1v1 / 2v2 / 3v3 / 4v4 / 5v5), Warcraft
-> menu/chat dispatchers (recv-queue-overflow fix), a 20-bug audit sweep, and the workshop-maps
-> root-cause fix.  v0.9.2.1 fixes a 5-second RCON regression introduced by v0.9.2's multi-
-> packet sentinel, plus five other re-audit findings.  Next: v0.10.0 will ship the map-veto
-> match-setup feature ([VETO.md](VETO.md)).
+> **Status: v0.9.2.1 (released) — v0.10.0 in progress (Days 1-5 of 7 done).**  Core features
+> are stable.  Post-v0.9.1 shipped a remote-guest role, split team-size modes
+> (1v1 / 2v2 / 3v3 / 4v4 / 5v5), Warcraft menu/chat dispatchers (recv-queue-overflow fix),
+> a 20-bug audit sweep, and the workshop-maps root-cause fix.  v0.9.2.1 fixes a 5-second
+> RCON regression introduced by v0.9.2's multi-packet sentinel, plus five other re-audit
+> findings.  **v0.10.0** (in flight on master) adds the map-veto / match-setup flow:
+> server-side state machine, HTTP API + SSE live mirror, captain role, SPA Veto tab, QR
+> codes for captain links, and a cinematic finale.  Day 6 (MatchZy `matchzy_loadmatch`
+> handoff) and Day 7 (polish + tag) are the remaining work before release.  Full spec in
+> [VETO.md](VETO.md), changelog in [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
@@ -127,6 +131,25 @@ Vanilla modes (Competitive, Casual, Wingman, etc.) run with no managed plugins a
 ### RCON Console
 - Full **RCON command console** — send any command, see the response
 - **RCON diagnostic** tool — tests TCP connectivity and auth, shows actionable error messages
+
+### Map Veto / Match Setup *(v0.10.0 — Days 1-5 of 7 in master, not yet released)*
+A guided match-setup flow ending in a CS2 map veto, with **captains vetoing from their own
+devices** while the operator's UI mirrors the session live over SSE:
+- **Five stages:** roster (10 players + team names + optional SteamIDs) → random 5+5 teams
+  (re-shuffle option) → captain election (each team votes 5×, ties auto-revote) → captain
+  links (LAN + Public URLs + **QR codes** for phone scanning) → BO1/BO3/BO5 veto board.
+- **Dedicated Veto tab** in the sidebar, with stage-pill navigation and a Reset button for
+  the operator; captains see a simplified view scoped to their actionable stages.
+- **Single-use scoped captain tokens** — `secrets.token_urlsafe(32)`, mints a captain
+  session cookie on claim; revoke + reissue if a token leaks.
+- **Cinematic finale** — title slide-up, staggered map reveal, accent-glow pulse on the
+  decider, 30-piece confetti shower.  Plays exactly once per session.
+- **MatchZy handoff** *(Day 6, pending)* — auto-generates a MatchZy match config from the
+  veto result and issues `matchzy_loadmatch`; MatchZy then runs the series (map order,
+  knife, scoring, map-end → next).
+
+Full spec in [VETO.md](VETO.md); implementation map in [INGEST.md](INGEST.md) → "API — map
+veto" + "Frontend — Veto tab".
 
 ---
 
