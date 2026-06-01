@@ -118,6 +118,16 @@
 
   <!-- Header -->
   <header id="hdr">
+    <!-- Hamburger (mobile only — display:none on desktop via base CSS,
+         revealed by the @media (max-width: 640px) block in app.css).
+         Toggles #sidebar.is-open via JS handler in app.js. -->
+    <button id="hamburger" type="button" aria-label="Toggle navigation" style="display:none">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="3" y1="6" x2="21" y2="6"/>
+        <line x1="3" y1="12" x2="21" y2="12"/>
+        <line x1="3" y1="18" x2="21" y2="18"/>
+      </svg>
+    </button>
     <div class="hdr-brand">
       <img src="/static/images/emblem.png" class="hdr-logo" alt="Oblivion">
       <div class="hdr-brand-text">

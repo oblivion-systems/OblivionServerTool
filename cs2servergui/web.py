@@ -1070,6 +1070,30 @@ def create_flask(core: AppCore) -> Flask:
         else:
             legal = []
             step_detail = None
+        # v0.10.2: at finale/complete states, surface the game-server
+        # connect string + password so captains can copy it into their
+        # team's Discord.  Captains are authenticated via single-use token
+        # so they're already authorized to know the password — without
+        # this they can't get their teammates into the match.  The CS2
+        # game-server runs on UDP:27015 — that's NOT the Cloudflare
+        # tunnel (which is HTTPS for the web panel only); captains' team
+        # members connect direct to the operator's public IP + 27015,
+        # which means the operator must port-forward 27015 separately.
+        match_connect = None
+        if s.state in ("finale", "complete"):
+            game_host = core.public_ip or _config._lan_ip()
+            game_port = RCON_PORT          # CS2 listens on the same port for game + RCON
+            pw        = core.sv_password or ""
+            cmd       = f"connect {game_host}:{game_port}"
+            if pw:
+                cmd += f"; password {pw}"
+            match_connect = {
+                "host":     game_host,
+                "port":     game_port,
+                "password": pw,
+                "password_set": bool(pw),
+                "command":  cmd,
+            }
         return {
             "state": s.state,
             "session": {
@@ -1103,6 +1127,11 @@ def create_flask(core: AppCore) -> Flask:
                 "ready_a":       s.ready_a,
                 "ready_b":       s.ready_b,
                 "both_ready":    _veto.both_captains_ready(s),
+                # v0.10.2 — non-null only at finale/complete; the captain
+                # finale + admin finale renderers use this to surface the
+                # CS2 server connect command + password (captains need to
+                # tell their team where to join)
+                "match_connect": match_connect,
                 "updated_at":    s.updated_at,
             },
         }
@@ -1566,6 +1595,11 @@ def create_flask(core: AppCore) -> Flask:
         """
         d = request.get_json() or {}
         load_match = bool(d.get("load_match", True))
+        # v0.10.2: optional `force` override so the operator can power
+        # through the mode pre-flight if they know the server is set up
+        # correctly (e.g. running 5v5 with vanilla settings + MatchZy
+        # plugin manually loaded).  Default False.
+        force = bool(d.get("force", False))
         with core._veto_lock:
             if core._veto_session is None:
                 return jsonify({"error": "no active veto session"}), 400
@@ -1584,6 +1618,34 @@ def create_flask(core: AppCore) -> Flask:
                 cfg = _veto.build_matchzy_config(core._veto_session)
             except Exception as e:
                 return _veto_error_response(e)
+
+        # v0.10.2 — Mode pre-flight.  matchzy_loadmatch only works on
+        # MatchZy-managed modes (Practice + the team-match modes 3v3/4v4/5v5
+        # use the same plugin bundle and the same RCON command).  If the
+        # operator's server is currently on Aim 1v1, Warcraft, Zombie
+        # Escape, etc., the loadmatch RCON would either succeed-but-
+        # play-wrong-ruleset or be silently ignored by the plugin.
+        # Refuse with 409 + the wanted/got mode so the SPA can offer a
+        # one-click switch.  `force=True` bypasses for the rare "operator
+        # knows what they're doing" case.
+        _MATCHZY_MODES = {"Practice", "3v3", "4v4", "5v5", "Competitive"}
+        current_mode = (core.current_mode or "").strip()
+        if load_match and not force and current_mode not in _MATCHZY_MODES:
+            return jsonify({
+                "error": (
+                    f"server is on mode {current_mode or '(unknown)'} which "
+                    f"isn't a MatchZy mode — matchzy_loadmatch will misbehave. "
+                    f"Switch the server to 5v5 (or 3v3 / 4v4 / Practice / "
+                    f"Competitive) first, OR retry with force=true to skip "
+                    f"this check."
+                ),
+                "precheck": {
+                    "ok": False,
+                    "current_mode": current_mode,
+                    "expected_one_of": sorted(_MATCHZY_MODES),
+                    "server_running":  bool(core.running),
+                },
+            }), 409
         # Snapshot cfg for the response, then prepare the on-disk variant.
         # MatchZy doesn't know about `_oblivion_meta` — strip it from the
         # written file so MatchZy's schema validator doesn't complain
@@ -1655,6 +1717,14 @@ def create_flask(core: AppCore) -> Flask:
             if core._veto_session is not None:
                 _veto.complete(core._veto_session)
         _veto_broadcast()
+        # v0.10.2 — also return the precheck snapshot in the success path
+        # so the SPA can show "✓ mode was 5v5" alongside the matchzy result.
+        matchzy_result["precheck"] = {
+            "ok": True,
+            "current_mode": current_mode,
+            "server_running": bool(core.running),
+            "forced": force,
+        }
         return jsonify({"ok": True, "config": cfg, "matchzy": matchzy_result})
 
     @app.route("/api/veto/reset", methods=["POST"])

@@ -2601,6 +2601,40 @@ body.compact #content        { padding: 14px 16px; }
   animation: veto-launch-armed-pulse 1.8s ease-in-out infinite;
 }
 
+/* v0.10.2 — Captain connect block on the finale (the workflow handoff that
+ * was missing from v0.10.0/.1).  Shown to captains AND admins on the
+ * finale page; backend only populates `match_connect` at finale/complete
+ * states.  Big copy buttons (44px+ touch targets) because this is the
+ * thing the captain came here to get. */
+.veto-captain-connect {
+  margin: 18px 0; padding: 16px 18px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-1));
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+}
+.veto-connect-label {
+  font-family: var(--font-mono); font-size: 10px;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--text-3); margin-bottom: 8px;
+}
+.veto-connect-cmd {
+  font-family: var(--font-mono); font-size: 13px;
+  color: var(--text-1); background: var(--bg-0);
+  padding: 10px 14px; border-radius: 6px;
+  border: 1px solid var(--line-1);
+  /* break-all so long URLs (e.g. cloudflared) don't overflow on phones */
+  word-break: break-all;
+  margin-bottom: 10px;
+}
+.veto-connect-actions {
+  display: flex; gap: 8px; flex-wrap: wrap;
+}
+.veto-connect-actions .btn { flex: 1; min-width: 140px; min-height: 44px; }
+.veto-connect-hint {
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--text-4); margin-top: 10px;
+}
+
 /* v0.10.1 — Captain finale view: own Ready toggle + opponent status */
 .veto-captain-ready-block {
   margin: 24px 0 0 0; padding: 18px;
@@ -2853,4 +2887,236 @@ body.compact #content        { padding: 14px 16px; }
                               color-mix(in srgb, var(--text-1) 30%, transparent) 50%,
                               var(--text-1) 100%);
   width: 1px; height: 50px; opacity: 0.5;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   MOBILE / PHONE RESPONSIVE PASS (v0.10.2)
+   ═══════════════════════════════════════════════════════════════════════
+   The SPA was built desktop-first.  This single @media block at the end of
+   the stylesheet retroactively makes the tool usable on a phone.  Online-
+   primary use case: captains + guests + spectators land on the panel via
+   Cloudflare tunnel URL on their phone; the operator stays on a desktop.
+
+   Breakpoint: 640px.  Below that we collapse the sidebar to a slide-out
+   drawer, shrink the header to brand + role + connect, clamp every
+   fixed-width popover to viewport, bump touch targets to 44px+, and
+   reflow the veto board / ready row to a single column.
+
+   Apple HIG / Material Design both call for 44x44 px minimum touch
+   targets; we use min-height: 44px on .btn and 48px on the primary CTAs
+   (Ready, Hand-to-MatchZy, Copy connect).
+
+   All clamps use `min(<orig>, calc(100vw - 16px))` so they remain at
+   their desktop size on bigger viewports and just shrink as needed.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 640px) {
+
+  /* ─── Shell layout: sidebar becomes a slide-out drawer ─────────────── */
+  /* Desktop has #body { display: flex } with sidebar fixed at 192px wide.
+   * Phone: sidebar absolutely positioned off-screen by default, slides
+   * in over the content when .is-open is set by the hamburger JS. */
+  #body {
+    /* Stay flex; sidebar floats over via position: fixed below. */
+    flex-direction: column;
+  }
+  #sidebar {
+    position: fixed;
+    top: 51px;           /* under the header */
+    left: 0;
+    bottom: 0;
+    width: 240px;
+    transform: translateX(-100%);
+    transition: transform 200ms cubic-bezier(0.4, 0, 0.2, 1);
+    z-index: 50;
+    box-shadow: 4px 0 16px rgba(0, 0, 0, 0.4);
+  }
+  #sidebar.is-open { transform: translateX(0); }
+  /* Backdrop dim when drawer open — tap to close */
+  #sidebar.is-open::before {
+    content: '';
+    position: fixed;
+    top: 51px; left: 240px; right: 0; bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: -1;
+  }
+  /* Main content goes full-width (sidebar no longer occupies space) */
+  #content {
+    width: 100%;
+    padding: 12px;
+  }
+
+  /* Hamburger button (only renders below 640px via display: none on
+   * the desktop default) */
+  #hamburger {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    width: 40px; height: 40px;
+    background: transparent; border: 1px solid var(--line-1);
+    border-radius: 6px;
+    cursor: pointer;
+    margin-right: 6px;
+  }
+  #hamburger svg { width: 22px; height: 22px; stroke: var(--text-1); }
+  #hamburger:hover { background: var(--bg-1); }
+
+  /* ─── Header: shrink to essentials ─────────────────────────────────── */
+  #hdr {
+    gap: 8px;
+    padding: 0 10px;
+  }
+  /* Hide non-essential header items below 640px:
+   *   - the cmd-trigger ("Search · type a command…") is a keyboard-only
+   *     affordance with no touch equivalent
+   *   - the ? help button is reachable from sidebar anyway */
+  #hdr-cmd-trigger, #hdr-help-btn { display: none; }
+  /* Brand text is the OBLIVION wordmark — shorten on phone */
+  #hdr .brand-text { font-size: 14px; }
+
+  /* ─── Status bar: wrap + shrink ────────────────────────────────────── */
+  #statusbar {
+    flex-wrap: wrap;
+    padding: 6px 10px;
+    gap: 6px;
+  }
+  .sb-item {
+    padding: 0 8px;
+    font-size: 11px;
+  }
+  /* Below 640px, hide the "label" half of label+value pairs to save horz
+   * real estate.  The value (e.g. "5/10 players") is self-explanatory. */
+  .sb-item .sb-label { display: none; }
+  /* Web URL (right-most item) wraps to a second row if needed */
+  #sb-web-url { flex-basis: 100%; text-align: left; }
+
+  /* ─── Login card ───────────────────────────────────────────────────── */
+  #login-screen {
+    /* svh handles iOS Safari's URL-bar-during-scroll viewport jumps */
+    min-height: 100svh;
+    padding: 16px;
+  }
+  .login-card {
+    width: min(380px, calc(100vw - 24px));
+    padding: 28px 24px;
+  }
+
+  /* ─── Connect popover ──────────────────────────────────────────────── */
+  /* Width: clamp to viewport.  Position: handled in JS (clamp left so
+   * the popover doesn't overflow the right edge). */
+  .connect-popover {
+    width: min(380px, calc(100vw - 16px));
+    max-width: 100vw;
+  }
+  .cp-v {
+    word-break: break-all;
+    font-size: 12px;
+  }
+
+  /* Command palette: similar clamp */
+  .palette {
+    width: min(640px, calc(100vw - 24px));
+  }
+
+  /* ─── Touch targets: 44px minimum on all buttons ───────────────────── */
+  .btn {
+    min-height: 44px;
+    padding: 10px 14px;
+  }
+  .btn.btn-sm { min-height: 38px; padding: 8px 12px; }
+  /* Sidebar nav items become big tap targets too */
+  .nav-item { min-height: 48px; padding: 12px 16px; }
+  /* Keypad keys already 52px — fine */
+
+  /* ─── Veto board: single column under 640 ──────────────────────────── */
+  .veto-board {
+    /* Stay grid (existing auto-fit at minmax(140px, 1fr) drops to 1 col
+     * on its own).  Bump map name font for legibility. */
+    gap: 10px;
+  }
+  .veto-map-name { font-size: 13px; }
+  .veto-stage { padding: 14px; }
+
+  /* ─── Finale title: clamp + drop letter-spacing ────────────────────── */
+  .veto-finale-title {
+    font-size: clamp(18px, 5.5vw, 30px);
+    letter-spacing: 0.14em;       /* down from 0.22em */
+    word-break: break-word;
+  }
+  .veto-finale-sub { font-size: 11px; }
+  .veto-turn-banner .veto-turn-team { font-size: clamp(16px, 5vw, 24px); }
+  .veto-stage-head h2 { font-size: clamp(18px, 5vw, 24px); }
+
+  /* ─── Ready row: stack rather than side-by-side on narrow ──────────── */
+  .veto-ready-row { flex-direction: column; gap: 10px; }
+  .veto-ready-slot { max-width: 100%; }
+
+  /* ─── Captain finale primary buttons: bump to 48px (HIG primary CTA) */
+  #veto-cap-ready-btn { min-height: 48px; font-size: 13px; }
+  #veto-launch-btn    { min-height: 48px; }
+
+  /* ─── Roster grid: drop the 160px SteamID column on phones ─────────── */
+  .veto-roster-slot {
+    /* From: 28px 1fr 160px → 28px 1fr (SteamID input wraps below) */
+    grid-template-columns: 28px 1fr;
+    grid-template-rows: auto auto;
+    gap: 4px 6px;
+  }
+  .veto-roster-slot .veto-steam {
+    grid-column: 2 / 3;            /* slot under the name input */
+    grid-row: 2 / 3;
+  }
+  .veto-roster-slot .veto-name { font-size: 13px; }
+
+  /* ─── Link cards: stack actions below the URLs ─────────────────────── */
+  .veto-link-actions { flex-direction: column; }
+  .veto-link-actions .btn { width: 100%; }
+
+  /* ─── Connect block: connect command + buttons full-width ──────────── */
+  .veto-captain-connect { padding: 12px; }
+  .veto-connect-actions .btn { width: 100%; min-width: 0; }
+
+  /* ─── Players / Workshop tables: horizontal scroll instead of cram ── */
+  .player-search, .map-search { width: 100%; min-width: 0; }
+  /* Compact tab pills */
+  .tab-pill { padding: 6px 10px; font-size: 12px; }
+
+  /* ─── Log drawer: hide for guest role (sidebar drives this); ensure
+   *    bottom bar doesn't overlap toasts ────────────────────────────── */
+  #toast { bottom: 16px; right: 12px; max-width: calc(100vw - 24px); }
+  .log-drawer { width: 100vw; right: -100vw; }
+  .log-drawer.is-open { right: 0; }
+
+  /* ─── Hide hover-only decorations on touch ─────────────────────────── */
+  /* Pure CSS @media (hover: hover) feature query — only desktop devices
+   * get the hover lift/glow animations. */
+}
+
+/* On touch-only devices (regardless of width) suppress the hover-only
+ * animations that show up "stuck" after the first tap because
+ * touchstart fires :hover. */
+@media (hover: none) {
+  .nav-item:hover { background: transparent; }
+  .btn:hover     { transform: none; }
+  .veto-map-card:hover { transform: none; box-shadow: none; }
+  .veto-ready-slot:hover { border-color: var(--line-1); }
+  .sb-clickable:hover    { background: transparent; }
+}
+
+/* Honour `prefers-reduced-motion` for vestibular sensitivity — kills
+ * the finale theatrics, stamp slam, decider glow.  Page still renders
+ * correctly in resting state because every animation uses fill-mode `both`. */
+@media (prefers-reduced-motion: reduce) {
+  .veto-stage-enter,
+  .veto-map-stamp.just-stamped,
+  .veto-map-card.just-stamped,
+  .veto-finale-enter .veto-finale-title,
+  .veto-finale-enter .veto-finale-sub,
+  .veto-finale-enter .veto-finale-map,
+  .veto-finale-enter .veto-finale-map.decider,
+  .veto-finale-enter #veto-launch-btn,
+  .veto-confetti-piece,
+  .veto-launch-armed {
+    animation: none !important;
+  }
 }
