@@ -2566,3 +2566,155 @@ body.compact #content        { padding: 14px 16px; }
   color: var(--bg-0); border-radius: 999px; font-family: var(--font-mono);
   font-size: 13px; letter-spacing: 0.16em; margin-bottom: 14px;
 }
+
+/* ─── Veto cinematics (v0.10.0 Day 5) ──────────────────────────────────
+ * Animation rules:
+ *   • Stage-enter fade plays exactly ONCE per state transition (JS-gated
+ *     via .veto-stage-enter class — only stamped when state changed).
+ *   • Stamp slam plays exactly ONCE per step performed (JS-gated via the
+ *     `_vetoLastSeqLen` counter — only the freshly-acted map gets the
+ *     .just-stamped class).
+ *   • Confetti + decider reveal play exactly ONCE per session (JS-gated
+ *     via `_vetoFinaleShownThisSession` — reset on `idle`).
+ * `both` fill-mode pins the end state so the layout doesn't reflow after
+ * the animation completes. */
+
+@keyframes veto-stage-fade-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.veto-stage-enter {
+  animation: veto-stage-fade-in 320ms ease-out both;
+}
+
+/* Stamp slam-in: starts huge + rotated wrong, snaps to natural rest with
+ * a slight bounce.  The card itself does a tiny shake at the same time so
+ * the player feels the impact, not just the stamp landing in vacuum. */
+@keyframes veto-stamp-slam {
+  0%   { opacity: 0; transform: translate(-50%, -50%) rotate(-35deg) scale(2.6); }
+  60%  { opacity: 1; transform: translate(-50%, -50%) rotate(-8deg)  scale(0.92); }
+  80%  {             transform: translate(-50%, -50%) rotate(-14deg) scale(1.05); }
+  100% { opacity: 1; transform: translate(-50%, -50%) rotate(-12deg) scale(1); }
+}
+.veto-map-stamp.just-stamped {
+  animation: veto-stamp-slam 520ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+@keyframes veto-card-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-3px); }
+  40% { transform: translateX(3px); }
+  60% { transform: translateX(-2px); }
+  80% { transform: translateX(2px); }
+}
+.veto-map-card.just-stamped {
+  animation: veto-card-shake 360ms ease-out;
+}
+
+/* ── Finale entry choreography ──────────────────────────────────────────
+ * Three layered animations on .veto-finale-enter:
+ *   1. Title slides up + fades (0 → 380 ms)
+ *   2. Sub-title fades in (200 → 580 ms)
+ *   3. Each .veto-finale-map pops in staggered (250 + 80×idx ms)
+ *   4. Decider gets an additional glow-pulse (700 ms onwards)
+ *   5. Confetti rains for 3s
+ * Without .veto-finale-enter (re-render of the same finale), no animation
+ * runs — the page just renders in its final resting state. */
+
+@keyframes veto-title-rise {
+  from { opacity: 0; transform: translateY(20px); letter-spacing: 0.04em; }
+  to   { opacity: 1; transform: translateY(0);   letter-spacing: 0.12em; }
+}
+.veto-finale-enter .veto-finale-title {
+  animation: veto-title-rise 480ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes veto-sub-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.veto-finale-enter .veto-finale-sub {
+  animation: veto-sub-fade 380ms ease-out both;
+  animation-delay: 220ms;
+}
+
+@keyframes veto-map-pop {
+  from { opacity: 0; transform: translateY(14px) scale(0.85); }
+  to   { opacity: 1; transform: translateY(0)    scale(1); }
+}
+.veto-finale-enter .veto-finale-map {
+  animation: veto-map-pop 420ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  opacity: 0;
+}
+/* Stagger up to 5 maps (BO5 is the max).  More than 5 just snaps to the
+ * 5-slot delay — harmless and we don't ship modes that big. */
+.veto-finale-enter .veto-finale-map:nth-child(1) { animation-delay: 260ms; }
+.veto-finale-enter .veto-finale-map:nth-child(2) { animation-delay: 340ms; }
+.veto-finale-enter .veto-finale-map:nth-child(3) { animation-delay: 420ms; }
+.veto-finale-enter .veto-finale-map:nth-child(4) { animation-delay: 500ms; }
+.veto-finale-enter .veto-finale-map:nth-child(5) { animation-delay: 580ms; }
+
+/* Decider gets a glow pulse AFTER the pop completes.  We use a second
+ * animation on the same element via comma-separated declarations. */
+@keyframes veto-decider-glow {
+  /* color-mix lets us fade the accent's alpha — the accent token is oklch
+   * so we can't just rgba(var(--accent), 0.55).  Modern WebView2 supports
+   * color-mix natively.  Fallback (older WebView): box-shadow simply
+   * doesn't render — the rest of the reveal still works. */
+  0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 0%, transparent); }
+  50%  { box-shadow: 0 0 28px 6px color-mix(in srgb, var(--accent) 55%, transparent); }
+  100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 0%, transparent); }
+}
+.veto-finale-enter .veto-finale-map.decider {
+  /* override the generic pop with a bigger one + the glow pulse after */
+  animation:
+    veto-map-pop 480ms cubic-bezier(0.34, 1.56, 0.64, 1) both,
+    veto-decider-glow 1.8s ease-in-out 900ms 2;
+  animation-delay: 700ms, 900ms;
+}
+
+/* Launch button + footer fade in last so the eye lands on them after the
+ * maps have settled. */
+@keyframes veto-launch-fade {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.veto-finale-enter #veto-launch-btn {
+  animation: veto-launch-fade 360ms ease-out both;
+  animation-delay: 900ms;
+}
+
+/* ── Confetti ───────────────────────────────────────────────────────────
+ * Absolutely positioned over the finale stage.  Each piece is a small
+ * rotated rectangle that falls from -40 px to 600 px while spinning.
+ * Colours rotate via :nth-child(N of …) — 5 hues mixed so it doesn't
+ * read as a flag.  pointer-events: none so the Hand-to-MatchZy button
+ * stays clickable underneath. */
+.veto-confetti {
+  position: absolute; inset: 0; overflow: hidden; pointer-events: none;
+  z-index: 1;
+}
+.veto-finale { position: relative; overflow: hidden; }
+.veto-finale-title, .veto-finale-sub, .veto-finale-maps, #veto-launch-btn {
+  position: relative; z-index: 2;
+}
+@keyframes veto-confetti-fall {
+  0%   { transform: translateY(-40px) rotate(0deg);   opacity: 0; }
+  10%  { opacity: 1; }
+  90%  { opacity: 1; }
+  100% { transform: translateY(620px) rotate(720deg); opacity: 0; }
+}
+.veto-confetti-piece {
+  position: absolute; top: 0; width: 8px; height: 14px;
+  background: var(--accent);
+  animation: veto-confetti-fall 2.6s linear both;
+}
+/* Colour rotation — five hues, with the accent (orange-ish) anchoring. */
+.veto-confetti-piece:nth-child(5n+1) { background: var(--accent); }
+.veto-confetti-piece:nth-child(5n+2) { background: var(--ok); }
+.veto-confetti-piece:nth-child(5n+3) { background: var(--blue, #5aa9e6); }
+.veto-confetti-piece:nth-child(5n+4) { background: #f6c84c; }   /* warm gold */
+.veto-confetti-piece:nth-child(5n+5) { background: #d96cc4; }   /* magenta accent */
+/* Every other piece falls slightly tilted for visual variety. */
+.veto-confetti-piece:nth-child(2n) { width: 6px; height: 10px; transform: rotate(15deg); }
+.veto-confetti-piece:nth-child(3n) { width: 10px; height: 6px; }
