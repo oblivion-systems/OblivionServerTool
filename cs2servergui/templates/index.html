@@ -143,6 +143,12 @@
          level so remote captains/guests have visual confirmation, and
          the admin sees they're admin vs. accidentally on a guest tab. -->
     <span id="hdr-role-pill" class="role-pill hidden" title="Your session role"></span>
+    <!-- SSE status pill (v0.10.2): "Live" / "Reconnecting…" / "Offline".
+         Lets remote users distinguish "quiet" from "broken connection."
+         Hidden when SSE is healthy (status="live") to avoid clutter;
+         appears on first reconnect attempt and goes back to hidden once
+         the stream is live again. -->
+    <span id="hdr-sse-status" class="sse-status hidden" title="Live update stream status"></span>
 
     <!-- Connect button — opens popover with LAN/Public connect strings -->
     <button id="hdr-connect-btn" class="hdr-connect hidden" title="Share this server">

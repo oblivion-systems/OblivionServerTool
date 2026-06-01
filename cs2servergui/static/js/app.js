@@ -262,7 +262,7 @@ async function doQuickRestart() {
     toast(e.message, 'var(--red)');
   } finally {
     // Always restore the poll interval
-    _stateInterval = setInterval(pollState, 3000);
+    _stateInterval = setInterval(pollState, 10000);
     if (btn) {
       btn.disabled = false;
       btn.innerHTML = icon('<polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.25"/>');
@@ -590,27 +590,195 @@ function appendLog(line) {
   if (window.LogDrawer) LogDrawer.append(line);
 }
 
-let _sseRetries = 0;
-const _SSE_MAX_RETRIES = 12;   // ~1 min of retries before giving up
-function startSSE() {
-  if (logEs) logEs.close();
-  logEs = new EventSource('/api/log/stream');
-  logEs.onmessage = e => { _sseRetries = 0; appendLog(e.data); };   // reset backoff on data
-  logEs.onerror   = () => {
-    logEs.close();
-    // Cap reconnects so an expired session doesn't spin forever; a 401 on any
-    // API call will already have reloaded the page to the login screen.
-    if (_sseRetries++ < _SSE_MAX_RETRIES) setTimeout(startSSE, 5000);
-  };
+// v0.10.2 — Shared SSE transport.  Replaces two divergent reconnect
+// strategies (log: cap at 12 retries; veto: fixed 5 s only while on the
+// veto tab).  Single helper with:
+//
+//   * Exponential backoff (1 → 2 → 4 → 8 → 16 → 30 s capped) so a flaky
+//     cell connection doesn't hammer the tunnel
+//   * Re-arm on `online` + `visibilitychange` so a phone screen-lock
+//     followed by 2 min of background doesn't leave the stream
+//     permanently dead
+//   * Aggregate "health" status (live / connecting / reconnecting /
+//     offline) used by the header status pill so users distinguish
+//     "quiet" from "broken"
+//   * `close()` returns a handle owners can use to tear down on tab
+//     navigation (veto tab does this on hashchange-away)
+//
+// Public:
+//   const handle = _oblivionSSE.connect(path, {onMessage, onOpen, onError, label});
+//   handle.close();
+//
+// Where label is a short string (e.g. "log", "veto", "state") used in
+// the aggregate status calculation and console diagnostics.
+const _oblivionSSE = (() => {
+  const _streams = new Map();   // label -> {es, retries, timer, opts}
+  const BACKOFF  = [1000, 2000, 4000, 8000, 16000, 30000];
+
+  // Aggregate status across all active streams.  Mapped to the header
+  // status pill via _renderSSEStatus below.
+  //   live          — all known streams have emitted at least one message
+  //   connecting    — at least one stream is in initial connection
+  //   reconnecting  — at least one stream is in backoff after a drop
+  //   offline       — all streams have exhausted backoff (or no streams)
+  let _aggStatus = 'live';
+  function _recomputeStatus() {
+    if (_streams.size === 0) { _setStatus('live'); return; }
+    let any_connecting = false, any_reconnecting = false, any_live = false, all_dead = true;
+    for (const s of _streams.values()) {
+      if (s.dead) continue;
+      all_dead = false;
+      if (s.status === 'live') any_live = true;
+      else if (s.status === 'reconnecting') any_reconnecting = true;
+      else any_connecting = true;
+    }
+    if (all_dead) _setStatus('offline');
+    else if (any_reconnecting) _setStatus('reconnecting');
+    else if (any_live) _setStatus('live');
+    else _setStatus('connecting');
+  }
+  function _setStatus(s) {
+    if (_aggStatus === s) return;
+    _aggStatus = s;
+    _renderSSEStatus(s);
+  }
+
+  function connect(path, opts = {}) {
+    const label = opts.label || path;
+    // Close any prior stream with the same label (idempotent re-subscribe).
+    _close(label);
+    const state = {
+      es: null, retries: 0, timer: null, opts, status: 'connecting',
+      path, label, dead: false, closed: false,
+    };
+    _streams.set(label, state);
+    _open(state);
+    _recomputeStatus();
+    return {
+      close() {
+        state.closed = true;
+        _close(label);
+      },
+    };
+  }
+
+  function _open(state) {
+    try {
+      state.es = new EventSource(state.path);
+    } catch (exc) {
+      _scheduleReconnect(state, exc);
+      return;
+    }
+    state.es.onopen = () => {
+      // EventSource onopen fires when the connection is established;
+      // the first message will flip status from "connecting" → "live".
+    };
+    state.es.onmessage = e => {
+      state.retries = 0;
+      state.status = 'live';
+      _recomputeStatus();
+      try { if (state.opts.onMessage) state.opts.onMessage(e); } catch (exc) {
+        console.warn(`[sse:${state.label}] onMessage threw`, exc);
+      }
+    };
+    state.es.onerror = () => {
+      try { state.es.close(); } catch (_) {}
+      state.es = null;
+      if (state.closed) return;
+      _scheduleReconnect(state);
+    };
+  }
+
+  function _scheduleReconnect(state) {
+    if (state.closed) return;
+    const i = Math.min(state.retries, BACKOFF.length - 1);
+    const delay = BACKOFF[i];
+    state.retries++;
+    state.status = 'reconnecting';
+    _recomputeStatus();
+    state.timer = setTimeout(() => {
+      if (state.closed) return;
+      _open(state);
+    }, delay);
+    // After many retries (~5 min real time at the 30 s cap), mark dead so
+    // the aggregate goes to "offline" — but we KEEP retrying (it's cheap).
+    // The visibilitychange/online handlers will reset retries on user
+    // activity so a long-locked phone catches up fast on wake.
+    if (state.retries > 10) state.dead = true;
+  }
+
+  function _close(label) {
+    const s = _streams.get(label);
+    if (!s) return;
+    s.closed = true;
+    if (s.timer) clearTimeout(s.timer);
+    try { if (s.es) s.es.close(); } catch (_) {}
+    _streams.delete(label);
+    _recomputeStatus();
+  }
+
+  // Re-arm: reset retries + immediately re-open every still-alive stream.
+  // Called on `online` event (network came back) and `visibilitychange`
+  // when the page becomes visible after a screen-lock or tab-switch.
+  function _reArmAll() {
+    for (const s of _streams.values()) {
+      if (s.closed) continue;
+      s.retries = 0;
+      s.dead = false;
+      if (s.timer) { clearTimeout(s.timer); s.timer = null; }
+      try { if (s.es) s.es.close(); } catch (_) {}
+      s.es = null;
+      _open(s);
+    }
+    _recomputeStatus();
+  }
+  // Global re-arm triggers — fired by _wireMobileSSEReconnect during init().
+  // (We don't bind them here directly because they'd run on script load,
+  // before init has a chance to set up other things.)
+  window.addEventListener('online',         _reArmAll);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') _reArmAll();
+  });
+  // Tear all streams down on Ctrl+R / window close so the server-side
+  // queues drop us immediately instead of waiting for the next keepalive
+  // cycle to notice the dead socket.
+  window.addEventListener('beforeunload', () => {
+    for (const label of Array.from(_streams.keys())) _close(label);
+  });
+
+  return { connect, status: () => _aggStatus };
+})();
+
+// Header status pill renderer.  Mirrors _aggStatus from _oblivionSSE.
+// "live" → hidden (no clutter when everything's fine); other states
+// show a coloured pill so the user can distinguish quiet from broken.
+function _renderSSEStatus(status) {
+  const pill = document.getElementById('hdr-sse-status');
+  if (!pill) return;
+  pill.classList.remove('hidden', 'sse-live', 'sse-connecting', 'sse-reconnecting', 'sse-offline');
+  if (status === 'live') {
+    pill.classList.add('hidden');
+    return;
+  }
+  pill.classList.add(`sse-${status}`);
+  pill.textContent = {
+    connecting:   'Connecting…',
+    reconnecting: 'Reconnecting…',
+    offline:      '✗ Offline',
+  }[status] || status;
 }
 
-// Close the SSE on page unload (Ctrl+R, window close) so the browser GC
-// doesn't have to clean up a dangling EventSource on the old window — the
-// server-side queue also stops receiving for the closed client immediately
-// instead of waiting for the next keepalive cycle to notice.
-window.addEventListener('beforeunload', () => {
-  try { if (logEs) logEs.close(); } catch (_) {}
-});
+// Existing log SSE — refactored to use the shared module.  Preserves the
+// previous behaviour: appendLog on each line.  No more 12-retry cap (the
+// shared module handles backoff cleanly + re-arms on visibility/online).
+let _logSseHandle = null;
+function startSSE() {
+  if (_logSseHandle) { _logSseHandle.close(); _logSseHandle = null; }
+  _logSseHandle = _oblivionSSE.connect('/api/log/stream', {
+    label: 'log',
+    onMessage: e => appendLog(e.data),
+  });
+}
 
 async function loadLogHistory() {
   try {
@@ -2072,21 +2240,19 @@ pages['veto'] = function() {
 };
 
 function _vetoSubscribe() {
+  // v0.10.2: refactored to use _oblivionSSE.  Exponential backoff +
+  // visibility/online re-arm + aggregate health status now come for free.
+  // _vetoEs becomes a handle (with .close()) instead of the raw EventSource.
   if (_vetoEs) { try { _vetoEs.close(); } catch (_) {} }
-  _vetoEs = new EventSource('/api/veto/stream');
-  _vetoEs.onmessage = (e) => {
-    try {
-      _vetoState = JSON.parse(e.data);
-      if (currentPage === 'veto') _renderVeto();
-    } catch (_) {}
-  };
-  _vetoEs.onerror = () => {
-    try { _vetoEs.close(); } catch (_) {}
-    _vetoEs = null;
-    // Cap reconnects via a 5-s setTimeout; SSE recovers naturally on the
-    // next render-trigger (tab re-open, manual reload).
-    if (currentPage === 'veto') setTimeout(_vetoSubscribe, 5000);
-  };
+  _vetoEs = _oblivionSSE.connect('/api/veto/stream', {
+    label: 'veto',
+    onMessage: (e) => {
+      try {
+        _vetoState = JSON.parse(e.data);
+        if (currentPage === 'veto') _renderVeto();
+      } catch (_) {}
+    },
+  });
 }
 
 function _renderVeto() {
@@ -3702,36 +3868,11 @@ function _wireMobileHamburger() {
   window.addEventListener('hashchange', () => sidebar.classList.remove('is-open'));
 }
 
-// v0.10.2 — When a phone screen locks then unlocks 60s+ later, the log
-// SSE has long since exhausted its 12-retry budget AND the veto SSE has
-// also gone dark.  Without this handler, the user sees a stale UI and
-// the only fix is a full page reload.  This re-arms both streams on
-// `visibilitychange` (phone wake) and `online` (network restored).
-function _wireMobileSSEReconnect() {
-  const recover = () => {
-    if (document.visibilityState !== 'visible') return;
-    // Log stream — reset the retry counter and re-subscribe.  Defensive:
-    // these globals may not exist depending on init order.
-    try {
-      if (typeof _sseRetries !== 'undefined') {
-        // Best-effort: reset retries + re-subscribe.  startSSE is
-        // idempotent because it closes the existing connection first.
-        _sseRetries = 0;       // eslint-disable-line no-undef
-      }
-      if (typeof startSSE === 'function') startSSE();
-    } catch (_) {}
-    // Veto stream — only re-subscribe if user is on the veto tab right now
-    // (otherwise the SSE cleanup on hashchange-away has already torn it
-    // down and we'd be creating a leak by re-opening here)
-    try {
-      if (currentPage === 'veto' && typeof _vetoSubscribe === 'function') {
-        _vetoSubscribe();
-      }
-    } catch (_) {}
-  };
-  document.addEventListener('visibilitychange', recover);
-  window.addEventListener('online', recover);
-}
+// v0.10.2 NOTE: the dedicated `_wireMobileSSEReconnect()` from earlier
+// in this release is gone — the shared `_oblivionSSE` module now handles
+// visibilitychange + online re-arm centrally for every registered stream.
+// init() no longer calls _wireMobileSSEReconnect.
+function _wireMobileSSEReconnect() { /* superseded by _oblivionSSE */ }
 
 async function init() {
   if (_initialised) return;
@@ -3812,7 +3953,19 @@ async function init() {
 
   // Initial state poll — must happen before setup check so is_local is known
   await pollState();
-  _stateInterval = setInterval(pollState, 3000);
+  // v0.10.2: poll cadence dropped from 3 s → 10 s.  With 7 connected users
+  // (admin + 2 captains + 4 spectators) at 3 s, the tunnel was carrying ~140
+  // round-trips/min just for state polling.  At 10 s that's ~42/min — still
+  // live-feeling for slow-moving fields (uptime, player count) without
+  // hammering metered mobile data.  Fast-moving state (veto + log) already
+  // arrives via SSE so the polling interval doesn't affect them.
+  _stateInterval = setInterval(pollState, 10000);
+  // Fire an immediate extra poll whenever the page becomes visible (phone
+  // unlock / tab-switch back) so the UI catches up instantly instead of
+  // waiting up to 10 s for the next interval tick.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') pollState();
+  });
 
   // ── First-run setup check (local window only) ──────────────────────────
   if (state.server.is_local) {

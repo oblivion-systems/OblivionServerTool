@@ -528,6 +528,64 @@ def t_api_state_includes_captain_team_field():
 t('/api/state: includes captain_team field (empty for admin)', t_api_state_includes_captain_team_field)
 
 
+def t_capabilities_admin_has_server_control():
+    """v0.10.2: /api/capabilities returns {role, is_local, can: [...]}.
+    Admin session (via PIN, not auto-auth) is REMOTE in test_client so
+    is_local will be False — the admin set without local-only tags is
+    what's expected here.  Local-only superset is in its own test."""
+    from cs2servergui.web import create_flask
+    ac = AppCore()
+    ac.admin_pin = '0000'
+    app = create_flask(ac)
+    client = app.test_client()
+    client.post('/api/auth/login', json={'pin': '0000'})
+    r = client.get('/api/capabilities')
+    body = r.get_json() or {}
+    if r.status_code != 200:
+        return False, f'status={r.status_code}'
+    if body.get('role') != 'admin':
+        return False, f'expected role=admin, got {body.get("role")}'
+    cans = set(body.get('can', []))
+    must_have = {'server.start', 'server.stop', 'server.broadcast',
+                 'players.kick', 'players.ban', 'config.write', 'veto.admin'}
+    missing = must_have - cans
+    if missing:
+        return False, f'admin missing tags: {missing}'
+    # Remote admin must NOT see the local-only tags
+    forbidden = {'rcon', 'steam.login', 'server.install', 'log.save'}
+    leaked = forbidden & cans
+    return (not leaked), f'remote admin leaked local-only: {leaked}'
+t('/api/capabilities: remote admin has server.control but not local-only', t_capabilities_admin_has_server_control)
+
+
+def t_capabilities_guest_is_restricted():
+    """A guest-PIN session should NOT include any of the local-only tags.
+    Verifies the renderer-side disable-with-tooltip pattern has the right
+    source of truth."""
+    from cs2servergui.web import create_flask
+    ac = AppCore()
+    ac.admin_pin = '0000'
+    ac.guest_pin = '9999'
+    app = create_flask(ac)
+    client = app.test_client()
+    # Login as guest (PIN '9999')
+    client.post('/api/auth/login', json={'pin': '9999'})
+    # Test client sessions are NOT is_local — but they're also not really
+    # "remote" in the sense of having a different IP from the server.  The
+    # auth route classifies test_client as remote because remote_addr is set.
+    r = client.get('/api/capabilities')
+    body = r.get_json() or {}
+    if r.status_code != 200:
+        return False, f'status={r.status_code} body={body}'
+    cans = set(body.get('can', []))
+    forbidden = {'rcon', 'steam.login', 'server.install',
+                 'server.start', 'server.stop', 'players.kick'}
+    leaked = forbidden & cans
+    return (not leaked and 'workshop.download' in cans), \
+           f'role={body.get("role")} leaked={leaked} cans={sorted(cans)}'
+t('/api/capabilities: guest session excludes admin + local-only tags', t_capabilities_guest_is_restricted)
+
+
 def t_stop_server_clears_last_start_error():
     """stop_server() must clear the stale last_start_error so a successful
     next-Start doesn't show a leftover banner from a failure two attempts ago."""

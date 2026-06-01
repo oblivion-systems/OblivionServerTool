@@ -7,23 +7,89 @@
 
 const api = (() => {
 
-  async function req(method, path, body = null) {
+  // v0.10.2 — request bottleneck with timeout + one retry on network error.
+  //
+  // Why: the cross-cutting audit caught that a single network blip on a
+  // Cloudflare-tunnelled session = silent stuck UI.  Default `fetch` has
+  // no timeout, and a one-off DNS/cell-handoff hiccup would leave the
+  // user with no feedback either way.
+  //
+  // Strategy:
+  //   - 10 s AbortController timeout per attempt.
+  //   - One retry ONLY on network-level failure (fetch threw, OR HTTP 502/503/504
+  //     which on Cloudflare means "tunnel briefly lost upstream").
+  //     We do NOT retry 4xx — those are intentional rejections that
+  //     re-tries can't fix.
+  //   - On final failure, throw a useful Error with: .status (number or 0),
+  //     .body (parsed JSON if any), .network (true for fetch-level failures
+  //     so the SPA can render a "lost connection" banner instead of a
+  //     plain toast).
+  const REQ_TIMEOUT_MS = 10_000;
+  const RETRY_STATUSES = new Set([502, 503, 504]);
+
+  async function _attempt(method, path, body, abortSignal) {
     const opts = {
       method,
       headers: { 'Content-Type': 'application/json' },
+      signal:  abortSignal,
     };
     if (body !== null) opts.body = JSON.stringify(body);
-    const r = await fetch(path, opts);
-    // Session expired / not authenticated: reload so the server shows the PIN
-    // screen — except for the login call itself, whose 401 means "wrong PIN"
-    // and must surface as an error the login form can display.
-    if (r.status === 401 && !path.includes('/api/auth/login')) {
-      location.reload();
-      throw new Error('Session expired');
+    return await fetch(path, opts);
+  }
+
+  async function req(method, path, body = null) {
+    let lastErr = null;
+    // Two attempts max: first try, then one retry on transient failure.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const ctrl  = new AbortController();
+      const timer = setTimeout(() => ctrl.abort('timeout'), REQ_TIMEOUT_MS);
+      let r;
+      try {
+        r = await _attempt(method, path, body, ctrl.signal);
+      } catch (fetchErr) {
+        // fetch threw — network-level failure (DNS, refused, abort, etc.).
+        clearTimeout(timer);
+        lastErr = fetchErr;
+        if (attempt === 0) {
+          // Brief pause before retry — gives the tunnel time to reconnect
+          await new Promise(res => setTimeout(res, 400));
+          continue;
+        }
+        const err = new Error(`Network error: ${fetchErr.message || fetchErr}`);
+        err.status = 0;
+        err.network = true;
+        throw err;
+      } finally {
+        clearTimeout(timer);
+      }
+
+      // Session expired / not authenticated: reload so the server shows the PIN
+      // screen — except for the login call itself, whose 401 means "wrong PIN"
+      // and must surface as an error the login form can display.
+      if (r.status === 401 && !path.includes('/api/auth/login')) {
+        location.reload();
+        throw new Error('Session expired');
+      }
+
+      // Cloudflare-tunnel hiccup? retry once.
+      if (RETRY_STATUSES.has(r.status) && attempt === 0) {
+        lastErr = new Error(`HTTP ${r.status}`);
+        await new Promise(res => setTimeout(res, 400));
+        continue;
+      }
+
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        const err = new Error(data.error || r.statusText);
+        err.status = r.status;
+        err.body   = data;
+        Object.assign(err, data);   // preserve old behaviour: err.preflight_errors, etc.
+        throw err;
+      }
+      return data;
     }
-    const data = await r.json().catch(() => ({}));
-    if (!r.ok) { const err = new Error(data.error || r.statusText); Object.assign(err, data); throw err; }
-    return data;
+    // Shouldn't reach here, but defend against logic bugs.
+    throw lastErr || new Error('Request failed');
   }
 
   const get  = (path)        => req('GET',    path);
@@ -37,6 +103,12 @@ const api = (() => {
 
     // ── State ─────────────────────────────────────────────────────────────
     state:   ()         => get('/api/state'),
+
+    // ── Capabilities (v0.10.2) — {role, is_local, can: [tags]} ────────────
+    // Single source of truth for "what can the current session do."
+    // SPA renders local-only / admin-only controls disabled-with-tooltip
+    // based on this instead of try-then-403.
+    capabilities: ()    => get('/api/capabilities'),
 
     // ── Server control ────────────────────────────────────────────────────
     start:   (map, mode, workshop = false) =>
