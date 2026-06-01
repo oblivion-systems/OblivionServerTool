@@ -128,6 +128,10 @@ const api = (() => {
       step:       (team, mapId)      => post('/api/veto/step', { team, map_id: mapId }),
       finale:     (loadMatch=true)   => post('/api/veto/finale', { load_match: loadMatch }),
       reset:      ()                 => post('/api/veto/reset'),
+      // QR returns SVG bytes, not JSON — used only as <img src=…>.
+      // qrUrl() builds the URL the SPA embeds; no fetch wrapper needed.
+      qrUrl:      (token, kind='lan') =>
+                    `/api/veto/qr?token=${encodeURIComponent(token)}&kind=${encodeURIComponent(kind)}`,
     },
   };
 })();

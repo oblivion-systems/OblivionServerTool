@@ -6,3 +6,7 @@ flask>=3.0.0
 werkzeug>=3.0.0
 pywebview>=5.0
 keyring>=25.0.0
+# Pure-Python QR generator (no Pillow / no native deps).  Used by the veto
+# captain-link share cards (v0.10.0 Day 4) to render SVG QR codes for the
+# captain join URLs.  ~70 KB pure Python; PyInstaller picks it up automatically.
+segno>=1.6.0

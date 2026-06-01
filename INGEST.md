@@ -267,8 +267,13 @@ admin-only unless noted.  Captains get a scoped session via `/api/veto/claim`
 | `POST /api/veto/step` | `perform_step(team, map_id)`.  Captains can only act for their own team; admins can act for either. **(captain + admin)** |
 | `POST /api/veto/finale` | `build_matchzy_config()` + `complete()`.  Logs the planned `matchzy_loadmatch` (full handoff lands on Day 6). |
 | `POST /api/veto/reset` | Clear the active session and return to `idle`. |
+| `GET /api/veto/qr?token=…&kind=lan\|public` | (v0.10.0 Day 4) SVG QR code for a captain join URL.  Validates token against the live session; admin/local only; cached `private, max-age=300`. |
 | `GET /veto?join=<token>` | Captain-link landing page — server-side claim + cookie set, then redirect to `/#veto`. **(public)** |
 | `GET /veto` (no token) | Redirects to `/#veto` so the SPA can render the live-mirror page. **(public)** |
+
+Day 4 also extended `POST /api/veto/tokens` and `POST /api/veto/revoke_token` to
+include the raw `token` field alongside the LAN/Public URLs so the SPA can build
+QR URLs without re-parsing tokens out of links.
 
 ### Frontend — Veto tab (v0.10.0 Day 3)
 
@@ -282,7 +287,7 @@ entry point in `app.js`; state comes from `/api/veto/state` + the SSE stream
 | `_renderVetoRoster(root, sess)` | 10-slot input grid + paste / demo / save / distribute |
 | `_renderVetoTeams(root, sess)` | A/B columns with captain badge after election + reshuffle |
 | `_renderVetoVoting(root, sess)` | Per-player vote buttons + revote indicator |
-| `_renderVetoLinks(root, sess)` | Captain link cards (LAN + Public URLs + Copy + Revoke) |
+| `_renderVetoLinks(root, sess)` | Captain link cards (LAN + Public URLs + Copy + Revoke + QR codes from `/api/veto/qr`) |
 | `_renderVetoBoard(root, sess)` | 7 map cards + turn banner + click-to-act (filtered by `legal_moves`) |
 | `_renderVetoFinale(root, sess)` | "Get Ready to Battle" + final maplist + Hand to MatchZy |
 | `_renderVetoComplete(root, sess)` | Series summary + Start a new session |

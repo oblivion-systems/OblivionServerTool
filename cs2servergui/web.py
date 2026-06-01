@@ -1267,9 +1267,11 @@ def create_flask(core: AppCore) -> Flask:
                 urls["public"] = f"http://{public}:{port}/veto?join={token}"
             return urls
         _veto_broadcast()
+        # Include the raw token alongside the URLs so the SPA can build
+        # /api/veto/qr?token=… without re-parsing it out of the LAN URL.
         return jsonify({
-            "A": _urls(tokens["A"]),
-            "B": _urls(tokens["B"]),
+            "A": {"token": tokens["A"], **_urls(tokens["A"])},
+            "B": {"token": tokens["B"], **_urls(tokens["B"])},
         })
 
     @app.route("/api/veto/revoke_token", methods=["POST"])
@@ -1291,7 +1293,9 @@ def create_flask(core: AppCore) -> Flask:
         if public:
             urls["public"] = f"http://{public}:{port}/veto?join={new_token}"
         _veto_broadcast()
-        return jsonify({"team": team, "urls": urls})
+        # Include raw token (mirrors /api/veto/tokens) so the SPA can build
+        # the QR URL without parsing the token out of the LAN link.
+        return jsonify({"team": team, "token": new_token, "urls": urls})
 
     @app.route("/api/veto/claim", methods=["POST"])
     def veto_claim():
@@ -1428,6 +1432,72 @@ def create_flask(core: AppCore) -> Flask:
         _veto_broadcast()
         core.log("[veto] session reset")
         return jsonify({"ok": True, "state": "idle"})
+
+    # ── Captain-link QR codes (v0.10.0 Day 4) ─────────────────────────────────
+    # Returns an SVG QR code for a captain's join URL.  The SPA's Links stage
+    # embeds <img src="/api/veto/qr?token=…&kind=lan"> alongside each Copy
+    # button so captains on their phones can scan instead of typing.
+    #
+    # Why server-side: pure-Python segno avoids bundling ~10 KB of QR JS in
+    # static/ and keeps the SVG cacheable (the URL is stable for the life of
+    # the token).  Auth: admin/local only — captains have already received
+    # their URL via the operator, they don't need to request QR codes.
+    #
+    # Token validation: the endpoint refuses unknown tokens so it can't be
+    # used as a generic QR proxy by anyone who somehow got a session cookie.
+    @app.route("/api/veto/qr")
+    @require_auth
+    def veto_qr():
+        import segno
+        from io import BytesIO
+        token = request.args.get("token", "").strip()
+        kind  = request.args.get("kind", "lan").strip().lower()
+        if not token:
+            return jsonify({"error": "token required"}), 400
+        if kind not in ("lan", "public"):
+            return jsonify({"error": "kind must be 'lan' or 'public'"}), 400
+        with core._veto_lock:
+            s = core._veto_session
+            if s is None:
+                return jsonify({"error": "no active veto session"}), 400
+            # Match against currently-issued tokens.  Single-use semantics:
+            # the QR endpoint is OK to call even after a captain has claimed
+            # — the URL stays the same and the operator may want to re-share.
+            valid = any(t.value == token for t in (s.tokens or {}).values())
+            if not valid:
+                return jsonify({"error": "unknown token"}), 404
+        # Build the URL the same way veto_tokens / veto_revoke_token do.
+        port = _config.FLASK_PORT
+        if kind == "lan":
+            host = _config._lan_ip()
+        else:
+            host = core.public_ip or ""
+            if not host:
+                return jsonify({"error": "no public IP — cannot build URL"}), 400
+        url = f"http://{host}:{port}/veto?join={token}"
+        # error='M' gives ~15% damage tolerance — fine for a phone scan at
+        # close range; lower error level would shrink the QR but a wet/glare
+        # phone screen is the realistic enemy here.  scale=8 (~200 px) is the
+        # sweet spot for both desktop popovers and printable share cards.
+        try:
+            qr = segno.make(url, error='m')
+        except Exception as e:
+            return jsonify({"error": f"QR encode failed: {e}"}), 500
+        buf = BytesIO()
+        # SVG output: vector, scales perfectly, no Pillow dep.  xmldecl=False
+        # so it embeds cleanly into an <img src>.
+        qr.save(buf, kind='svg', scale=8, border=2, xmldecl=False, svgns=True)
+        from flask import Response
+        return Response(
+            buf.getvalue(),
+            mimetype='image/svg+xml',
+            # Cache aggressively — the token+kind combo maps to a stable URL
+            # for the life of the veto session.  Token rotation (revoke +
+            # reissue) produces a different ?token= value, so cache key
+            # differs naturally.  No-store on errors via the early returns
+            # above keeps stale-error responses out of the cache.
+            headers={"Cache-Control": "private, max-age=300"},
+        )
 
     # ── Log SSE ────────────────────────────────────────────────────────────────
 
