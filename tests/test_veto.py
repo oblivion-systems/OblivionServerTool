@@ -743,6 +743,72 @@ def t_state_transitions_reachable_from_idle():
 t('state graph: every state idle→complete reachable via the helpers', t_state_transitions_reachable_from_idle)
 
 
+def t_set_ready_only_in_finale():
+    """set_ready raises InvalidVetoTransition outside finale state.
+    Defends against a stale captain SPA tab toggling Ready during a
+    fresh session's roster/voting/veto stages."""
+    for state in ('roster', 'teams', 'voting', 'links', 'veto', 'complete'):
+        s = _make_to(state)
+        try:
+            V.set_ready(s, 'A', True)
+            return False, f'should have raised from state={state}'
+        except (InvalidVetoTransition, VetoStageError):
+            pass
+    return True, ''
+t('set_ready: legal only in finale state', t_set_ready_only_in_finale)
+
+
+def t_set_ready_toggles():
+    """set_ready can mark ready=True, then un-ready with ready=False."""
+    s = _make_to('finale')
+    V.set_ready(s, 'A', True)
+    if not s.ready_a or s.ready_b:
+        return False, f'after A ready: a={s.ready_a} b={s.ready_b}'
+    V.set_ready(s, 'B', True)
+    if not (s.ready_a and s.ready_b):
+        return False, 'B ready should not have cleared A'
+    V.set_ready(s, 'A', False)
+    return (s.ready_a is False and s.ready_b is True), \
+           f'after A un-ready: a={s.ready_a} b={s.ready_b}'
+t('set_ready: toggles independently per team', t_set_ready_toggles)
+
+
+def t_both_captains_ready_predicate():
+    s = _make_to('finale')
+    if V.both_captains_ready(s):
+        return False, 'fresh finale should NOT have both ready'
+    V.set_ready(s, 'A', True)
+    if V.both_captains_ready(s):
+        return False, 'only A ready - both_captains_ready should be False'
+    V.set_ready(s, 'B', True)
+    return V.both_captains_ready(s), 'both set to True'
+t('both_captains_ready: True only when both flags set', t_both_captains_ready_predicate)
+
+
+def t_set_ready_unknown_team_rejected():
+    s = _make_to('finale')
+    for bad in ('C', 'a', '', 'AB', 'team_a'):
+        try:
+            V.set_ready(s, bad, True)
+            return False, f'should have rejected team={bad!r}'
+        except VetoStageError:
+            pass
+    return True, ''
+t('set_ready: unknown team values rejected', t_set_ready_unknown_team_rejected)
+
+
+def t_reset_clears_ready_flags():
+    """Both ready flags must clear on reset so a fresh session starts
+    with both captains un-ready (not inheriting from the prior match)."""
+    s = _make_to('finale')
+    V.set_ready(s, 'A', True)
+    V.set_ready(s, 'B', True)
+    V.reset(s)
+    return (s.ready_a is False and s.ready_b is False), \
+           f'after reset: a={s.ready_a} b={s.ready_b}'
+t('reset: clears both ready flags', t_reset_clears_ready_flags)
+
+
 def t_reset_from_complete():
     """A finished session must accept reset() so the operator can
     start a fresh BO without restarting the app."""

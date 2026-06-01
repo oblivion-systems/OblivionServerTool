@@ -686,6 +686,159 @@ def t_finale_calls_rcon_with_correct_filename_when_running():
 t('finale: load_match=True + running → matchzy_loadmatch <basename> issued', t_finale_calls_rcon_with_correct_filename_when_running)
 
 
+def _drive_to_finale_state(c, app):
+    """Like _drive_to_finale but returns the (cap_a, cap_b, pool) tuple so
+    callers can hit the captain ready endpoint with the right session
+    cookies — needed for the new v0.10.1 ready endpoint tests."""
+    c.post('/api/veto/create', json={'mode': 'BO3'})
+    c.post('/api/veto/roster', json={
+        'team_a_name': 'Alpha', 'team_b_name': 'Bravo',
+        'players': _ten_player_payload(),
+    })
+    c.post('/api/veto/distribute'); c.post('/api/veto/start_voting')
+    for team in ('A','B'):
+        for v in range(5):
+            c.post('/api/veto/vote', json={'team':team,'voter_idx':v,'votee_idx':0})
+    c.post('/api/veto/resolve_captains')
+    tk = c.post('/api/veto/tokens').get_json()
+    cap_a, cap_b = app.test_client(), app.test_client()
+    cap_a.post('/api/veto/claim', json={'token': tk['A']['token']})
+    cap_b.post('/api/veto/claim', json={'token': tk['B']['token']})
+    pool = c.get('/api/veto/state').get_json()['session']['map_pool']
+    cap_a.post('/api/veto/step', json={'map_id': pool[0]})
+    cap_b.post('/api/veto/step', json={'map_id': pool[1]})
+    cap_a.post('/api/veto/step', json={'map_id': pool[2]})
+    cap_b.post('/api/veto/step', json={'map_id': pool[3]})
+    cap_a.post('/api/veto/step', json={'map_id': pool[4]})
+    cap_b.post('/api/veto/step', json={'map_id': pool[5]})
+    return cap_a, cap_b
+
+
+def t_ready_captain_can_set_own_team():
+    ac, app, c = _new_app()
+    _login(c)
+    cap_a, cap_b = _drive_to_finale_state(c, app)
+    r = cap_a.post('/api/veto/ready', json={'ready': True})
+    body = r.get_json()
+    return (r.status_code == 200 and body.get('ready_a') is True
+            and body.get('ready_b') is False
+            and body.get('both_ready') is False
+            and body.get('team') == 'A'), f'body={body}'
+t('ready: captain A can set own team ready', t_ready_captain_can_set_own_team)
+
+
+def t_ready_captain_cannot_spoof_other_team():
+    ac, app, c = _new_app()
+    _login(c)
+    cap_a, cap_b = _drive_to_finale_state(c, app)
+    # Captain A passes team=B in body — must be rejected as spoof
+    r = cap_a.post('/api/veto/ready', json={'ready': True, 'team': 'B'})
+    return r.status_code == 403, f'status={r.status_code} body={r.get_data(as_text=True)[:100]!r}'
+t('ready: captain A spoofing team=B → 403', t_ready_captain_cannot_spoof_other_team)
+
+
+def t_ready_admin_can_set_either_team():
+    """Admin acks-on-behalf for an AFK captain — passes team explicitly."""
+    ac, app, c = _new_app()
+    _login(c)
+    _drive_to_finale_state(c, app)
+    r = c.post('/api/veto/ready', json={'ready': True, 'team': 'B'})
+    body = r.get_json()
+    return (r.status_code == 200 and body.get('ready_b') is True
+            and body.get('team') == 'B'), f'body={body}'
+t('ready: admin can set any team via explicit team= field', t_ready_admin_can_set_either_team)
+
+
+def t_ready_admin_team_required():
+    ac, app, c = _new_app()
+    _login(c)
+    _drive_to_finale_state(c, app)
+    r = c.post('/api/veto/ready', json={'ready': True})  # no team
+    return r.status_code == 400, f'status={r.status_code}'
+t('ready: admin without team= → 400', t_ready_admin_team_required)
+
+
+def t_ready_both_captains_flips_both_ready():
+    ac, app, c = _new_app()
+    _login(c)
+    cap_a, cap_b = _drive_to_finale_state(c, app)
+    cap_a.post('/api/veto/ready', json={'ready': True})
+    r = cap_b.post('/api/veto/ready', json={'ready': True})
+    body = r.get_json()
+    return (body.get('both_ready') is True), f'body={body}'
+t('ready: both captains ready → both_ready=True in response', t_ready_both_captains_flips_both_ready)
+
+
+def t_ready_state_clears_on_reset():
+    ac, app, c = _new_app()
+    _login(c)
+    cap_a, cap_b = _drive_to_finale_state(c, app)
+    cap_a.post('/api/veto/ready', json={'ready': True})
+    cap_b.post('/api/veto/ready', json={'ready': True})
+    c.post('/api/veto/reset')
+    # New session — ready flags should be False
+    snap = c.get('/api/veto/state').get_json()
+    return snap['state'] == 'idle' and snap['session'] is None, f'snap={snap}'
+t('ready: reset clears session (and ready flags with it)', t_ready_state_clears_on_reset)
+
+
+def t_ready_snapshot_includes_flags():
+    """Mid-finale snapshot exposes ready_a, ready_b, both_ready inside session."""
+    ac, app, c = _new_app()
+    _login(c)
+    _drive_to_finale_state(c, app)
+    snap = c.get('/api/veto/state').get_json()
+    sess = snap.get('session') or {}
+    needs = {'ready_a', 'ready_b', 'both_ready'}
+    return (needs.issubset(set(sess.keys()))
+            and sess['ready_a'] is False
+            and sess['ready_b'] is False
+            and sess['both_ready'] is False), f'sess_keys={sorted(sess.keys())}'
+t('ready: snapshot includes ready_a/ready_b/both_ready inside session', t_ready_snapshot_includes_flags)
+
+
+def t_public_share_url_used_in_tokens_response():
+    """When public_share_url is set, /api/veto/tokens returns a Public URL
+    built from it instead of http://<public_ip>:<port>/."""
+    ac, app, c = _new_app()
+    _login(c)
+    ac.public_share_url = 'https://random-words.trycloudflare.com'
+    ac.public_ip = '1.2.3.4'  # would lose if share URL is honoured
+    c.post('/api/veto/create', json={'mode': 'BO3'})
+    c.post('/api/veto/roster', json={'team_a_name':'A','team_b_name':'B',
+                                      'players':_ten_player_payload()})
+    c.post('/api/veto/distribute'); c.post('/api/veto/start_voting')
+    for team in ('A','B'):
+        for v in range(5):
+            c.post('/api/veto/vote', json={'team':team,'voter_idx':v,'votee_idx':0})
+    c.post('/api/veto/resolve_captains')
+    tk = c.post('/api/veto/tokens').get_json()
+    pub_a = tk['A'].get('public', '')
+    return (pub_a.startswith('https://random-words.trycloudflare.com/veto?join=')
+            and '1.2.3.4' not in pub_a), f'public={pub_a!r}'
+t('public_share_url: tokens response uses it instead of public_ip', t_public_share_url_used_in_tokens_response)
+
+
+def t_public_share_url_validated_on_save():
+    """POST /api/config with public_share_url that isn't a URL → 400."""
+    ac, app, c = _new_app()
+    _login(c)
+    r = c.post('/api/config', json={'public_share_url': 'not-a-url'})
+    return r.status_code == 400 and 'http' in r.get_json().get('error', '').lower(), \
+           f'status={r.status_code} body={r.get_data(as_text=True)[:80]!r}'
+t('public_share_url: must start with http:// or https://', t_public_share_url_validated_on_save)
+
+
+def t_public_share_url_can_be_cleared():
+    ac, app, c = _new_app()
+    _login(c)
+    ac.public_share_url = 'https://example.com'
+    r = c.post('/api/config', json={'public_share_url': ''})
+    return r.status_code == 200 and ac.public_share_url == '', \
+           f'status={r.status_code} val={ac.public_share_url!r}'
+t('public_share_url: blank value clears it', t_public_share_url_can_be_cleared)
+
+
 def t_finale_load_match_false_skips_rcon():
     ac, app, c = _new_app()
     _login(c)

@@ -479,6 +479,20 @@ class AppCore:
         self.bot_difficulty:       str  = "Normal"
         self.max_players_override: str  = ""
         self.presets:              dict[str, dict] = {}
+        # v0.10.1 — online-primary veto support
+        # public_share_url: when set, captain link cards build the Public
+        #   URL from this base instead of `http://<public_ip>:<port>`.  Use
+        #   case: operator is running cloudflared (or any reverse proxy);
+        #   their captains live on the internet not the LAN; the
+        #   port-forward URL doesn't reach them.  Operator pastes the
+        #   tunnel URL (e.g. https://random-words.trycloudflare.com) and
+        #   the SPA serves that as the captain join URL.
+        self.public_share_url:     str  = ""
+        # veto_auto_launch_on_ready: when both captains tick Ready on the
+        #   finale page, fire matchzy_loadmatch automatically.  Off by
+        #   default — admin clicks GO manually so they can verify the
+        #   server's in the right mode first.
+        self.veto_auto_launch_on_ready: bool = False
 
         # Runtime state
         self.public_ip:           str                      = ""
@@ -642,6 +656,9 @@ class AppCore:
         self.bots_enabled          = bool(cfg.get("bots_enabled", False))
         self.max_players_override  = cfg.get("max_players_override", "")
         self.presets               = cfg.get("presets", {})
+        # v0.10.1 — online-primary veto support (see __init__ for prose)
+        self.public_share_url            = cfg.get("public_share_url", "")
+        self.veto_auto_launch_on_ready   = bool(cfg.get("veto_auto_launch_on_ready", False))
 
         # Workshop command-filter detection results + manual overrides (wid → bool).
         self._cmdfilter_auto       = dict(cfg.get("cmdfilter_auto", {}))
@@ -684,6 +701,9 @@ class AppCore:
                 "presets":               self.presets,
                 "cmdfilter_auto":        self._cmdfilter_auto,
                 "cmdfilter_override":    self._cmdfilter_override,
+                # v0.10.1 online-primary veto config
+                "public_share_url":              self.public_share_url,
+                "veto_auto_launch_on_ready":     self.veto_auto_launch_on_ready,
             }
             # Atomic write: serialize via _config_save_lock so concurrent
             # save_config calls don't interleave (Flask is threaded), and use
