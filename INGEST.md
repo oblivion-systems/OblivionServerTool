@@ -253,9 +253,9 @@ admin-only unless noted.  Captains get a scoped session via `/api/veto/claim`
 
 | Route | Summary |
 |-------|---------|
-| `GET /api/veto/state` | Current session snapshot (state, roster, teams, votes, sequence, decider).  Tokens redacted. **(admin + captain)** |
+| `GET /api/veto/state` | Current session snapshot (state, roster, teams, votes, sequence, decider, `current_step_detail`, `legal_moves`).  Tokens redacted. **(admin + captain)** |
 | `GET /api/veto/stream` | SSE pub/sub for live mirror — pushes a JSON snapshot on every state change.  Initial snapshot delivered immediately on subscribe. **(admin + captain)** |
-| `POST /api/veto/create` | `create_session(mode, map_pool)` — starts a fresh session in `roster` state. |
+| `POST /api/veto/create` | `create_session(mode, map_pool)` — starts a fresh session in `roster` state.  Returns 409 if a session is already active (operator must call `/api/veto/reset` first). |
 | `POST /api/veto/roster` | `set_roster(team_a_name, team_b_name, players)` — players are `[{name, steam_id}]`. |
 | `POST /api/veto/distribute` | Random 5-5 split.  Self-callable in `teams` to reshuffle. |
 | `POST /api/veto/start_voting` | `teams` → `voting`. |

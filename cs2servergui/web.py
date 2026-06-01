@@ -1021,10 +1021,30 @@ def create_flask(core: AppCore) -> Flask:
         """Serialise the current session to a JSON-safe dict.  Tokens are
         REDACTED from the snapshot — captains learn their token via the
         one-time tokens response or by clicking their join URL; the snapshot
-        only ever exposes which tokens are claimed, not their values."""
+        only ever exposes which tokens are claimed, not their values.
+
+        Includes pre-computed `current_step_detail` + `legal_moves` so the
+        SPA frontend doesn't have to re-derive them on every render.
+        """
         s = core._veto_session
         if s is None:
             return {"state": "idle", "session": None}
+        # Pre-compute the active step + legal-move set for the frontend.
+        step = _veto.current_step(s)
+        if step is not None:
+            already_picked = {st.map_id for st in s.sequence[:s.current_step]
+                              if st.kind == "PICK" and st.map_id}
+            legal = _veto.remaining_maps(s)
+            if step.kind == "PICK":
+                legal = [m for m in legal if m not in already_picked]
+            step_detail = {
+                "index": s.current_step,
+                "kind":  step.kind,
+                "team":  step.team,
+            }
+        else:
+            legal = []
+            step_detail = None
         return {
             "state": s.state,
             "session": {
@@ -1048,6 +1068,9 @@ def create_flask(core: AppCore) -> Flask:
                 "sequence":      [{"kind": st.kind, "team": st.team, "map_id": st.map_id}
                                   for st in s.sequence],
                 "current_step":  s.current_step,
+                # NEW: pre-computed for the frontend (Day 3 SPA).
+                "current_step_detail": step_detail,
+                "legal_moves":   list(legal),
                 "decider":       s.decider,
                 "final_maps":    list(s.final_maps),
                 "updated_at":    s.updated_at,
@@ -1106,6 +1129,16 @@ def create_flask(core: AppCore) -> Flask:
         mode = d.get("mode", "BO3")
         map_pool = d.get("map_pool")
         with core._veto_lock:
+            # Refuse to silently clobber an in-flight session.  If the
+            # operator means to start over, they call /api/veto/reset first.
+            # This protects against accidental double-clicks on the SPA's
+            # Create button AND against a guest captain unknowingly nuking
+            # an active veto by re-claiming a stale URL.
+            if core._veto_session is not None and core._veto_session.state != "idle":
+                return jsonify({
+                    "error": "A veto session is already active — call /api/veto/reset first.",
+                    "current_state": core._veto_session.state,
+                }), 409
             try:
                 core._veto_session = _veto.create_session(mode=mode, map_pool=map_pool)
             except Exception as e:
