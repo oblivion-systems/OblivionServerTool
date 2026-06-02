@@ -415,9 +415,32 @@ def issue_tokens(session: VetoSession) -> dict[str, str]:
     """Mint scoped single-use tokens for both captains.  Returns the raw
     values keyed by team.  Caller delivers them to the captains via copy /
     QR / DM (Layer 1).  Must be in `links` state.
+
+    **Idempotent (v0.11.2 fix):** if tokens already exist for this session
+    and neither has been claimed yet, return the SAME values.  Without
+    this, a browser refresh or accidental re-tap of the operator's
+    "Generate links" button silently rotates both tokens — the captain
+    who already opened their link is fine (their token's still bound),
+    but the OTHER captain's link is now dead with no warning.  Operator
+    only finds out when the second captain reports "your link doesn't
+    work."
+
+    For the explicit rotate case use `revoke_token(session, team)` per
+    team (single-team rotation, leaves the other captain's link alive).
+    Pattern mirrors v0.11.1's `issue_spectator_token` /
+    `rotate_spectator_token` split.
+
+    Edge case: if either token has been CLAIMED already, we return the
+    existing dict unchanged (rotating a claimed token would log the
+    captain out mid-veto — operator should use `revoke_token` instead,
+    which handles state rollback).
     """
     if session.state != "links":
         raise InvalidVetoTransition(f"issue_tokens legal only in links (now {session.state})")
+    # Idempotent return when called a second time — captains' shared
+    # links must not silently invalidate.
+    if session.tokens and "A" in session.tokens and "B" in session.tokens:
+        return {"A": session.tokens["A"].value, "B": session.tokens["B"].value}
     now = time.time()
     session.tokens = {
         "A": CaptainToken("A", secrets.token_urlsafe(32), now),
