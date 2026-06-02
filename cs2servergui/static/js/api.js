@@ -114,6 +114,10 @@ const api = (() => {
     discord: {
       voiceChannels: ()           => get('/api/discord/voice_channels'),
       voiceMembers:  (channelId)  => get(`/api/discord/voice_members?channel_id=${encodeURIComponent(channelId)}`),
+      // v0.11.0 polish — connection-check helpers
+      testEmbed:     (channelId)  => post('/api/discord/test_embed',
+                                          channelId ? { channel_id: channelId } : {}),
+      testDm:        (discordId)  => post('/api/discord/test_dm', { discord_id: discordId }),
     },
 
     // ── Server control ────────────────────────────────────────────────────
@@ -206,6 +210,8 @@ const api = (() => {
       step:       (team, mapId)      => post('/api/veto/step', { team, map_id: mapId }),
       finale:     (loadMatch=true)   => post('/api/veto/finale', { load_match: loadMatch }),
       reset:      ()                 => post('/api/veto/reset'),
+      // v0.10.2 — last N completed matches persisted to oblivion_matches.json
+      history:    ()                 => get('/api/veto/history'),
       // v0.10.2: rematch with same teams.  Optional body fields:
       // mode ('BO1'|'BO3'|'BO5') + map_pool (7 entries).
       rematch:    (mode, mapPool)    => post('/api/veto/rematch',
