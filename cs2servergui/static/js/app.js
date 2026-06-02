@@ -2352,6 +2352,9 @@ let _vetoCreateMode = 'BO3';
 function _renderVetoIdle(root) {
   root.innerHTML = `
     <div class="veto-stage">
+      <div id="veto-online-banner" class="veto-online-banner veto-online-banner--loading">
+        Checking public share URL…
+      </div>
       <div class="veto-stage-head"><h2>Start a new match setup</h2>
         <span class="sub">10 players, captain vote, ban/pick over 7 maps</span></div>
       <div class="veto-create-card">
@@ -2365,6 +2368,7 @@ function _renderVetoIdle(root) {
       </div>
     </div>
   `;
+  _vetoRenderOnlineBanner();   // fire-and-forget — paints async, OK if Idle re-renders
   document.querySelectorAll('#veto-mode-pills .pill').forEach(p => {
     p.addEventListener('click', () => {
       _vetoCreateMode = p.dataset.mode;
@@ -2634,6 +2638,78 @@ async function _vetoOpenDiscordPullModal() {
         for permissions + setup.
       </div>
     `;
+  }
+}
+
+/* ── v0.11.0 polish — "Go Online" banner ─────────────────────────────────
+ * Renders inside the Veto-idle stage.  Pulls /api/config to check whether
+ * the operator has set `public_share_url` (their Cloudflare tunnel URL,
+ * typically).  Without it, captain links are LAN-only — fine on a LAN
+ * party, fatal when the captain is at home.
+ *
+ * Three states:
+ *   - online: green + masked URL + copy button + "open" link
+ *   - lan-only: yellow + "Configure" jump-to-config link
+ *   - error: red + the error (only on /api/config failure — rare)
+ *
+ * Fire-and-forget; if the Veto tab re-renders while we're loading, the
+ * old element is just orphaned (the next call paints into the new node).
+ */
+async function _vetoRenderOnlineBanner() {
+  const node = el('veto-online-banner');
+  if (!node) return;
+  try {
+    const cfg = await api.config();
+    const url = (cfg.public_share_url || '').trim();
+    if (url) {
+      node.className = 'veto-online-banner veto-online-banner--online';
+      node.innerHTML = `
+        <div class="veto-online-row">
+          <span class="veto-online-icon">🌐</span>
+          <span class="veto-online-label">Online · captain links use</span>
+          <code class="veto-online-url">${esc(url)}</code>
+          <button class="btn btn-ghost btn-sm" id="veto-online-copy">Copy</button>
+          <a class="btn btn-ghost btn-sm" href="${esc(url)}" target="_blank" rel="noopener">Open ↗</a>
+        </div>
+      `;
+      const copyBtn = el('veto-online-copy');
+      if (copyBtn) copyBtn.addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(url);
+          toast('Public URL copied');
+        } catch (_e) {
+          toast('Copy failed (HTTPS required for clipboard)', 'var(--bad)');
+        }
+      });
+    } else {
+      node.className = 'veto-online-banner veto-online-banner--lan';
+      node.innerHTML = `
+        <div class="veto-online-row">
+          <span class="veto-online-icon">📡</span>
+          <span class="veto-online-label">
+            <strong>LAN-only.</strong>
+            Captain links will use your local IP — fine for a LAN party,
+            but won't work if a captain is at home.
+          </span>
+          <button class="btn btn-ghost btn-sm" id="veto-online-configure">
+            Configure public URL →
+          </button>
+        </div>
+      `;
+      const cfgBtn = el('veto-online-configure');
+      if (cfgBtn) cfgBtn.addEventListener('click', () => {
+        // Switch to the Config tab; the input is `cfg-public-share-url`.
+        const cfgTab = document.querySelector('.nav-item[data-tab="config"]');
+        if (cfgTab) cfgTab.click();
+        setTimeout(() => {
+          const inp = el('cfg-public-share-url');
+          if (inp) { inp.focus(); inp.scrollIntoView({behavior: 'smooth', block: 'center'}); }
+        }, 200);
+      });
+    }
+  } catch (err) {
+    node.className = 'veto-online-banner veto-online-banner--err';
+    node.textContent = `Couldn't read share-URL config: ${err.message || err}`;
   }
 }
 
