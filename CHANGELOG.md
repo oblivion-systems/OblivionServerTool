@@ -2,6 +2,39 @@
 
 ---
 
+## v0.11.2 — 2026-06-03 (pre-Friday hotfix + strategy doc)
+
+**Bug fix: `issue_tokens` idempotency.**  Previous behaviour: calling
+`issue_tokens` a second time from `links` ROTATED both captain
+tokens.  Realistic trigger — a captain refreshes their browser on
+the links page, or the operator double-taps "Generate captain
+links."  The captain who already opened their link kept working
+(claim binds the token), but the OTHER captain's shared URL was now
+dead with no warning — operator only found out when the second
+captain reported "your link doesn't work."
+
+Fix: `issue_tokens` now returns the existing dict unchanged when
+tokens exist for the session, including when one captain has
+already claimed theirs (rotating a claimed token would log that
+captain out mid-flow).  Per-team rotation remains available via
+`revoke_token('A')` / `revoke_token('B')` — those leave the other
+captain's link alive.
+
+Pattern mirrors v0.11.1's `issue_spectator_token` (idempotent) +
+`rotate_spectator_token` (explicit) split.
+
+**+2 unit tests**, original pinning test flipped to assert new
+behaviour.  test_veto 70/70, total **163/163**.
+
+**Also in this release: PLAN.md** — strategic roadmap to v1.0.
+Names the two-audience strategy (Average Joe + Pro server hoster),
+elevates Plugin Manager UX to the headline differentiator, adds
+Linux + headless + Docker as Phase 3.5, locks in BSL license model
++ donations-only monetization for v1.0.  Doesn't dictate code;
+sets direction.  See PLAN.md.
+
+---
+
 ## v0.11.1 — 2026-06-02 (polish release)
 
 Post-v0.11.0 polish sweep — Tuesday work toward Friday's live test.
