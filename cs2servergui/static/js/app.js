@@ -2431,6 +2431,14 @@ function _renderVetoRoster(root, sess) {
                 title="Paste 10 lines from clipboard. Each line: 'Name' OR 'Name,SteamID64' OR 'Name,SteamID64,DiscordID' (comma/tab/semicolon delimited)">
           Paste 10 names
         </button>
+        <button class="btn btn-ghost" id="veto-roster-preset-save"
+                title="Save the current 10-player roster as a named preset (stored in this browser)">
+          💾 Save preset
+        </button>
+        <select class="select" id="veto-roster-preset-load"
+                title="Load a saved roster preset (overwrites current input)">
+          <option value="">— Load preset —</option>
+        </select>
         <button class="btn btn-ghost" id="veto-roster-discord"
                 title="Pull a voice channel's connected members into the roster (auto-fills name + Discord ID)">
           🎤 Pull from voice channel
@@ -2520,6 +2528,73 @@ function _renderVetoRoster(root, sess) {
       const withDid = _vetoLocalRoster.filter(p => p.discord_id).length;
       toast(`Pasted 10 (${withSid} SteamIDs, ${withDid} DiscordIDs)`);
     } catch (e) { toast(`Clipboard read failed: ${e.message}`, 'var(--bad)'); }
+  });
+
+  // v0.11.0 polish — Roster presets (localStorage-backed; per-browser).
+  // Operator running recurring teams (weekly Tuesday match etc.) can save
+  // the current 10-player roster + reload it in one click.  Stored as
+  // {presetName: [{name, steam_id, discord_id} x 10]} under
+  // localStorage['oblivion.roster_presets'].  Per-browser is fine — per
+  // user memory, operator runs from one machine.
+  const _PRESETS_KEY = 'oblivion.roster_presets';
+  const _readPresets = () => {
+    try { return JSON.parse(localStorage.getItem(_PRESETS_KEY) || '{}'); }
+    catch (_e) { return {}; }
+  };
+  const _writePresets = (obj) => {
+    try { localStorage.setItem(_PRESETS_KEY, JSON.stringify(obj)); }
+    catch (e) { toast(`Preset save failed: ${e.message}`, 'var(--bad)'); }
+  };
+  const _populatePresetDropdown = () => {
+    const sel = el('veto-roster-preset-load');
+    if (!sel) return;
+    const presets = _readPresets();
+    const names = Object.keys(presets).sort();
+    sel.innerHTML = `<option value="">— Load preset (${names.length}) —</option>` +
+      names.map(n => `<option value="${esc(n)}">${esc(n)} (${(presets[n] || []).length})</option>`).join('') +
+      (names.length ? `<option value="__delete__">⚠ Delete a preset…</option>` : '');
+  };
+  _populatePresetDropdown();
+
+  el('veto-roster-preset-save').addEventListener('click', () => {
+    const filled = _vetoLocalRoster.filter(p => p.name.trim()).length;
+    if (filled === 0) { toast('Nothing to save — roster is empty', 'var(--bad)'); return; }
+    const name = (prompt(`Preset name? (${filled}/10 filled — will save as-is)`) || '').trim();
+    if (!name) return;
+    const presets = _readPresets();
+    if (presets[name] && !confirm(`Overwrite preset "${name}"?`)) return;
+    presets[name] = _vetoLocalRoster.map(p => ({
+      name: p.name || '', steam_id: p.steam_id || '', discord_id: p.discord_id || ''
+    }));
+    _writePresets(presets);
+    _populatePresetDropdown();
+    toast(`Saved preset "${name}"`);
+  });
+
+  el('veto-roster-preset-load').addEventListener('change', (e) => {
+    const v = e.target.value;
+    if (!v) return;
+    if (v === '__delete__') {
+      const presets = _readPresets();
+      const names = Object.keys(presets);
+      const which = (prompt(`Delete which preset?\n\n${names.join('\n')}`) || '').trim();
+      if (!which) { e.target.value = ''; return; }
+      if (!presets[which]) { toast(`No preset named "${which}"`, 'var(--bad)'); e.target.value = ''; return; }
+      if (!confirm(`Delete preset "${which}" permanently?`)) { e.target.value = ''; return; }
+      delete presets[which];
+      _writePresets(presets);
+      _populatePresetDropdown();
+      toast(`Deleted "${which}"`);
+      e.target.value = '';
+      return;
+    }
+    const presets = _readPresets();
+    const r = presets[v];
+    if (!Array.isArray(r) || r.length === 0) { toast(`Preset "${v}" is empty`, 'var(--bad)'); e.target.value = ''; return; }
+    // Pad / trim to exactly 10
+    _vetoLocalRoster = Array.from({length: 10}, (_, i) => r[i] || { name: '', steam_id: '', discord_id: '' });
+    _renderVeto();
+    toast(`Loaded preset "${v}"`);
   });
 
   // v0.11.0 Layer 1B — Pull roster from a Discord voice channel.  Opens a
