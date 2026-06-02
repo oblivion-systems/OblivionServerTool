@@ -24,6 +24,130 @@ actually drives people to paid managed hosting.
 
 ---
 
+## The two-audience strategy
+
+Oblivion serves two distinct audiences, and the same engineering
+work satisfies both for different reasons.  This is intentional and
+strategic — not an accident of scope.
+
+### Audience 1 — "Average Joe" (the founding audience)
+
+The friend-group host.  Wants to run a CS2 / TF2 / Palworld server
+for their crew on weekends.  Doesn't want to learn RCON, what a
+`.vdf` file is, or why their server crashes when they install three
+plugins.
+
+What they value:
+- **"It just works"** out of the box
+- **Curated picks**: "give me something good for casual play"
+- **No jargon** — plain-language descriptions, no
+  `mp_warmup_pausetimer` exposed by default
+- **Forgiving** — they'll click the wrong button; the tool shouldn't
+  punish them
+- **Free** — they're hosting for friends, not paying customers
+
+### Audience 2 — "Pro server hoster" (the climb-up market)
+
+Tournament organizer, community admin team, scrim-organizer for a
+local league, semi-commercial host.  Already comfortable with RCON,
+plugins, Linux.
+
+What they value:
+- **Reliability** — uptime, predictable behavior, no silent
+  failures
+- **Automation** — scheduled tasks, multi-server management,
+  templated deployments
+- **Auditability** — who changed what when, configuration history,
+  rollback
+- **Headless / Docker / Linux** — proper server-grade deployment
+  shape
+- **Time savings** — willing to pay for things that save 30 min/week
+
+### Why one product can serve both
+
+The same engineering decisions land differently for each audience:
+
+| Feature | Average Joe gets | Pro gets |
+|---|---|---|
+| Plugin Manager with curated packs | "I don't know what plugins I want — give me the Competitive 5v5 pack" | "Push a tested pack to 5 servers in one click" |
+| One-click factory reset | "Let me start over without uninstalling the tool" | "Spin up a fresh test environment" |
+| Auto-restart on crash | "I don't have to babysit the server during game night" | "Acceptable uptime without on-call rotation" |
+| Plain-language descriptions | "I finally understand what MatchZy does" | "Onboarding new junior admins takes 10 min, not 2 hours" |
+| Pre-flight panel | "Big green ✓ tells me I'm ready to start" | "Catch config drift before going live for a tournament" |
+| Discord bot integration | "Captain links auto-DM, no copy-paste" | "Match results post to community channel automatically" |
+| Atomic config saves + rollback | "I clicked the wrong thing and nothing got lost" | "Survive power cuts during a 50-server fleet deploy" |
+| Headless / Linux daemon | (rarely uses) | "Runs on the VPS, managed from phone" |
+| Scheduled tasks (Pro tier) | (rarely needs) | "Daily map updates at 5am, weekly auto-restart Sundays" |
+| Multi-server management (Pro tier) | (one server is enough) | "Promotes Oblivion from a tool to infrastructure" |
+
+**The discipline this implies for engineering**: "consumer-grade UX,
+pro-grade reliability."  Every feature must clear two bars:
+
+1. **Can the average Joe figure it out without docs?**
+2. **Does it behave deterministically under the load a pro would
+   put on it?**
+
+Failing either bar = the feature isn't done.
+
+### Why this is a strategic moat
+
+The competitive landscape:
+
+| Tool | Average Joe | Pro |
+|---|---|---|
+| **AMP (Cube Coders)** | ❌ too technical | ✅ established |
+| **Pterodactyl** | ❌ Docker + Linux + reverse proxy required | ✅ industry standard for hosts |
+| **Managed hosting** (Nitrado, GameServerKings) | ✅ trivial | ❌ no control, expensive at scale |
+| **Hand-rolled scripts** | ❌ requires sysadmin skill | ⚠️ each org rebuilds the wheel |
+| **Oblivion (target)** | ✅ first-class UX | ✅ headless + automation |
+
+**Nobody is currently serving both audiences well.**  Each tool is
+locked into its corner.  Oblivion's deliberate two-audience design
+hits the gap.
+
+### The natural monetization shape this implies
+
+The average Joe stays on the free tier — that's the audience that
+generates word-of-mouth, GitHub stars, and trust signals.  Charging
+them is counterproductive.
+
+The pro is the natural Pro-tier customer.  Features they want — and
+average Joe doesn't need — make obvious Pro tier candidates:
+- Multi-server management
+- Scheduled tasks (cron-style)
+- Audit log + permission groups (already started with v0.10.x guest PIN)
+- Premium curated packs (vetted, supported, breaking-change tested)
+- Cloud config sync (manage from any machine)
+- Priority Discord support queue
+- Health monitoring + alerting (webhook on RCON failure, email on
+  uptime drop)
+- API / webhook integration (programmatic control)
+- Backup / restore automation
+- Templates ("every new server gets this base config")
+
+This is the **natural Notion / Linear playbook**: free tier acquires
+the consumer audience, pro tier monetizes the team / commercial
+audience.  Same product, two pricing tiers.
+
+### The marketing arc that follows from this
+
+The story to tell, by phase:
+
+- **v0.12** (Plugin Manager lands): "Oblivion finally makes running
+  a CS2 server feel like installing a phone app."
+- **v0.13** (TF2): "Now for TF2 too — same UX, same pack model."
+- **v0.14** (Linux + headless + Docker): "Pros: run it on your VPS,
+  manage from your phone."
+- **v0.15** (first non-Source game): "Multi-game.  Self-hosted.
+  One UI."
+- **v1.0**: "Self-hosted game server platform.  Accessible enough
+  for first-timers, reliable enough for tournament operators."
+
+Each release earns one new audience segment without losing the
+previous one.  That's the climb.
+
+---
+
 ## The "noob-friendly plugin attachment" thesis
 
 Every plugin-managed self-hosting tool today is built for sysadmins:
@@ -494,13 +618,33 @@ businesses on BSL.
   Tier 2 → Tier 1 (refunds, etc.) is much harder
 
 **Pro tier (Year 2+ IF revisited)** would gate NEW features only,
-never retroactively paywall what v0.11.1 / v1.0 users already had:
-- Multi-server management
-- Scheduled tasks (cron-style auto-restart, nightly map updates)
-- Match history analytics dashboard
-- Cloud-synced config (login from any machine)
-- Curated premium plugin bundle (auto-updated, tested combos)
-- Priority Discord support queue
+never retroactively paywall what v0.11.1 / v1.0 users already had.
+These features all serve the **Pro audience** (see "Two-audience
+strategy" above) — features the average Joe doesn't need but the
+tournament organizer / community admin / semi-commercial host
+genuinely will:
+- **Multi-server management** (deploy a pack to N servers at once;
+  promotes Oblivion from a tool to infrastructure)
+- **Scheduled tasks** (cron-style auto-restart, nightly map updates,
+  weekly maintenance windows)
+- **Audit log + permission groups** (who-changed-what; granular
+  per-admin scopes — extends v0.10.x guest PIN concept)
+- **Match history analytics dashboard**
+- **Cloud-synced config** (login from any machine, settings travel)
+- **Curated premium plugin bundle** (vetted, supported,
+  breaking-change tested)
+- **Health monitoring + alerting** (webhook on RCON failure, email
+  on uptime drop)
+- **API / webhook integration** (programmatic control for
+  automation pipelines)
+- **Backup / restore automation** (scheduled config + data backup)
+- **Templates** ("every new server gets the Tuesday League base
+  config")
+- **Priority Discord support queue**
+
+The pattern: **average Joe stays free forever**, pro pays for the
+features that turn the tool into infrastructure.  Notion / Linear
+playbook.
 
 **Pricing if Tier 2 happens:** $4–5/mo USD, or $40/year, or $25 lifetime.
 Mixed models common.
@@ -590,3 +734,20 @@ decision should wait until there are 50+ active strangers using the
 tool.
 
 Until then: ship, validate, iterate.
+
+## Engineering discipline
+
+The two-audience strategy implies a hard engineering rule:
+
+**Consumer-grade UX, pro-grade reliability.**
+
+Every feature must clear both bars before it's considered done:
+
+1. **Can the average Joe figure it out without docs?**  No jargon,
+   plain language, sensible defaults, forgiving error recovery.
+2. **Does it behave deterministically under the load a pro would
+   put on it?**  Atomic operations, rollback on failure, audit
+   trail, no silent failures, no race conditions.
+
+Failing either bar = the feature isn't done.  This is the
+non-negotiable quality floor.
