@@ -3,45 +3,32 @@
 A desktop application for managing a **Counter-Strike 2 dedicated server** on Windows.  
 Built with Python + Flask + pywebview (Edge WebView2). Ships as a single `.exe` with an optional installer.
 
-> **Status: v0.11.1 (released).**  Post-v0.11.0 polish sweep.  Eight
-> operator-facing wins on top of the Discord bot integration:
-> **Discord test buttons** (Test Embed / Test DM in Config — verify bot
-> wiring without running a full veto); **📜 Match history modal** (last
-> 10 completed sessions); **"Go Online" banner** on the Veto-idle stage
-> (green when `public_share_url` set, yellow with a one-click jump to
-> Config when LAN-only); **bulk paste** now accepts `Name,SteamID64,DiscordID`
-> rows from any spreadsheet/Discord copy; **roster presets** (localStorage
-> save/load); **MatchZy cvar editor** (local-only key/value rows that
-> merge over the built-in defaults at finale time, with blank-value
-> suppression); **📺 Spectator URL** (read-only token-gated `/spectate`
-> page that polls every 3s — PII stripped, OBS-browser-source friendly,
-> XSS-defended); plus a **`MOBILE_CHECK.md`** real-device checklist for
-> pre-session validation.  **161/161 backend tests green** (28 v092 +
-> 68 veto + 65 veto-api).
+> **Status: v0.11.3 (released 2026-06-03).**
 >
-> **Previously: v0.11.0 (Discord bot Layer 1).**  Optional Discord bot —
-> operator runs their own bot bound to their own server
-> ([5-min setup in DISCORD.md](DISCORD.md)).  Auto-DM captain links on
-> `/api/veto/tokens`, "🎤 Pull from voice channel" Roster button that
-> fills 10 slots in one click, and a live veto embed in a chosen channel
-> that updates as captains ban/pick.  All Discord features degrade
-> silently when no token is configured.
+> **What's new since v0.11.0**:
+> - **Active session persistence** *(v0.11.3)* — accidental Ctrl+Q, Windows
+>   update, or app crash mid-session no longer evaporates the in-progress
+>   veto.  Captain claim bindings, partial ban/pick sequence, ready flags
+>   all survive an app restart.  Atomic write to `oblivion_veto_active.json`;
+>   12 h cutoff before stale sessions are discarded.
+> - **`issue_tokens` idempotency fix** *(v0.11.2)* — captain browser
+>   refresh no longer silently invalidates the other captain's link.
+>   Per-team rotation via `revoke_token('A')` / `revoke_token('B')` is the
+>   explicit escape hatch.
+> - **v0.11.1 polish sweep**: Discord Test Embed / Test DM buttons, 📜 Match
+>   history modal, 🌐 "Go Online" banner, bulk paste with SteamID + Discord
+>   ID columns, roster presets (localStorage), MatchZy cvar editor (local),
+>   📺 Spectator URL (token-gated read-only `/spectate` page, OBS-friendly,
+>   PII stripped, XSS-defended), `MOBILE_CHECK.md` real-device checklist.
+> - **v0.11.0 (Discord bot Layer 1)**: operator runs their own bot bound to
+>   their own server ([5-min setup in DISCORD.md](DISCORD.md)).  Auto-DM
+>   captain links, voice-channel roster pull, live veto embed.  All Discord
+>   features degrade silently when no token is configured.
 >
-> **Previously: v0.10.2 (online-primary polish).**  The **map-veto / match-setup feature** is now
-> online-primary polished: mobile-responsive SPA (hamburger sidebar drawer, 44/48 px
-> touch targets, viewport-clamped popovers, visibility/online SSE reconnect for
-> phone wake), captain finale embeds the CS2 `connect <ip>; password X` command +
-> "Copy team invite" button, `/api/veto/finale` mode pre-flight refuses if the
-> server isn't in a MatchZy mode, `/api/server/start` returns 4xx with preflight
-> reason instead of silent 200 OK, unified SSE transport (`_oblivionSSE` shared
-> module with exp backoff + reconnect re-arm + header status pill),
-> `/api/capabilities` endpoint for role-aware UI, fetch retry layer in `api.js`,
-> role pill in header, captain limbo screen, Rematch (same teams) button, last-10
-> matches persisted to `oblivion_matches.json`, optional Discord webhook posting
-> finale embeds.  Core features (v0.9.x) stable: remote-guest role, split team-size
-> modes (1v1 / 2v2 / 3v3 / 4v4 / 5v5), Warcraft menu/chat dispatchers, atomic config
-> save, multi-packet RCON sentinel.  Full spec [VETO.md](VETO.md); prose
-> [CHANGELOG.md](CHANGELOG.md).  **137/137 backend tests green** at v0.10.2.
+> **167/167 backend tests green** (28 v092 + 74 veto + 65 veto-api).  Full
+> per-release prose in [CHANGELOG.md](CHANGELOG.md); spec for the
+> map-veto feature in [VETO.md](VETO.md); strategic roadmap to v1.0 in
+> [PLAN.md](PLAN.md).
 
 ---
 
@@ -195,6 +182,16 @@ devices** while the operator's UI mirrors the session live over SSE:
   read-only view for casters/observers.  Sanitized (Discord IDs
   omitted, SteamIDs masked first-4 + last-4, captain tokens never
   included).  No SPA, no auth flow — works as an OBS browser source.
+- **Captain-token idempotency** *(v0.11.2)* — re-calling `issue_tokens`
+  (e.g. a captain refreshes the links page mid-issue) no longer
+  silently invalidates the other captain's URL.  Per-team rotation
+  via `revoke_token('A')` / `revoke_token('B')` is the explicit
+  escape hatch.
+- **Session persistence** *(v0.11.3)* — accidental Ctrl+Q, Windows
+  update, or pywebview crash mid-session no longer evaporates the
+  in-progress veto.  Captain claim bindings, partial ban/pick
+  sequence, ready flags all survive an app restart via atomic write
+  to `oblivion_veto_active.json` (12 h cutoff for stale sessions).
 
 Full spec in [VETO.md](VETO.md); implementation map in [INGEST.md](INGEST.md) → "API — map
 veto" + "Frontend — Veto tab".  See [DISCORD.md](DISCORD.md) for the optional
@@ -275,6 +272,28 @@ Enforcement is fail-closed (an allowlist of guest-reachable routes; everything e
 To let friends reach the panel over the internet, run a Cloudflare quick tunnel
 (`cloudflared tunnel --url http://localhost:5050`) and share the printed HTTPS URL + a PIN — no
 router changes, encrypted transport. See [TONIGHT.md](TONIGHT.md) for the full steps.
+
+---
+
+## Where this is going (post-1.0 direction)
+
+CS2 was the founding game; it isn't the destination.  The strategic
+roadmap to v1.0 is in [PLAN.md](PLAN.md), but the headline:
+
+- **v0.12** — driver abstraction + plugin registry: third-party
+  plugins fetched on demand from upstream, not bundled
+- **v0.13** — second game driver (TF2)
+- **v0.14** — Linux + headless mode (systemd / Docker / multi-arch),
+  no GUI required for server-grade unattended deployments
+- **v0.15** — first non-Source game driver (Palworld / Valheim / TBD)
+- **v1.0** — open-source under BSL (non-compete, reverts to Apache
+  after 4 years), 2-3 games supported, donation-funded, Plugin
+  Manager as the headline differentiator
+
+The two-audience pitch: **consumer-grade UX, pro-grade reliability.**
+Approachable enough for first-time CS2 server hosts, automated and
+reliable enough for tournament operators.  Both audiences served
+by the same engineering work.
 
 ---
 
