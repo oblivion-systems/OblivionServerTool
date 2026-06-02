@@ -647,6 +647,49 @@ def t_matchzy_cvars_ignores_blank_keys():
 t('build_matchzy_config: blank cvar keys are dropped silently', t_matchzy_cvars_ignores_blank_keys)
 
 
+def t_spectator_token_idempotent_then_rotate():
+    """v0.11.0 polish: issue → same call returns same token; rotate
+    mints a different one + bumps updated_at."""
+    s = _make_to('finale')
+    t1 = V.issue_spectator_token(s)
+    t2 = V.issue_spectator_token(s)
+    t3 = V.rotate_spectator_token(s)
+    return (t1 == t2 and t1 != t3 and len(t1) >= 20), f't1={t1!r} t2={t2!r} t3={t3!r}'
+t('spectator: issue idempotent + rotate mints fresh token', t_spectator_token_idempotent_then_rotate)
+
+
+def t_spectator_snapshot_strips_pii():
+    """v0.11.0 polish: build_spectator_snapshot masks SteamIDs (no full
+    17-digit value), omits Discord IDs (no 'discord_id' key anywhere),
+    and excludes captain tokens (no 'tokens' key at all)."""
+    s = _make_to('finale')
+    # Plant a Discord ID + a real-shape SteamID in team_a[0] so we can
+    # check they don't survive into the snapshot.
+    s.team_a[0].discord_id = '123456789012345678'
+    s.team_a[0].steam_id   = '76561198000000001'
+    snap = V.build_spectator_snapshot(s)
+    blob = repr(snap)
+    return ('123456789012345678' not in blob       # discord id gone
+            and '76561198000000001' not in blob    # full steam id gone
+            and 'tokens' not in snap               # captain tokens absent
+            and 'matchzy_config' not in snap       # admin payload absent
+            and 'discord_id' not in blob           # field name itself absent
+           ), f'snapshot keys={list(snap.keys())}'
+t('spectator: snapshot strips discord/steam/tokens PII', t_spectator_snapshot_strips_pii)
+
+
+def t_spectator_token_cleared_by_reset():
+    """v0.11.0 polish: reset() invalidates any outstanding spectator
+    link.  Operator running a rematch should start the next session
+    with a clean slate."""
+    s = _make_to('finale')
+    V.issue_spectator_token(s)
+    assert s.spectator_token
+    V.reset(s)
+    return (s.spectator_token == ''), f'token={s.spectator_token!r}'
+t('spectator: reset() clears spectator_token', t_spectator_token_cleared_by_reset)
+
+
 def t_revoke_before_issue_mints_one_anyway():
     """Documented behaviour: `revoke_token` doesn't gate on
     has-token-already — it just mints a fresh one for the given team.

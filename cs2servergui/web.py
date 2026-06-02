@@ -166,6 +166,103 @@ def _clear_global() -> None:
         _global["until"] = 0.0
 
 
+# v0.11.0 polish — Standalone spectator page.  Served by /spectate; polls
+# /api/veto/spectator/state every 3s with the embedded token.  Kept as a
+# string literal (not a Jinja template) so it has zero external deps and
+# works inside an OBS browser source with no auth flow.  Token marker
+# __TOKEN__ is replaced at request time.
+SPECTATOR_HTML = """<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Veto · Spectator</title>
+<style>
+  body { margin:0; padding:24px; font-family: 'Space Grotesk', system-ui, sans-serif;
+         background:#0f1115; color:#eaeaea; min-height:100vh; }
+  h1 { margin:0 0 4px; font-size:22px; letter-spacing:.04em; }
+  .sub { color:#888; font-size:13px; margin-bottom:18px; }
+  .err { color:#ff6b6b; padding:14px; border:1px solid #ff6b6b; border-radius:6px; }
+  .grid { display:grid; gap:16px; max-width:920px; }
+  .row { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  .card { background:#171a21; border:1px solid #2a2f3a; border-radius:8px; padding:14px 16px; }
+  .card h2 { margin:0 0 8px; font-size:14px; letter-spacing:.08em;
+             text-transform:uppercase; color:#aaa; font-weight:600; }
+  ul { list-style:none; padding:0; margin:0; }
+  li { font-size:13px; padding:3px 0; color:#ccc; }
+  li.cap { color:#fff; font-weight:600; }
+  li small { color:#666; font-family:'JetBrains Mono', monospace; margin-left:6px; font-size:11px; }
+  .mode-pill { display:inline-block; background:#262d3a; padding:2px 8px;
+               border-radius:99px; font-size:11px; font-family:'JetBrains Mono', monospace; }
+  .seq { display:flex; flex-wrap:wrap; gap:6px; }
+  .seq .step { font-family:'JetBrains Mono', monospace; font-size:11px;
+               padding:3px 8px; border-radius:3px; background:#262d3a; color:#bbb; }
+  .seq .step.ban  { background:rgba(255,107,107,.18); color:#ff8e8e; }
+  .seq .step.pick { background:rgba(64,180,140,.22); color:#7cdcb0; }
+  .seq .step.decider { background:#3a4a2c; color:#c8e3a0; font-weight:600; }
+  .foot { color:#555; font-size:11px; margin-top:18px; text-align:center; }
+  @media (max-width: 640px) { .row { grid-template-columns:1fr; } }
+</style>
+</head><body>
+<h1 id="hdr">Veto</h1>
+<div class="sub" id="sub">Loading…</div>
+<div id="content"></div>
+<div class="foot">Read-only spectator view · refreshes every 3s</div>
+<script>
+const TOKEN = "__TOKEN__";
+async function tick() {
+  try {
+    const r = await fetch("/api/veto/spectator/state?token=" + encodeURIComponent(TOKEN),
+                          {cache:"no-store"});
+    if (r.status === 401) { renderErr("Spectator link is invalid or has been rotated."); return; }
+    if (r.status === 404) { renderErr("No active veto session."); return; }
+    if (!r.ok) { renderErr("HTTP " + r.status); return; }
+    render(await r.json());
+  } catch (e) { renderErr("Network: " + e.message); }
+}
+function esc(s) { return String(s == null ? "" : s)
+  .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function renderErr(msg) {
+  document.getElementById("content").innerHTML = '<div class="err">' + esc(msg) + '</div>';
+  document.getElementById("sub").textContent = "—";
+}
+function render(s) {
+  document.getElementById("hdr").textContent = esc(s.team_a_name) + "  vs  " + esc(s.team_b_name);
+  document.getElementById("sub").innerHTML =
+    '<span class="mode-pill">' + esc(s.mode) + '</span> · state: ' + esc(s.state);
+  const c = document.getElementById("content");
+  const players = (team, capName) => '<ul>' + (team || []).map(p =>
+    '<li class="' + (p.name === capName ? 'cap' : '') + '">' +
+    (p.name === capName ? '★ ' : '') + esc(p.name) +
+    (p.steam_id ? '<small>' + esc(p.steam_id) + '</small>' : '') + '</li>'
+  ).join('') + '</ul>';
+  const seq = (s.sequence || []).map((st, i) => {
+    const cls = (st.kind === "ban" ? "ban" : "pick") +
+                (s.decider && st.map === s.decider ? " decider" : "");
+    return '<span class="step ' + cls + '">' + (i+1) + '. ' + esc(st.team) + ' ' +
+           esc(st.kind) + ' · ' + esc(st.map || '?') + '</span>';
+  }).join('');
+  const finalMaps = (s.final_maps || []).map((m, i) => {
+    const isDec = (m === s.decider);
+    return '<span class="step ' + (isDec ? 'decider' : 'pick') + '">' +
+           (isDec ? '🏁 ' : (i+1) + '. ') + esc(m) + '</span>';
+  }).join('');
+  c.innerHTML = '<div class="grid">' +
+    '<div class="row">' +
+      '<div class="card"><h2>' + esc(s.team_a_name) + (s.captain_a ? ' · cap: ' + esc(s.captain_a) : '') + '</h2>' + players(s.team_a, s.captain_a) + '</div>' +
+      '<div class="card"><h2>' + esc(s.team_b_name) + (s.captain_b ? ' · cap: ' + esc(s.captain_b) : '') + '</h2>' + players(s.team_b, s.captain_b) + '</div>' +
+    '</div>' +
+    (seq ? '<div class="card"><h2>Veto sequence</h2><div class="seq">' + seq + '</div></div>' : '') +
+    (finalMaps ? '<div class="card"><h2>Final maplist</h2><div class="seq">' + finalMaps + '</div></div>' : '') +
+  '</div>';
+}
+tick(); setInterval(tick, 3000);
+// Refresh immediately when the OBS browser source / phone gets focus.
+document.addEventListener("visibilitychange", () => { if (!document.hidden) tick(); });
+</script>
+</body></html>
+"""
+
+
 # ── Flask app factory ──────────────────────────────────────────────────────────
 
 def create_flask(core: AppCore) -> Flask:
@@ -2485,6 +2582,63 @@ def create_flask(core: AppCore) -> Flask:
     def veto_history():
         """v0.10.2 — Last N completed matches (newest last)."""
         return jsonify({"matches": _load_match_history()})
+
+    # v0.11.0 polish — Spectator URL: read-only caster/observer link
+    @app.route("/api/veto/spectator", methods=["POST"])
+    @require_auth
+    def veto_spectator_issue():
+        """Issue (or return) the read-only spectator token + URLs.
+        Admin-only because giving someone the URL = giving them perm to
+        watch every map in the session as it lands.  Rotate by including
+        {rotate:true} in the body."""
+        d = request.get_json(silent=True) or {}
+        rotate = bool(d.get("rotate"))
+        with core._veto_lock:
+            sess = core._veto_session
+            if sess is None:
+                return jsonify({"error": "no active veto session"}), 404
+            token = (_veto.rotate_spectator_token(sess) if rotate
+                     else _veto.issue_spectator_token(sess))
+        lan_ip     = _config._lan_ip()
+        port       = _config.FLASK_PORT
+        share_base = (getattr(core, "public_share_url", "") or "").rstrip("/")
+        urls = {"lan": f"http://{lan_ip}:{port}/spectate?token={token}"}
+        if share_base:
+            urls["public"] = f"{share_base}/spectate?token={token}"
+        # SSE on the SPA broadcast so the operator's own UI updates.
+        _veto_broadcast()
+        return jsonify({"token": token, "urls": urls, "rotated": rotate})
+
+    @app.route("/api/veto/spectator/state")
+    def veto_spectator_state():
+        """Token-gated, sanitized snapshot.  No auth cookie required —
+        the token IS the auth (spectators won't have admin/guest PINs).
+        Returns 401 on bad/expired token to make the front-end's empty
+        state clean."""
+        token = request.args.get("token", "").strip()
+        with core._veto_lock:
+            sess = core._veto_session
+            if sess is None or not token:
+                return jsonify({"error": "no session"}), 404
+            if not secrets.compare_digest(sess.spectator_token or "", token):
+                return jsonify({"error": "invalid spectator token"}), 401
+            snap = _veto.build_spectator_snapshot(sess)
+        return jsonify(snap)
+
+    @app.route("/spectate")
+    def veto_spectate_page():
+        """Tiny standalone HTML page that polls
+        /api/veto/spectator/state?token=… every 3s and renders the
+        sanitized snapshot.  Deliberately NOT the full SPA — casters
+        get a fast-loading, distraction-free view that works in OBS
+        browser sources without needing the admin login flow."""
+        # Token is validated server-side on each state poll; here we
+        # just embed it into the page so the JS can use it.
+        token = request.args.get("token", "").strip()
+        # esc the token defensively even though token_urlsafe is safe.
+        safe_token = re.sub(r'[^A-Za-z0-9_\-]', '', token)[:64]
+        html = SPECTATOR_HTML.replace("__TOKEN__", safe_token)
+        return Response(html, mimetype="text/html")
 
     @app.route("/api/veto/rematch", methods=["POST"])
     @require_auth

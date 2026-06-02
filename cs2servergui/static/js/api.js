@@ -212,6 +212,10 @@ const api = (() => {
       reset:      ()                 => post('/api/veto/reset'),
       // v0.10.2 — last N completed matches persisted to oblivion_matches.json
       history:    ()                 => get('/api/veto/history'),
+      // v0.11.0 polish — Spectator URL (read-only token-gated link).
+      // issueSpectator() returns {token, urls, rotated}; pass {rotate:true}
+      // to invalidate the previous link.
+      issueSpectator: (rotate=false) => post('/api/veto/spectator', rotate ? {rotate:true} : {}),
       // v0.10.2: rematch with same teams.  Optional body fields:
       // mode ('BO1'|'BO3'|'BO5') + map_pool (7 entries).
       rematch:    (mode, mapPool)    => post('/api/veto/rematch',
