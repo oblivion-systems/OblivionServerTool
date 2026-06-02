@@ -2,6 +2,73 @@
 
 ---
 
+## v0.11.1 — 2026-06-02 (polish release)
+
+Post-v0.11.0 polish sweep — Tuesday work toward Friday's live test.
+Eight discrete enhancements + a mobile-validation checklist.  All
+back-compat; no schema or state-machine changes.  Tests: 161/161
+green (was 147 at v0.11.0).
+
+  1. **Discord test buttons** — Config card gains "Test Embed" + "Test
+     DM" buttons (local-only) so operator can verify bot wiring
+     without running a full veto.  Backed by /api/discord/test_embed
+     and /api/discord/test_dm.
+
+  2. **Match history modal** — new "📜 History" button on the Veto
+     header opens a modal listing the last 10 completed matches
+     (date, teams, captains, decider-tagged maplist) from the
+     /api/veto/history endpoint that already existed in v0.10.2.
+
+  3. **"Go Online" banner** — Veto-idle stage gets a coloured banner
+     reading the public_share_url config: green "Online" with masked
+     URL + Copy/Open buttons, or yellow "LAN-only" with a
+     one-click jump to Config that focuses the URL input.  Operator
+     no longer has to remember whether the tunnel is wired.
+
+  4. **Bulk paste** — "Paste 10 names" now accepts `Name`,
+     `Name,SteamID64`, or `Name,SteamID64,DiscordID` per line
+     (comma/tab/semicolon delimited).  Toast reports how many of
+     each ID column got extracted, so a wrong column is visible
+     without scanning the grid.
+
+  5. **Roster presets** — Save/Load preset controls on the Roster
+     stage backed by localStorage (per-browser; single-machine
+     operator per MEMORY).  Save names a 10-player roster; Load
+     overwrites the input; ⚠ Delete sentinel keeps the destructive
+     action off the main UI.
+
+  6. **MatchZy cvar editor** — Config tab adds a key/value row
+     editor (local-only) for matchzy_* cvars.  Values merge over
+     the built-in defaults (`mp_warmup_pausetimer=0`,
+     `matchzy_minimum_ready_required=2`) at finale time; operator
+     wins on conflicts; blank value actively suppresses a default.
+     `veto.build_matchzy_config` gains optional `cvar_overrides=`
+     param (old signature preserved).  4 new unit tests.
+
+  7. **Spectator URL** — read-only veto link for casters/observers.
+     POST /api/veto/spectator issues a per-session token (idempotent;
+     {rotate:true} mints fresh).  GET /api/veto/spectator/state is
+     token-gated (no cookie required — token IS the auth) and serves
+     a sanitized snapshot: Discord IDs omitted, SteamIDs masked
+     (first 4 + last 4), captain tokens + matchzy_config absent.
+     GET /spectate serves a standalone HTML page that polls every
+     3s — no SPA, no auth flow, works in OBS browser sources.  Token
+     chars sanitised before HTML embed (XSS defense in depth).  New
+     "📺 Spectator" button on the Veto header opens a modal with
+     LAN + Public URLs + Copy + Rotate (with confirm).  10 new tests.
+
+  8. **Mobile validation checklist** — `MOBILE_CHECK.md` ticks
+     through what to verify on an actual phone (hamburger drawer,
+     SSE re-arm on background/foreground, captain handoff via DM
+     link, reduced-motion).  Pre-Friday gate, not a code change.
+
+### What's parked
+
+  * **Cinematic finale animation rewrite** — user-parked ("skip
+     animation for now").  Still on the deferred list.
+
+---
+
 ## v0.11.0 — 2026-06-02 (release)
 
 **Discord bot integration (Layer 1).**  Four-day push for the optional
