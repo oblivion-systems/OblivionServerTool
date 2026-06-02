@@ -2703,6 +2703,48 @@ body.compact #content        { padding: 14px 16px; }
 }
 .veto-pull-channel.ready .veto-pull-channel-count { color: var(--ok); }
 
+/* v0.11.0 polish — "Go Online" banner inside the Veto-idle stage.  Tells
+   the operator at a glance whether captain links will reach the
+   internet or only the LAN. */
+.veto-online-banner {
+  padding: 10px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--line-1);
+  background: var(--bg-1);
+  margin-bottom: 14px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.veto-online-banner--loading { color: var(--text-3); font-style: italic; }
+.veto-online-banner--online {
+  border-color: color-mix(in srgb, var(--ok) 40%, var(--line-1));
+  background:   color-mix(in srgb, var(--ok) 8%, var(--bg-1));
+}
+.veto-online-banner--lan {
+  border-color: color-mix(in srgb, var(--warn, #b88a00) 50%, var(--line-1));
+  background:   color-mix(in srgb, var(--warn, #b88a00) 8%, var(--bg-1));
+}
+.veto-online-banner--err {
+  border-color: color-mix(in srgb, var(--bad) 50%, var(--line-1));
+  background:   color-mix(in srgb, var(--bad) 8%, var(--bg-1));
+  color: var(--bad);
+}
+.veto-online-row {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+.veto-online-icon { font-size: 16px; }
+.veto-online-label { color: var(--text-2); }
+.veto-online-url {
+  font-family: var(--font-mono); font-size: 12px;
+  background: var(--bg-0); padding: 3px 8px; border-radius: 3px;
+  color: var(--text-1); border: 1px solid var(--line-1);
+  max-width: 360px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+@media (max-width: 640px) {
+  .veto-online-url { max-width: 100%; }
+}
+
 /* v0.11.0 polish — Match history list (in the History modal). */
 .veto-history-list {
   display: flex; flex-direction: column; gap: 12px;
