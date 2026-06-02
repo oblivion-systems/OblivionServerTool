@@ -2427,7 +2427,10 @@ function _renderVetoRoster(root, sess) {
       </div>
       <div class="veto-stage-actions">
         <button class="btn btn-ghost" id="veto-roster-demo">Demo names</button>
-        <button class="btn btn-ghost" id="veto-roster-paste">Paste 10 names</button>
+        <button class="btn btn-ghost" id="veto-roster-paste"
+                title="Paste 10 lines from clipboard. Each line: 'Name' OR 'Name,SteamID64' OR 'Name,SteamID64,DiscordID' (comma/tab/semicolon delimited)">
+          Paste 10 names
+        </button>
         <button class="btn btn-ghost" id="veto-roster-discord"
                 title="Pull a voice channel's connected members into the roster (auto-fills name + Discord ID)">
           🎤 Pull from voice channel
@@ -2493,10 +2496,29 @@ function _renderVetoRoster(root, sess) {
     try {
       const txt = await navigator.clipboard.readText();
       const lines = txt.split(/[\r\n]+/).map(s => s.trim()).filter(Boolean);
-      if (lines.length < 10) { toast(`Need 10 names, clipboard has ${lines.length}`, 'var(--bad)'); return; }
-      _vetoLocalRoster = lines.slice(0, 10).map(n => ({ name: n, steam_id: '', discord_id: '' }));
+      if (lines.length < 10) { toast(`Need 10 entries, clipboard has ${lines.length}`, 'var(--bad)'); return; }
+      // v0.11.0 polish — Bulk paste now recognises three formats:
+      //   1. `Name`                                  (legacy)
+      //   2. `Name,SteamID64`                        (Discord copy-out)
+      //   3. `Name,SteamID64,DiscordSnowflake`       (full)
+      // SteamID64 = 17-digit decimal starting with "765611".  Discord
+      // snowflake = 17-19 digit decimal.  Comma OR tab OR semicolon
+      // delimits.  Quotes around fields are stripped.
+      const SID_RE  = /^7656\d{13}$/;
+      const SNOW_RE = /^\d{17,19}$/;
+      _vetoLocalRoster = lines.slice(0, 10).map(line => {
+        const parts = line.split(/[\t,;]/).map(s => s.trim().replace(/^["']|["']$/g, ''));
+        const out = { name: parts[0] || '', steam_id: '', discord_id: '' };
+        for (const p of parts.slice(1)) {
+          if (SID_RE.test(p))                       out.steam_id   = p;
+          else if (SNOW_RE.test(p) && !out.discord_id) out.discord_id = p;
+        }
+        return out;
+      });
       _renderVeto();
-      toast('Pasted 10 names');
+      const withSid = _vetoLocalRoster.filter(p => p.steam_id).length;
+      const withDid = _vetoLocalRoster.filter(p => p.discord_id).length;
+      toast(`Pasted 10 (${withSid} SteamIDs, ${withDid} DiscordIDs)`);
     } catch (e) { toast(`Clipboard read failed: ${e.message}`, 'var(--bad)'); }
   });
 
