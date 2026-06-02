@@ -7,7 +7,24 @@
 
 ---
 
-## Where We Are — v0.10.2 (released 2026-06-01)
+## Where We Are — v0.11.0 (released 2026-06-02)
+
+**Discord bot integration (Layer 1).**  Four-day push.  Operator runs
+their own bot bound to their own Discord server (DISCORD.md has the
+5-min setup runbook).  When configured:
+
+  Mon — Bot scaffolding (gateway thread + queue bridge + Config card)
+  Tue — Layer 1A: auto-DM captain links on /api/veto/tokens
+  Wed — Layer 1B: "🎤 Pull from voice channel" fills 10 roster slots
+  Thu — Layer 1C: live veto embed updates as captains ban/pick
+
+147/147 tests green.  All Discord features degrade silently when no
+token is configured — existing Copy-for-Discord / manual roster /
+spectator-via-tunnel workflows still work.
+
+Full prose in [CHANGELOG.md](CHANGELOG.md) → v0.11.0.
+
+## Previously — v0.10.2 (released 2026-06-01)
 
 **Online-primary polish phase complete.**  After a five-agent audit of online-use
 readiness surfaced ~35 actionable findings, v0.10.2 took the BLOCKERs + the top

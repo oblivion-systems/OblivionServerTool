@@ -3,7 +3,16 @@
 A desktop application for managing a **Counter-Strike 2 dedicated server** on Windows.  
 Built with Python + Flask + pywebview (Edge WebView2). Ships as a single `.exe` with an optional installer.
 
-> **Status: v0.10.2 (released).**  The **map-veto / match-setup feature** is now
+> **Status: v0.11.0 (released).**  Adds optional **Discord bot integration**
+> (Layer 1): operator runs their own bot bound to their own Discord server
+> ([5-min setup in DISCORD.md](DISCORD.md)).  When configured, captain links
+> auto-DM to elected captains on `/api/veto/tokens`, the Roster page gains a
+> "🎤 Pull from voice channel" button that fills 10 slots in one click, and
+> a live veto embed in a chosen channel updates as captains ban/pick.  All
+> Discord features degrade silently when no token is configured.
+> 147/147 backend tests green.
+>
+> **Previously: v0.10.2 (online-primary polish).**  The **map-veto / match-setup feature** is now
 > online-primary polished: mobile-responsive SPA (hamburger sidebar drawer, 44/48 px
 > touch targets, viewport-clamped popovers, visibility/online SSE reconnect for
 > phone wake), captain finale embeds the CS2 `connect <ip>; password X` command +

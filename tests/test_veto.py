@@ -809,6 +809,26 @@ def t_reset_clears_ready_flags():
 t('reset: clears both ready flags', t_reset_clears_ready_flags)
 
 
+def t_session_has_live_embed_msg_id():
+    """v0.11.0 Layer 1C: VetoSession carries live_embed_msg_id so the
+    embed-refresh helper can EDIT the same message across veto steps
+    instead of spamming a new message per step."""
+    s = V.VetoSession()
+    if s.live_embed_msg_id != '':
+        return False, f'default not empty: {s.live_embed_msg_id!r}'
+    s.live_embed_msg_id = '1234567890'
+    return s.live_embed_msg_id == '1234567890', f'set failed: {s.live_embed_msg_id}'
+t('VetoSession: live_embed_msg_id field defaults empty, accepts a value', t_session_has_live_embed_msg_id)
+
+
+def t_reset_clears_live_embed_msg_id():
+    s = _make_to('finale')
+    s.live_embed_msg_id = '9876543210'
+    V.reset(s)
+    return s.live_embed_msg_id == '', f'after reset: {s.live_embed_msg_id!r}'
+t('reset: clears live_embed_msg_id', t_reset_clears_live_embed_msg_id)
+
+
 def t_roster_player_has_discord_id_field():
     """v0.11.0: RosterPlayer dataclass gains optional `discord_id` field
     used by Layer 1A auto-DM.  Backward-compatible default ''."""

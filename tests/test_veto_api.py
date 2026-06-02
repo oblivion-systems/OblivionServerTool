@@ -905,6 +905,22 @@ def t_tokens_response_includes_dm_sent_field():
 t('tokens: response includes dm_sent: False when no bot configured', t_tokens_response_includes_dm_sent_field)
 
 
+def t_perform_step_succeeds_without_discord_channel():
+    """v0.11.0 Layer 1C: when discord_veto_channel_id isn't configured,
+    _refresh_live_veto_embed silently no-ops + the step API works as
+    before.  Defends the live-embed code from breaking the core veto
+    workflow if the operator never configured a channel."""
+    ac, app, c = _new_app()
+    _login(c)
+    ac.discord_veto_channel_id = ''     # explicitly off
+    _drive_to_finale(c, app)            # walks the full 6 steps
+    # If _refresh_live_veto_embed crashed instead of silently no-op'ing,
+    # _drive_to_finale would have failed by now.  State should be finale.
+    snap = c.get('/api/veto/state').get_json()
+    return snap.get('state') == 'finale', f'state={snap.get("state")}'
+t('perform_step: succeeds when no discord_veto_channel_id configured', t_perform_step_succeeds_without_discord_channel)
+
+
 def t_discord_voice_channels_400_without_guild_id():
     """v0.11.0 Layer 1B: /api/discord/voice_channels returns 400 if the
     operator hasn't configured a guild ID in Config → Discord."""

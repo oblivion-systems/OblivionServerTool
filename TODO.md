@@ -80,6 +80,29 @@ deferred loose ends. Full prose in [CHANGELOG.md](CHANGELOG.md) → v0.9.1.*
   lock, the `_stop_event` edge-window cancel race, and the Warcraft `ReferenceEquals` → SteamID
   equality fix in three deferred-menu sites.
 
+### Shipped — v0.11.0 (Discord bot integration, released 2026-06-02)
+
+Layer 1 of the Discord bot — operator-run bot bound to operator's own Discord
+server.  See [DISCORD.md](DISCORD.md) for setup.  All features degrade silently
+when no token configured.
+
+- [x] Mon — Discord bot scaffolding (`cs2servergui/discord_bot.py`, gateway
+      thread + queue bridge); Config card; DISCORD.md operator runbook.
+- [x] Tue — Layer 1A: per-player `discord_id` on roster; `/api/veto/tokens`
+      auto-DMs each elected captain their join URL; "📨 DM SENT" pill on
+      link card.  Mid-day fix: SPA hydration was dropping `discord_id`
+      from snapshot projection.
+- [x] Wed — Layer 1B: voice-channel roster pull — modal lists every voice
+      channel with member counts; click fills 10 roster slots with
+      `{display_name, discord_id}`.
+- [x] Thu — Layer 1C: live veto embed in operator-chosen channel; updates
+      on every ban/pick; "✅ MATCH LOCKED IN" on finale.  Version bump
+      0.10.2 → 0.11.0; tag + release.
+
+147/147 tests green (28 v092 + 61 veto + 58 veto-api).
+
+---
+
 ### Shipped — v0.10.2 (online-primary polish phase, released 2026-06-01)
 
 **Audit-driven release.**  Five agents audited the tool against online-primary use
