@@ -729,26 +729,64 @@ def t_revoke_unknown_team_rejected():
 t('revoke_token: unknown team values rejected', t_revoke_unknown_team_rejected)
 
 
-def t_issue_tokens_rotates_on_recall():
-    """Documented (and arguably buggy) behaviour: calling issue_tokens
-    a second time from `links` ROTATES both tokens, breaking any URL
-    already shared with the captains.  The SPA only calls this once per
-    session (the "Generate captain links" button binds the result to a
-    module-local cache), but a browser refresh during the links stage
-    would re-trigger and silently invalidate the shared URLs.
+def t_issue_tokens_idempotent_on_recall():
+    """v0.11.2 fix: calling issue_tokens a second time from `links` must
+    return the SAME tokens, not rotate them.
 
-    TODO follow-up: make issue_tokens idempotent (return existing if
-    already issued) — would prevent the refresh-invalidates-URLs trap.
-    For now this test pins the current behaviour so a future change
-    that flips it is visible in the diff."""
+    Previous (buggy) behaviour: any SPA refresh / re-tap of the operator's
+    "Generate captain links" button silently rotated both tokens.  The
+    captain who already opened their link kept working (their claim binds
+    the token to them), but the OTHER captain's shared URL was now dead
+    with no warning — operator only finds out when the second captain
+    reports "your link doesn't work."
+
+    Pattern mirrors v0.11.1's `issue_spectator_token` / `rotate_spectator_token`
+    split: idempotent issue, separate explicit rotate (here: revoke_token
+    per team, which also leaves the other captain's link alive)."""
     s = _make_to('links')
     first = V.issue_tokens(s)
     second = V.issue_tokens(s)
-    return (first['A'] != second['A']
-            and first['B'] != second['B']
-            and s.tokens['A'].value == second['A']), \
+    return (first['A'] == second['A']
+            and first['B'] == second['B']
+            and s.tokens['A'].value == first['A']
+            and s.tokens['B'].value == first['B']), \
            f'first={first} second={second}'
-t('issue_tokens: pinned — currently rotates on re-call (TODO: make idempotent)', t_issue_tokens_rotates_on_recall)
+t('issue_tokens: idempotent on recall (v0.11.2 fix — no silent URL invalidation)', t_issue_tokens_idempotent_on_recall)
+
+
+def t_issue_tokens_idempotent_after_one_claimed():
+    """v0.11.2 fix edge case: if captain A already CLAIMED their token
+    but B hasn't yet, re-calling issue_tokens must NOT rotate A's value
+    (that would log captain A out of the session mid-flow).  Return the
+    existing dict unchanged — operator uses revoke_token('B') to mint a
+    fresh B token without disturbing A."""
+    s = _make_to('links')
+    first = V.issue_tokens(s)
+    V.claim_captain(s, first['A'], caller_id='cap_A_phone')
+    # Session is still in `links` because B hasn't claimed yet.
+    assert s.state == 'links'
+    second = V.issue_tokens(s)
+    return (first['A'] == second['A']
+            and first['B'] == second['B']
+            and s.tokens['A'].used is True
+            and s.tokens['A'].claimed_by == 'cap_A_phone'), \
+           f'first={first} second={second} A.used={s.tokens["A"].used}'
+t('issue_tokens: idempotent even after one captain claimed (no mid-flow logout)', t_issue_tokens_idempotent_after_one_claimed)
+
+
+def t_revoke_token_per_team_still_rotates():
+    """v0.11.2 fix: idempotent issue_tokens does NOT change the per-team
+    rotate path.  revoke_token('A') still mints a fresh A token and
+    leaves B untouched — operator's escape hatch when one captain's link
+    leaks but the other is fine."""
+    s = _make_to('links')
+    first = V.issue_tokens(s)
+    new_a = V.revoke_token(s, 'A')
+    return (new_a != first['A']
+            and s.tokens['A'].value == new_a
+            and s.tokens['B'].value == first['B']     # B untouched
+           ), f"first_A={first['A'][:8]} new_a={new_a[:8]} B={s.tokens['B'].value[:8]}"
+t('revoke_token: per-team rotation still works alongside idempotent issue', t_revoke_token_per_team_still_rotates)
 
 
 def t_perform_step_after_finale_rejected():

@@ -274,15 +274,12 @@ Layered build plan with v0.10.0 = Layer 0 (core veto), v0.11.0 = Layer 1 (Discor
   and `cs2servergui.veto` in `--hidden-import`.  PyInstaller's static analyser misses
   both (segno is lazy-imported inside `/api/veto/qr`; `cs2servergui.veto` enters via
   `from . import veto as _veto` inside a function in `web.py`).
-- [ ] **Follow-up: `issue_tokens` idempotency.**  Currently re-calling
-  `issue_tokens` from `links` ROTATES both tokens, silently invalidating
-  any URL already shared with captains.  The SPA only calls it once per
-  session, but a browser refresh during the links stage would trigger
-  the rotation.  Make it return the existing tokens if already issued
-  (test_veto.py pins the current rotating behaviour so the fix shows up
-  cleanly in the diff).  *Pattern to mirror: v0.11.1's
-  `issue_spectator_token` got this right from day one — it's idempotent
-  and exposes a separate `rotate_spectator_token` for the explicit case.*
+- [x] **`issue_tokens` idempotency** *(fixed 2026-06-02, pre-Friday hotfix)* —
+  re-calling now returns the existing values; rotation is only via the
+  per-team `revoke_token('A')` / `revoke_token('B')` escape hatches (those
+  leave the other captain's link alive).  Pattern mirrors v0.11.1's
+  spectator-token split.  +2 unit tests, the original pinning test
+  flipped — 70/70 in test_veto, 163/163 across all suites.
 
 ### Shipped in v0.9.1 — confirmed in-game
 - [x] **Jailbreak crash fixed** — dropped CS2Fixes (`zombie`) from the Jailbreak mode; native
