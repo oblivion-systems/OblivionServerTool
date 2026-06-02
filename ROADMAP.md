@@ -7,7 +7,30 @@
 
 ---
 
-## Where We Are — v0.11.0 (released 2026-06-02)
+## Where We Are — v0.11.1 (released 2026-06-02)
+
+**Post-v0.11.0 polish sweep.**  Eight discrete operator-facing wins
+shipped in one day on top of the Discord bot release, plus a
+real-device validation checklist for pre-session.  All back-compat —
+no schema or state-machine changes.  **161/161 tests green** (28 v092
++ 68 veto + 65 veto-api; +14 from v0.11.0).
+
+| # | Item | Layer |
+|---|---|---|
+| 1 | Discord test buttons (verify bot wiring) | Config card |
+| 2 | 📜 Match history modal | Veto header |
+| 3 | "Go Online" banner (LAN-only / online-with-URL state) | Veto-idle |
+| 4 | Bulk paste: `Name,SteamID,DiscordID` columns | Roster |
+| 5 | Roster presets (localStorage) | Roster |
+| 6 | MatchZy cvar editor (key/value rows; blank suppresses) | Config |
+| 7 | 📺 Spectator URL (`/spectate` standalone page) | Veto header |
+| 8 | `MOBILE_CHECK.md` — real-device validation checklist | Docs |
+
+Parked at operator request: cinematic finale animation rewrite.
+
+Full prose in [CHANGELOG.md](CHANGELOG.md) → v0.11.1.
+
+## Previously — v0.11.0 (released 2026-06-02)
 
 **Discord bot integration (Layer 1).**  Four-day push.  Operator runs
 their own bot bound to their own Discord server (DISCORD.md has the
@@ -18,8 +41,8 @@ their own bot bound to their own Discord server (DISCORD.md has the
   Wed — Layer 1B: "🎤 Pull from voice channel" fills 10 roster slots
   Thu — Layer 1C: live veto embed updates as captains ban/pick
 
-147/147 tests green.  All Discord features degrade silently when no
-token is configured — existing Copy-for-Discord / manual roster /
+147/147 tests at release.  All Discord features degrade silently when
+no token is configured — existing Copy-for-Discord / manual roster /
 spectator-via-tunnel workflows still work.
 
 Full prose in [CHANGELOG.md](CHANGELOG.md) → v0.11.0.

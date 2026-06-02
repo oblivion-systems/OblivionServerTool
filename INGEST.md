@@ -29,18 +29,24 @@ each with a one-sentence summary. No code, no behavioural changes — reference 
 
 ---
 
-## `cs2servergui/veto.py` (NEW — 654 lines)
+## `cs2servergui/veto.py` (~800 lines, grew through v0.11.x)
 
 Backend state machine for the v0.10.0 map-veto / match-setup feature.
 AppCore owns at most one `VetoSession` at a time, serialised by
 `AppCore._veto_lock`.  Web routes in `web.py` are thin wrappers over the
 functions here; SSE streams state changes to the SPA mirror.
 
+**Growth since v0.10.0:**
+- v0.10.1 — `ready_a` / `ready_b` flags + `set_ready` + `both_captains_ready`
+- v0.10.2 — `rematch()` (preserves teams, clears veto state); `archive_to_history()` (snapshot for `oblivion_matches.json`); `_LEGAL_TRANSITIONS["complete"] = {"idle", "links"}` so rematch is legal
+- v0.11.0 — `RosterPlayer.discord_id`; `VetoSession.live_embed_msg_id`
+- v0.11.1 — `DEFAULT_MATCHZY_CVARS` + `_merge_cvars()`; `build_matchzy_config(s, cvar_overrides=)`; spectator URL helpers (`issue_spectator_token`, `rotate_spectator_token`, `build_spectator_snapshot`, `_mask_steam_id`); `VetoSession.spectator_token`
+
 ### Dataclasses
 
 | Symbol | Summary |
 |--------|---------|
-| `RosterPlayer(name, steam_id="")` | One roster slot.  `steam_id` collected at roster time for MatchZy strict team assignment. |
+| `RosterPlayer(name, steam_id="", discord_id="")` | One roster slot.  `steam_id` collected at roster time for MatchZy strict team assignment.  `discord_id` (v0.11.0) opt-in — when set, captain links auto-DM to that user. |
 | `VetoStep(kind, team, map_id="")` | One slot in the veto sequence.  `kind` is `"BAN"` / `"PICK"`; `map_id` filled when the captain acts. |
 | `CaptainToken(team, value, issued_at, claimed_by="", used=False)` | Scoped, single-use credential for a captain's web link.  `secrets.token_urlsafe(32)` value (~256 bits entropy). |
 | `VetoSession` | Whole match-setup session.  States: `idle → roster → teams → voting → links → veto → finale → complete`. |
@@ -62,9 +68,19 @@ functions here; SSE streams state changes to the SPA mirror.
 | `current_step(s) -> VetoStep \| None` | The next step in the sequence, or `None` if veto is complete. |
 | `remaining_maps(s) -> list[str]` | Maps still in the pool after bans so far. |
 | `perform_step(s, team, map_id)` | Captain performs the current step.  Validates: state, team's turn, map still legal.  Identifies the decider + advances to `finale` on the last step. |
-| `build_matchzy_config(s) -> dict` | Generates MatchZy `match.json` shape — `matchid`, `maplist`, `players_per_team`, `team1` / `team2` with SteamID→name maps, `cvars`, `_oblivion_meta` audit trail. |
+| `build_matchzy_config(s, cvar_overrides=None) -> dict` | Generates MatchZy `match.json` shape — `matchid`, `maplist`, `players_per_team`, `team1` / `team2` with SteamID→name maps, `cvars`, `_oblivion_meta` audit trail.  v0.11.1: `cvar_overrides` merged on top of `DEFAULT_MATCHZY_CVARS` via `_merge_cvars` (operator wins; blank value actively suppresses a default). |
 | `complete(s)` | Mark session complete (after MatchZy hand-off). |
-| `reset(s)` | Return to `idle` with all per-session state cleared.  Legal from any state. |
+| `reset(s)` | Return to `idle` with all per-session state cleared (including `spectator_token`, `live_embed_msg_id`, `ready_a/b`).  Legal from any state. |
+| `set_ready(s, team, ready) -> tuple[bool, bool]` *(v0.10.1)* | Toggle captain ready flag for `'A'` / `'B'`.  Returns `(ready_a, ready_b)`. |
+| `both_captains_ready(s) -> bool` *(v0.10.1)* | Convenience for the auto-launch check. |
+| `rematch(s, mode=None, map_pool=None) -> None` *(v0.10.2)* | From `complete`, drop back to `links` preserving teams + captains.  Optionally switch mode/pool. |
+| `archive_to_history(s) -> dict` *(v0.10.2)* | Snapshot for `oblivion_matches.json` — matchid, timestamps, mode, both teams, captains, maplist, decider, sequence. |
+| `DEFAULT_MATCHZY_CVARS` *(v0.11.1)* | `{mp_warmup_pausetimer: "0", matchzy_minimum_ready_required: "2"}`.  Conservative defaults; operator overrides via Config tab. |
+| `_merge_cvars(overrides) -> dict` *(v0.11.1)* | Defaults + overrides; operator wins; blank value drops the key; blank/whitespace keys silently ignored. |
+| `issue_spectator_token(s) -> str` *(v0.11.1)* | Idempotent — returns existing token if any.  `secrets.token_urlsafe(24)`. |
+| `rotate_spectator_token(s) -> str` *(v0.11.1)* | Mints a fresh token; invalidates any prior URL. |
+| `build_spectator_snapshot(s) -> dict` *(v0.11.1)* | Sanitized snapshot for the public `/spectate` page — strips Discord IDs, masks SteamIDs (first 4 + last 4), omits captain tokens + `matchzy_config`. |
+| `_mask_steam_id(sid) -> str` *(v0.11.1)* | `"7656…0001"` masking helper. |
 
 ### Exceptions
 
@@ -80,6 +96,29 @@ functions here; SSE streams state changes to the SPA mirror.
 |--------|---------|
 | `_VETO_SEQUENCES` | Maps mode (`"BO1"`/`"BO3"`/`"BO5"`) → list of `(kind, team)` tuples.  Decider computed at runtime, not stored. |
 | `_LEGAL_TRANSITIONS` | Maps current state → frozenset of legal next states.  Enforced by `VetoSession._transition()`. |
+
+---
+
+## `cs2servergui/discord_bot.py` (NEW in v0.11.0 — ~280 lines)
+
+Optional Discord bot daemon.  Owns a `discord.py` gateway connection on a
+dedicated daemon thread with its own asyncio loop; Flask threads bridge
+into it via `asyncio.run_coroutine_threadsafe`.  All public APIs no-op
+silently when `discord_bot_token` is unset (`DISCORD_AVAILABLE = False`
+on missing dep / no token).
+
+| Symbol | Summary |
+|--------|---------|
+| `DISCORD_AVAILABLE` | True if `discord.py` imported successfully (gated by lazy import so the .exe runs even if Discord features aren't bundled). |
+| `_BotRunner` | Owns the asyncio loop, the `discord.Client`, and a 30 s retry loop on `LoginFailure`.  One instance per AppCore lifetime. |
+| `start_bot(core)` | Idempotent — restarts when token changes.  Called from `AppCore.__init__` after `_load_config` and on Config save. |
+| `stop_bot()` | Tears down the gateway connection cleanly. |
+| `bot_status() -> dict` | `{available, configured, connected, name, id, error}` for the SPA Config card status line. |
+| `bot_dm_user(discord_id, content) -> bool` | Fire-and-forget DM (used by v0.11.0 Tue Layer 1A to deliver captain links). |
+| `bot_voice_channels(guild_id) -> list[dict]` | Used by Layer 1B's voice-channel pull modal. |
+| `bot_voice_members(channel_id) -> list[dict]` | Members currently connected to a voice channel. |
+| `bot_post_embed(channel_id, embed_payload) -> str \| None` | Posts a new embed; returns message ID (Layer 1C live veto embed initial post). |
+| `bot_edit_embed(channel_id, message_id, embed_payload) -> bool` | Edits an existing embed (Layer 1C step-by-step updates + finale). |
 
 ---
 
@@ -111,7 +150,8 @@ functions here; SSE streams state changes to the SPA mirror.
 |--------|---------|
 | `CS2_APP_ID` | Steam App ID for CS2 (`"730"`). |
 | `DEPOTDL_RELEASE_URL` | GitHub API URL for the latest DepotDownloader release. |
-| `APP_VERSION` | Current application version string (currently `"0.9.2.1"`). |
+| `APP_VERSION` | Current application version string (currently `"0.11.1"`). |
+| `MATCH_HISTORY_FILE` / `MATCH_HISTORY_KEEP` *(v0.10.2)* | Path + cap for `oblivion_matches.json` — last 10 completed sessions persisted by `_save_to_match_history`. |
 | `APP_REPO` | GitHub repository slug for the app (`"jacquesvniekerk-eng/OblivionServerTool"`). |
 | `APP_RELEASES_URL` / `APP_API_URL` | Human and API GitHub release URLs derived from `APP_REPO`. |
 | `CS2_SERVER_DIR` / `STEAMCMD_PATH` / `CS2_PATH` / `WORKSHOP_DIR` / `DEPOTDL_PATH` / `CS2_ADDONS_DIR` | Default path constants; all re-set by `update_paths()`. |
@@ -271,6 +311,21 @@ admin-only unless noted.  Captains get a scoped session via `/api/veto/claim`
 | `GET /api/veto/qr?token=…&kind=lan\|public` | (v0.10.0 Day 4) SVG QR code for a captain join URL.  Validates token against the live session; admin/local only; cached `private, max-age=300`. |
 | `GET /veto?join=<token>` | Captain-link landing page — server-side claim + cookie set, then redirect to `/#veto`. **(public)** |
 | `GET /veto` (no token) | Redirects to `/#veto` so the SPA can render the live-mirror page. **(public)** |
+| `GET /api/veto/history` *(v0.10.2)* | Last 10 completed sessions from `oblivion_matches.json` (newest last). |
+| `POST /api/veto/rematch` *(v0.10.2)* | From `complete`, preserve teams + captains, optionally swap mode/pool; drop back to `links`. |
+| `POST /api/veto/spectator` *(v0.11.1)* | Issue (or rotate via `{rotate:true}`) the read-only spectator token; returns `{token, urls:{lan, public?}, rotated}`. *(admin)* |
+| `GET /api/veto/spectator/state?token=…` *(v0.11.1)* | Public, token-gated.  `secrets.compare_digest`; returns `build_spectator_snapshot(s)` — sanitized.  401 on bad token. |
+| `GET /spectate?token=…` *(v0.11.1)* | Standalone HTML (no SPA, no auth).  Polls `/api/veto/spectator/state` every 3s.  Token sanitised through `[A-Za-z0-9_-]` before HTML embed (XSS defense in depth). |
+
+### API — Discord bot (v0.11.0+)
+
+| Route | Summary |
+|-------|---------|
+| `GET /api/discord/status` | `bot_status()` snapshot for the Config card live line. |
+| `GET /api/discord/voice_channels` | Layer 1B — lists every voice channel in the configured guild with live member counts. |
+| `GET /api/discord/voice_members?channel_id=…` | Layer 1B — members currently connected to a voice channel. |
+| `POST /api/discord/test_embed` *(v0.11.1, local-only)* | Polish #1 — post a test embed to the configured veto channel so the operator can confirm Layer 1C wiring without running a full veto. |
+| `POST /api/discord/test_dm` *(v0.11.1, local-only)* | Polish #1 — DM a test message to a given Discord user ID so the operator can confirm Layer 1A wiring + that the captain hasn't blocked server-member DMs. |
 
 Day 4 also extended `POST /api/veto/tokens` and `POST /api/veto/revoke_token` to
 include the raw `token` field alongside the LAN/Public URLs so the SPA can build

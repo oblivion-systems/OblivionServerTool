@@ -31,6 +31,21 @@ the panel to the internet. Fine for one night; tear it down after.
 > Safety: the PIN is 4 digits. Behind the HTTPS tunnel that's acceptable for a friends night.
 > Brute-force backoff (20 fails → 5 min lockout) and IP-bound sessions are already in place.
 
+### v0.10.1+: paste the tunnel URL into Config so captain links use it
+
+For the **map-veto / match setup** flow, the tool builds per-captain
+join URLs.  Without configuration these use your `public_ip:5050` (which
+requires a port-forward), which won't work behind CGNAT.  Fix:
+
+1. Copy the `https://random-words.trycloudflare.com` URL `cloudflared` printed.
+2. Open Oblivion → **Config** → **Veto / Match Setup** → paste it into
+   **Public Share URL** → Save.
+3. The Veto-idle stage shows a green **"Online · captain links use …"**
+   banner once it's set.  Captain links now build from the tunnel URL.
+
+(v0.11.1: a yellow LAN-only banner on the Veto-idle stage tells you when
+this is missing, with a one-click jump to the Config input.)
+
 ### Optional: hand out a GUEST PIN (limited access)
 Config → Security → set a **Guest PIN** (separate from the admin PIN; blank disables it). Share
 the **guest** PIN with friends and keep the admin PIN to yourself:

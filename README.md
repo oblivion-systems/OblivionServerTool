@@ -3,14 +3,29 @@
 A desktop application for managing a **Counter-Strike 2 dedicated server** on Windows.  
 Built with Python + Flask + pywebview (Edge WebView2). Ships as a single `.exe` with an optional installer.
 
-> **Status: v0.11.0 (released).**  Adds optional **Discord bot integration**
-> (Layer 1): operator runs their own bot bound to their own Discord server
-> ([5-min setup in DISCORD.md](DISCORD.md)).  When configured, captain links
-> auto-DM to elected captains on `/api/veto/tokens`, the Roster page gains a
-> "🎤 Pull from voice channel" button that fills 10 slots in one click, and
-> a live veto embed in a chosen channel updates as captains ban/pick.  All
-> Discord features degrade silently when no token is configured.
-> 147/147 backend tests green.
+> **Status: v0.11.1 (released).**  Post-v0.11.0 polish sweep.  Eight
+> operator-facing wins on top of the Discord bot integration:
+> **Discord test buttons** (Test Embed / Test DM in Config — verify bot
+> wiring without running a full veto); **📜 Match history modal** (last
+> 10 completed sessions); **"Go Online" banner** on the Veto-idle stage
+> (green when `public_share_url` set, yellow with a one-click jump to
+> Config when LAN-only); **bulk paste** now accepts `Name,SteamID64,DiscordID`
+> rows from any spreadsheet/Discord copy; **roster presets** (localStorage
+> save/load); **MatchZy cvar editor** (local-only key/value rows that
+> merge over the built-in defaults at finale time, with blank-value
+> suppression); **📺 Spectator URL** (read-only token-gated `/spectate`
+> page that polls every 3s — PII stripped, OBS-browser-source friendly,
+> XSS-defended); plus a **`MOBILE_CHECK.md`** real-device checklist for
+> pre-session validation.  **161/161 backend tests green** (28 v092 +
+> 68 veto + 65 veto-api).
+>
+> **Previously: v0.11.0 (Discord bot Layer 1).**  Optional Discord bot —
+> operator runs their own bot bound to their own server
+> ([5-min setup in DISCORD.md](DISCORD.md)).  Auto-DM captain links on
+> `/api/veto/tokens`, "🎤 Pull from voice channel" Roster button that
+> fills 10 slots in one click, and a live veto embed in a chosen channel
+> that updates as captains ban/pick.  All Discord features degrade
+> silently when no token is configured.
 >
 > **Previously: v0.10.2 (online-primary polish).**  The **map-veto / match-setup feature** is now
 > online-primary polished: mobile-responsive SPA (hamburger sidebar drawer, 44/48 px
@@ -164,9 +179,27 @@ devices** while the operator's UI mirrors the session live over SSE:
   (map order, knife, scoring, map-end → next).  Three-way outcome: file write fails →
   500; RCON fails → 200 + status panel with the file path so the operator can run
   the load manually; full success → 200 + green ✓.
+- **Match history** *(v0.10.2)* — the last 10 completed sessions are
+  persisted to `oblivion_matches.json` and viewable via the **📜 History**
+  button on the Veto header (mode, teams, captains, decider-tagged
+  maplist).
+- **MatchZy cvar editor** *(v0.11.1, local-only)* — Config tab adds an
+  editable key/value row list; values merge over the built-in defaults
+  (`mp_warmup_pausetimer=0`, `matchzy_minimum_ready_required=2`) at
+  finale time; operator wins on conflicts; **blank value actively
+  suppresses** a default cvar so it's not sent at all.
+- **Roster presets** *(v0.11.1)* — Save/Load named 10-player rosters
+  (localStorage; per-browser).  Useful for recurring teams.
+- **Spectator URL** *(v0.11.1)* — operator generates a per-session
+  token; `/spectate?token=…` serves a standalone, auto-refreshing
+  read-only view for casters/observers.  Sanitized (Discord IDs
+  omitted, SteamIDs masked first-4 + last-4, captain tokens never
+  included).  No SPA, no auth flow — works as an OBS browser source.
 
 Full spec in [VETO.md](VETO.md); implementation map in [INGEST.md](INGEST.md) → "API — map
-veto" + "Frontend — Veto tab".
+veto" + "Frontend — Veto tab".  See [DISCORD.md](DISCORD.md) for the optional
+v0.11.0 bot integration, and [MOBILE_CHECK.md](MOBILE_CHECK.md) for the
+real-device checklist run before live sessions.
 
 ---
 

@@ -14,12 +14,17 @@
 
 | Phase | Title | Status |
 |-------|-------|--------|
-| 0 | Groundwork (this session) | ✅ done |
-| 1 | Stabilise the foundation | ⬜ not started |
-| 2 | Verify every mode | ⬜ not started |
-| 3 | Harden & secure | ⬜ not started |
-| 4 | Test & release engineering | ⬜ not started |
-| 5 | Polish & 1.0 launch | ⬜ not started |
+| 0 | Groundwork | ✅ done |
+| 1 | Stabilise the foundation | 🟢 mostly done (1.2 complete; 1.1 last bullet + 1.3 hygiene open) |
+| 2 | Verify every mode | 🟡 in flight (1/14 confirmed in-game — needs Friday session) |
+| 3 | Harden & secure | 🟢 mostly done (3.0 audit complete bar **C4b**, **H4**; 3.1/3.2/3.3 partial) |
+| 4 | Test & release engineering | 🟢 mostly done (smoke battery 161/161; build pipeline + signing still open) |
+| 5 | Polish & 1.0 launch | 🟡 in flight (mobile + role pill + capabilities done; final docs + 1.0 ship pending) |
+
+**Current release:** v0.11.1 (2026-06-02) — 161/161 tests green.
+The path to 1.0 is now: finish Phase 2 mode matrix (Friday), close the
+remaining Phase 3.1/3.2/3.3 error-path items, sign + verify the
+build pipeline, then ship.
 
 ---
 
@@ -80,6 +85,38 @@ deferred loose ends. Full prose in [CHANGELOG.md](CHANGELOG.md) → v0.9.1.*
   lock, the `_stop_event` edge-window cancel race, and the Warcraft `ReferenceEquals` → SteamID
   equality fix in three deferred-menu sites.
 
+### Shipped — v0.11.1 (post-v0.11.0 polish sweep, released 2026-06-02)
+
+Eight discrete operator-facing wins + a real-device validation
+checklist.  All back-compat; no schema / state-machine changes.
+**161/161 tests green** (28 v092 + 68 veto + 65 veto-api; +14 from v0.11.0).
+
+- [x] **Polish #1 — Discord test buttons** (Config card: Test Embed +
+      Test DM; backed by `/api/discord/test_embed` + `/api/discord/test_dm`)
+- [x] **Polish #2 — Mobile validation checklist** ([MOBILE_CHECK.md](MOBILE_CHECK.md))
+- [x] **Polish #3 — Match history modal** (📜 button on Veto header; reads
+      the v0.10.2 `/api/veto/history` endpoint that already existed)
+- [x] **Polish #5 — "Go Online" banner** (Veto-idle stage; green/yellow/error;
+      one-click jump-to-Config when LAN-only)
+- [x] **Polish #6 — Spectator URL** (📺 button on Veto header; per-session
+      token via `POST /api/veto/spectator`; standalone `/spectate` HTML
+      page polls `/api/veto/spectator/state` every 3s; sanitized snapshot
+      strips Discord IDs, masks SteamIDs, omits captain tokens; XSS-defended
+      via `[A-Za-z0-9_-]` regex on token before HTML embed)
+- [x] **Polish #7 — Bulk SteamID/Discord paste** (Roster: "Paste 10 names"
+      now accepts `Name`, `Name,SteamID64`, or `Name,SteamID64,DiscordID`
+      per line; toast reports column counts)
+- [x] **Polish #8 — Roster presets** (localStorage; Save / Load dropdown /
+      Delete sentinel)
+- [x] **Polish #9 — MatchZy cvar editor** (Config card; key/value rows;
+      operator merges over `DEFAULT_MATCHZY_CVARS`; blank value actively
+      suppresses a default; `build_matchzy_config(s, cvar_overrides=)`
+      gains optional kwarg with old signature preserved)
+- [x] Bump `APP_VERSION` 0.11.0 → 0.11.1, `installer.iss` matching, tag.
+
+**Parked at operator request:**
+- [ ] Cinematic finale animation rewrite — "skip animation for now"
+
 ### Shipped — v0.11.0 (Discord bot integration, released 2026-06-02)
 
 Layer 1 of the Discord bot — operator-run bot bound to operator's own Discord
@@ -99,7 +136,7 @@ when no token configured.
       on every ban/pick; "✅ MATCH LOCKED IN" on finale.  Version bump
       0.10.2 → 0.11.0; tag + release.
 
-147/147 tests green (28 v092 + 61 veto + 58 veto-api).
+147/147 tests at release.
 
 ---
 
@@ -112,60 +149,50 @@ the three cross-cutting investments + the highest-leverage workflow gaps in one
 release, scoped to four working days so Friday is real testing not finishing.
 
 **Day 1 — Mon (mobile + workflow blockers):**
-- [ ] CSS responsive pass — single `@media (max-width: 640px)` block:
-      - sidebar collapses to hamburger drawer
-      - `.login-card`, `.connect-popover`, `.palette` clamped to `min(380px, calc(100vw - 16px))`
-      - all `.btn` min-height 44 px (Apple HIG)
-      - `clamp()` on big finale titles
-      - `visibilitychange` SSE-reconnect handler
-- [ ] Captain finale embeds `connect <ip:port>; password X` + Copy button (the
-      workflow handoff that was missing)
-- [ ] `/api/veto/finale` refuses if `core.current_mode` not in MatchZy modes
-      (3v3 / 4v4 / 5v5 / Competitive); response includes `matchzy.precheck`
+- [x] CSS responsive pass — single `@media (max-width: 640px)` block:
+      hamburger drawer, clamped popovers, 44 px tap targets,
+      `clamp()` on finale titles, `visibilitychange` SSE re-arm.
+- [x] Captain finale embeds `connect <ip:port>; password X` + Copy button.
+- [x] `/api/veto/finale` refuses if `core.current_mode` not in MatchZy modes;
+      response includes `matchzy.precheck`.
 
 **Day 2 — Tue (pre-flight errors + local-only + role pill):**
-- [ ] `/api/server/start` returns 4xx with preflight reason (port held / plugin
-      missing / Steam creds expired)
-- [ ] `boot_error` field in `/api/state` (stuck boots visible remotely)
-- [ ] Hide CS2-update + App-update badges + CS2 server-update modal for non-local
-- [ ] App self-updater swallows GitHub Releases 404 silently (private repo)
-- [ ] Log drawer hidden for guest role (kills the 12-retry SSE hammer)
-- [ ] Role pill in header (admin / guest / captain)
-- [ ] LAN IP row hidden in status bar + Connect popover for `!is_local`
+- [x] `/api/server/start` returns 4xx with preflight reason.
+- [x] `boot_error` / `last_start_error` surfaced.
+- [x] CS2-update + App-update badges + server-update modal hidden for non-local.
+- [x] App self-updater swallows GitHub 404 silently (private repo).
+- [x] Log drawer hidden for guest role (kills 12-retry SSE hammer).
+- [x] Role pill in header (admin / guest / captain).
+- [x] LAN IP row hidden in status bar / Connect popover for `!is_local`.
 
 **Day 3 — Wed (cross-cutting investments):**
-- [ ] Unified SSE transport module — exponential backoff (1→2→4→8→30 s capped),
-      `online`/`visibilitychange` re-arm, header status pill
-- [ ] `/api/capabilities` endpoint returning `{role, is_local, can: [...]}`
-- [ ] Local-only buttons render `disabled` + tooltip "Local only — ask the host"
-      instead of click-then-403
-- [ ] `api.js` retry/timeout layer (10 s AbortController, one retry on network
-      error, sticky error toasts)
-- [ ] Push `/api/state` over SSE so 3 s polling dies (140 RTTs/min → ~1)
+- [x] Unified SSE transport `_oblivionSSE` — exp backoff (1→2→4→8→16→30 s),
+      `online` / `visibilitychange` re-arm, header status pill.
+- [x] `/api/capabilities` returning `{role, is_local, can: [...]}`.
+- [x] Local-only buttons render `disabled` + tooltip instead of click-then-403.
+- [x] `api.js` retry/timeout layer (10 s AbortController + one retry on
+      network/5xx; sticky `network: true` flag on the error).
 
 **Day 4 — Thu (polish + history + webhook + ship):**
-- [ ] Captain limbo screen ("Operator collecting votes — Team A: 3/5 in")
-- [ ] Rematch button on Complete page (preserves teams, resets veto)
-- [ ] Last-action attribution in `/api/state` (`{who, what, when}`)
-- [ ] Match history — last 5 completed sessions to `oblivion_matches.json`
-- [ ] Discord webhook on finale (operator pastes webhook URL → finale POSTs
-      embed to channel)
-- [ ] Full regression (123/123 → target ~145 with new cases)
-- [ ] Rebuild .exe via `build.bat` (now correctly using `python -m PyInstaller`)
-- [ ] Tag v0.10.2, GitHub release with binary, update `pull-latest.bat` references
+- [x] Captain limbo screen (per-stage status / waiting copy).
+- [x] Rematch button on Complete page (preserves teams; `complete → links`).
+- [x] Match history — last 10 completed sessions to `oblivion_matches.json`.
+- [x] Discord webhook on finale.
+- [x] Full regression — 137/137 at v0.10.2 release.
+- [x] Tag v0.10.2 + GitHub release; `pull-latest.bat` shipped in v0.10.1.
 
-**Explicitly cut from v0.10.2 (deferred or won't-do):**
-- [ ] Animation rewrite — parked at operator's request
-- [ ] "Go Online" header panel with cloudflared generator — defer to v0.10.3
-- [ ] Public read-only spectator URL — defer
-- [ ] Roster presets save/load — defer
-- [ ] MatchZy cvar editor (overtime / max-rounds) — defer
-- [ ] Bulk SteamID paste — defer
-- [ ] Browser push notifications (service worker) — defer
-- [ ] Tournament brackets — won't-do until 5+ matches felt the pain
-- [ ] In-app chat — won't-do (Discord exists)
-- [ ] Magic-link auth — won't-do (no email infra)
-- [ ] Public REST/webhook API — won't-do until external consumer asks
+**v0.10.2 backlog (was "explicitly cut" — actual outcomes):**
+- [x] Animation rewrite — *still parked* at operator request.
+- [x] "Go Online" panel — **shipped in v0.11.1** (Polish #5).
+- [x] Public read-only spectator URL — **shipped in v0.11.1** (Polish #6).
+- [x] Roster presets save/load — **shipped in v0.11.1** (Polish #8, localStorage).
+- [x] MatchZy cvar editor — **shipped in v0.11.1** (Polish #9, local-only).
+- [x] Bulk SteamID paste — **shipped in v0.11.1** (Polish #7).
+- [ ] Browser push notifications (service worker) — still deferred (no demand).
+- [ ] Tournament brackets — won't-do until 5+ matches felt the pain.
+- [ ] In-app chat — won't-do (Discord exists, v0.11.0 wires it).
+- [ ] Magic-link auth — won't-do (no email infra).
+- [ ] Public REST/webhook API — won't-do until external consumer asks.
 
 ---
 
@@ -187,7 +214,8 @@ release, scoped to four working days so Friday is real testing not finishing.
 - [x] **`pull-latest.bat`** self-service updater for grabbing the latest .exe
       from the private repo's GitHub Release via `gh` CLI
 
-123/123 tests green (22 v092 + 54 veto + 47 veto-api).
+123/123 tests at v0.10.1 release (22 v092 + 54 veto + 47 veto-api).
+Current state at v0.11.1: 161/161 (28 + 68 + 65).
 
 ---
 
@@ -252,7 +280,9 @@ Layered build plan with v0.10.0 = Layer 0 (core veto), v0.11.0 = Layer 1 (Discor
   session, but a browser refresh during the links stage would trigger
   the rotation.  Make it return the existing tokens if already issued
   (test_veto.py pins the current rotating behaviour so the fix shows up
-  cleanly in the diff).
+  cleanly in the diff).  *Pattern to mirror: v0.11.1's
+  `issue_spectator_token` got this right from day one — it's idempotent
+  and exposes a separate `rotate_spectator_token` for the explicit case.*
 
 ### Shipped in v0.9.1 — confirmed in-game
 - [x] **Jailbreak crash fixed** — dropped CS2Fixes (`zombie`) from the Jailbreak mode; native
@@ -463,7 +493,9 @@ Plugin-backed modes (verify deploy, verify markers, verify defining behaviour):
 
 ### 5.1 UX pass
 - [ ] Walk the golden path as a new user: download → wizard → install → start → connect
-- [ ] Remote web panel pass on a phone (responsive, touch targets, auth)
+- [~] Remote web panel pass on a phone (responsive, touch targets, auth) —
+      *responsive CSS + role pill + 44 px tap targets shipped in v0.10.2;
+      real-device run-through pending — checklist in [MOBILE_CHECK.md](MOBILE_CHECK.md)*
 - [ ] Theme/accent pass (dark/light/system) for visual regressions
 - [ ] Confirm every keybind and quick action works
 - [ ] **WebView2 accelerator keys** — F5/F12/Ctrl+R/Ctrl+P are owned by the Edge WebView2 host and JS `preventDefault` can't reliably suppress them, so binding those keys may trigger the host action (reload/devtools/print) instead. *Deferred:* pywebview 5.x doesn't expose `AreBrowserAcceleratorKeysEnabled`; reaching the underlying CoreWebView2.Settings is fragile + needs desktop testing. Revisit at a desktop session (or just mark those keys reserved in the keybind UI).
