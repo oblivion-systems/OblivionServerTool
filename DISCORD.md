@@ -106,6 +106,21 @@ Discord IDs are 17-19 digit numbers.  Two ways to get them:
 
 If you see `[discord] Login failed — check your bot token in Config.`, the token is wrong or was reset since you copied it.  Reset it again and re-paste.
 
+### v0.11.1 — verify the wiring before going live
+
+The Config → Discord card has two **test buttons** (local-only):
+
+- **Test Embed** — posts a small test embed to the configured veto
+  channel.  Confirms Layer 1C (bot can post embeds + you have the
+  channel ID right + bot has Send Messages + Embed Links permissions
+  there).
+- **Test DM** — type any Discord user ID and the bot DMs them a test
+  message.  Confirms Layer 1A (bot can DM + that captain hasn't
+  blocked server-member DMs).
+
+Run both before a real session — much faster feedback loop than
+"run a full veto and see if the embed appears."
+
 ---
 
 ## Step 8 — Optional: per-player Discord ID at roster time (Layer 1A)
