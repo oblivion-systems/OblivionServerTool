@@ -200,6 +200,13 @@ class VetoSession:
     # new message per step.  Cleared by reset().
     live_embed_msg_id: str        = ""
 
+    # v0.11.0 polish — Spectator URL.  Single token the operator
+    # generates + shares with casters / observers; gives a read-only,
+    # auto-refreshing view of the veto progress.  No PII (we strip
+    # discord_id, mask steam_id, don't include captain tokens).
+    # Empty until issue_spectator_token() is called; cleared by reset().
+    spectator_token: str          = ""
+
     # Audit
     created_at:  float = field(default_factory=time.time)
     updated_at:  float = field(default_factory=time.time)
@@ -584,6 +591,87 @@ def both_captains_ready(session: VetoSession) -> bool:
     return bool(session.ready_a and session.ready_b)
 
 
+# v0.11.0 polish — Spectator URL helpers ──────────────────────────────────
+def issue_spectator_token(session: VetoSession) -> str:
+    """Generate (or return the existing) read-only spectator token.
+    Idempotent: calling twice gives the same token until rotate.  No state
+    gate — operator can share the URL before captains are even resolved
+    and the spectator page will just see the early stages."""
+    if not session.spectator_token:
+        session.spectator_token = secrets.token_urlsafe(24)
+        session.updated_at = time.time()
+    return session.spectator_token
+
+
+def rotate_spectator_token(session: VetoSession) -> str:
+    """Mint a fresh spectator token, invalidating any URL previously
+    shared.  Use case: caster left the call and operator doesn't want
+    their saved link to keep working."""
+    session.spectator_token = secrets.token_urlsafe(24)
+    session.updated_at = time.time()
+    return session.spectator_token
+
+
+def _mask_steam_id(sid: str) -> str:
+    """SteamID64s are public — they appear in MatchZy logs, Discord
+    embeds, every join announcement — but truncating still feels nicer
+    when shoving them onto a caster's public stream.  Show first 4 + last
+    4, mask the middle.  Empty string passes through."""
+    sid = sid or ""
+    if len(sid) <= 8:
+        return sid
+    return f"{sid[:4]}…{sid[-4:]}"
+
+
+def build_spectator_snapshot(session: VetoSession) -> dict:
+    """Sanitized read-only view of a VetoSession for the spectator page.
+
+    Strips:
+      - Discord IDs (PII; bot DMs work without anyone seeing the ID)
+      - Captain claim tokens (would let a viewer hijack the captain seat)
+      - matchzy_config (admin-only handoff payload, ditto)
+      - SteamID64s are MASKED (first 4 + last 4) — they're public on
+        the server already but a casting overlay doesn't need them in
+        full.
+
+    Keeps everything the caster legitimately wants to talk about:
+    teams, mode, vote tallies, captain identity, veto sequence,
+    current step, final maplist, decider.
+    """
+    def _player(p: RosterPlayer) -> dict:
+        return {"name": p.name, "steam_id": _mask_steam_id(p.steam_id)}
+
+    captain_a_name = ""
+    if session.captain_a_idx is not None and 0 <= session.captain_a_idx < len(session.team_a):
+        captain_a_name = session.team_a[session.captain_a_idx].name
+    captain_b_name = ""
+    if session.captain_b_idx is not None and 0 <= session.captain_b_idx < len(session.team_b):
+        captain_b_name = session.team_b[session.captain_b_idx].name
+
+    return {
+        "state":         session.state,
+        "mode":          session.mode,
+        "team_a_name":   session.team_a_name,
+        "team_b_name":   session.team_b_name,
+        "team_a":        [_player(p) for p in session.team_a],
+        "team_b":        [_player(p) for p in session.team_b],
+        "captain_a":     captain_a_name,
+        "captain_b":     captain_b_name,
+        "map_pool":      list(session.map_pool),
+        "sequence": [
+            {"kind": s.kind, "team": s.team, "map": s.map_id}
+            for s in session.sequence
+        ],
+        "current_step":  session.current_step,
+        "final_maps":    list(session.final_maps),
+        "decider":       session.decider,
+        "ready_a":       session.ready_a,
+        "ready_b":       session.ready_b,
+        "created_at":    session.created_at,
+        "updated_at":    session.updated_at,
+    }
+
+
 # v0.11.0 polish — Conservative MatchZy cvar defaults.  Operator can
 # override or extend via AppCore.matchzy_cvars (Config tab).  Values are
 # kept as STRINGS — MatchZy's match-config parses them either way, but
@@ -793,4 +881,5 @@ def reset(session: VetoSession) -> None:
     session.ready_a = False
     session.ready_b = False
     session.live_embed_msg_id = ""
+    session.spectator_token = ""   # v0.11.0 polish — spectator URL invalidated
     session.updated_at = time.time()

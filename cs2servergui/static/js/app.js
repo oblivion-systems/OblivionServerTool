@@ -2229,6 +2229,8 @@ pages['veto'] = function() {
       <div class="veto-spacer"></div>
       <button class="btn btn-ghost btn-sm" id="veto-history-btn"
               title="Show the last 10 completed matches">📜 History</button>
+      <button class="btn btn-ghost btn-sm" id="veto-spectator-btn"
+              title="Generate a read-only spectator URL for casters / observers">📺 Spectator</button>
       <button class="btn btn-ghost" id="veto-reset-btn" style="display:none">Reset session</button>
     </div>
     <div class="veto-pill" id="veto-pill">
@@ -2242,6 +2244,7 @@ pages['veto'] = function() {
   `;
 
   el('veto-history-btn').addEventListener('click', _vetoOpenHistoryModal);
+  el('veto-spectator-btn').addEventListener('click', _vetoOpenSpectatorModal);
   el('veto-reset-btn').addEventListener('click', async () => {
     if (!confirm('Reset the active veto session? All roster and progress will be lost.')) return;
     try { await api.veto.reset(); toast('Session reset'); }
@@ -2808,6 +2811,90 @@ async function _vetoRenderOnlineBanner() {
     node.className = 'veto-online-banner veto-online-banner--err';
     node.textContent = `Couldn't read share-URL config: ${err.message || err}`;
   }
+}
+
+/* ── v0.11.0 polish — Spectator URL modal ────────────────────────────────
+ * Issues a read-only spectator token via POST /api/veto/spectator and
+ * shows the URL + Copy + Rotate buttons.  Token is per-session; the
+ * URL stays valid until reset() or rotate.
+ */
+async function _vetoOpenSpectatorModal() {
+  let modal = el('veto-spectator-modal');
+  if (modal) modal.remove();
+  modal = document.createElement('div');
+  modal.id = 'veto-spectator-modal';
+  modal.className = 'veto-modal-backdrop';
+  modal.innerHTML = `
+    <div class="veto-modal" role="dialog" aria-label="Spectator URL">
+      <div class="veto-modal-head">
+        <h2>📺 Spectator URL</h2>
+        <button class="veto-modal-close" aria-label="Close">×</button>
+      </div>
+      <div class="veto-modal-body" id="veto-spectator-body">
+        <div style="text-align:center;padding:30px;color:var(--text-3)">Issuing…</div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  const close = () => { try { modal.remove(); } catch(_){} };
+  modal.querySelector('.veto-modal-close').addEventListener('click', close);
+  modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
+
+  async function _issue(rotate) {
+    const body = el('veto-spectator-body');
+    if (!body) return;
+    body.innerHTML = `<div style="text-align:center;padding:30px;color:var(--text-3)">${rotate?'Rotating':'Issuing'}…</div>`;
+    try {
+      const r = await api.veto.issueSpectator(rotate);
+      const u = r.urls || {};
+      body.innerHTML = `
+        <div style="color:var(--text-3);font-size:12px;margin-bottom:14px;line-height:1.5">
+          A read-only link your casters / observers can load.  Refreshes every 3s.
+          ${rotate ? '<br><strong style="color:var(--ok)">Old link is now dead.</strong>' : ''}
+        </div>
+        ${u.public ? `
+          <div class="veto-spec-row">
+            <label>Public (share-URL based)</label>
+            <input class="input" type="text" id="veto-spec-public" value="${esc(u.public)}" readonly>
+            <button class="btn btn-ghost btn-sm" data-copy="veto-spec-public">Copy</button>
+            <a class="btn btn-ghost btn-sm" href="${esc(u.public)}" target="_blank" rel="noopener">Open ↗</a>
+          </div>
+        ` : ''}
+        <div class="veto-spec-row">
+          <label>LAN</label>
+          <input class="input" type="text" id="veto-spec-lan" value="${esc(u.lan || '')}" readonly>
+          <button class="btn btn-ghost btn-sm" data-copy="veto-spec-lan">Copy</button>
+          <a class="btn btn-ghost btn-sm" href="${esc(u.lan || '')}" target="_blank" rel="noopener">Open ↗</a>
+        </div>
+        <div style="margin-top:16px;display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn btn-ghost btn-sm" id="veto-spec-rotate"
+                  title="Mint a fresh token; the old link will stop working">
+            🔄 Rotate token
+          </button>
+        </div>
+        <div style="font-size:11px;color:var(--text-4);margin-top:14px;line-height:1.5">
+          The spectator view masks SteamIDs (first 4 + last 4) and omits
+          Discord IDs.  It does NOT include captain claim tokens — viewers
+          can watch but cannot interact.
+        </div>
+      `;
+      body.querySelectorAll('button[data-copy]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const inp = el(btn.dataset.copy);
+          if (!inp) return;
+          try { await navigator.clipboard.writeText(inp.value); toast('Copied'); }
+          catch (_e) { inp.select(); document.execCommand('copy'); toast('Copied (fallback)'); }
+        });
+      });
+      const rotateBtn = el('veto-spec-rotate');
+      if (rotateBtn) rotateBtn.addEventListener('click', () => {
+        if (confirm('Rotate the spectator token? The current link will stop working immediately.')) _issue(true);
+      });
+    } catch (err) {
+      body.innerHTML = `<div style="color:var(--bad);padding:20px;text-align:center">${esc(err.message || 'Failed to issue token')}</div>`;
+    }
+  }
+  _issue(false);
 }
 
 /* ── v0.11.0 polish — Match history modal ────────────────────────────────

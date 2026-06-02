@@ -1203,6 +1203,107 @@ def t_concurrent_finale_calls_serialise():
 t('finale: concurrent calls serialise via _veto_lock — session ends `complete`', t_concurrent_finale_calls_serialise)
 
 
+# ─── v0.11.0 polish: Spectator URL ────────────────────────────────────────
+def t_spectator_issue_requires_session():
+    """POST /api/veto/spectator with no active session → 404."""
+    ac, app, c = _new_app(); _login(c)
+    r = c.post('/api/veto/spectator')
+    return (r.status_code == 404), f'status={r.status_code}'
+t('spectator: 404 when no active session', t_spectator_issue_requires_session)
+
+
+def t_spectator_issue_returns_token_and_urls():
+    ac, app, c = _new_app(); _login(c)
+    c.post('/api/veto/create', json={'mode': 'BO1'})
+    r = c.post('/api/veto/spectator')
+    j = r.get_json()
+    ok = (r.status_code == 200
+          and isinstance(j.get('token'), str) and len(j['token']) >= 20
+          and 'urls' in j and 'lan' in j['urls']
+          and '/spectate?token=' in j['urls']['lan'])
+    return (ok, f'json={j}')
+t('spectator: issue returns token + LAN url', t_spectator_issue_returns_token_and_urls)
+
+
+def t_spectator_issue_idempotent_until_rotate():
+    ac, app, c = _new_app(); _login(c)
+    c.post('/api/veto/create', json={'mode': 'BO1'})
+    t1 = c.post('/api/veto/spectator').get_json()['token']
+    t2 = c.post('/api/veto/spectator').get_json()['token']
+    t3 = c.post('/api/veto/spectator', json={'rotate': True}).get_json()['token']
+    return (t1 == t2 and t1 != t3), f't1={t1[:8]} t2={t2[:8]} t3={t3[:8]}'
+t('spectator: issue idempotent + rotate mints fresh', t_spectator_issue_idempotent_until_rotate)
+
+
+def t_spectator_state_rejects_bad_token():
+    ac, app, c = _new_app(); _login(c)
+    c.post('/api/veto/create', json={'mode': 'BO1'})
+    c.post('/api/veto/spectator')
+    # Hit the public endpoint with a wrong token using a FRESH client
+    # (no auth cookie) — proves the token IS the auth.
+    public = app.test_client()
+    r = public.get('/api/veto/spectator/state?token=NOPE')
+    return (r.status_code == 401), f'status={r.status_code}'
+t('spectator: bad token → 401', t_spectator_state_rejects_bad_token)
+
+
+def t_spectator_state_strips_pii():
+    """Round-trip: issue token, fetch public state with it, verify no
+    discord_id field surfaces + steam_id full value is masked."""
+    ac, app, c = _new_app(); _login(c)
+    c.post('/api/veto/create', json={'mode': 'BO3'})
+    # Plant identifiable values
+    roster = _ten_player_payload()
+    roster[0]['discord_id'] = '123456789012345678'
+    roster[0]['steam_id']   = '76561198000000001'
+    c.post('/api/veto/roster', json={
+        'team_a_name': 'Alpha', 'team_b_name': 'Bravo', 'players': roster,
+    })
+    c.post('/api/veto/distribute')
+    tok = c.post('/api/veto/spectator').get_json()['token']
+    public = app.test_client()
+    r = public.get(f'/api/veto/spectator/state?token={tok}')
+    blob = r.get_data(as_text=True)
+    ok = (r.status_code == 200
+          and '123456789012345678' not in blob
+          and '76561198000000001'  not in blob
+          and 'discord_id' not in blob
+          and 'tokens' not in r.get_json())
+    return (ok, f'leaked? status={r.status_code} body starts={blob[:120]}')
+t('spectator: public state strips discord_id + masks steam_id + no tokens', t_spectator_state_strips_pii)
+
+
+def t_spectator_page_serves_html_with_embedded_token():
+    """GET /spectate?token=… returns HTML containing the (sanitized)
+    token so the page's JS can poll the state endpoint."""
+    ac, app, c = _new_app(); _login(c)
+    c.post('/api/veto/create', json={'mode': 'BO1'})
+    tok = c.post('/api/veto/spectator').get_json()['token']
+    public = app.test_client()
+    r = public.get(f'/spectate?token={tok}')
+    body = r.get_data(as_text=True)
+    return (r.status_code == 200
+            and 'text/html' in r.content_type
+            and tok in body
+            and 'Spectator' in body), f'status={r.status_code} ctype={r.content_type}'
+t('spectator: /spectate page serves HTML with token embedded', t_spectator_page_serves_html_with_embedded_token)
+
+
+def t_spectator_page_strips_unsafe_token_chars():
+    """Defense in depth: /spectate?token=<XSS> only embeds [A-Za-z0-9_-]
+    characters so a hostile URL can't inject script into the page HTML."""
+    ac, app, c = _new_app()       # no session needed
+    public = app.test_client()
+    bad = '<script>alert(1)</script>'
+    r = public.get(f'/spectate?token={bad}')
+    body = r.get_data(as_text=True)
+    return (r.status_code == 200
+            and '<script>alert' not in body
+            and '<script>' in body  # legitimate script tag for the polling JS
+           ), f'status={r.status_code}'
+t('spectator: /spectate sanitises token chars in embedded HTML', t_spectator_page_strips_unsafe_token_chars)
+
+
 # ─── Auto-generated pytest cases ──────────────────────────────────────────
 def _slug(name):
     out = ''.join(c if c.isalnum() else '_' for c in name).strip('_').lower()

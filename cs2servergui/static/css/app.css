@@ -2703,6 +2703,23 @@ body.compact #content        { padding: 14px 16px; }
 }
 .veto-pull-channel.ready .veto-pull-channel-count { color: var(--ok); }
 
+/* v0.11.0 polish — Spectator URL modal rows. */
+.veto-spec-row {
+  display: grid; grid-template-columns: 80px 1fr auto auto;
+  gap: 8px; align-items: center; margin-bottom: 10px;
+}
+.veto-spec-row label {
+  font-size: 11px; color: var(--text-3); text-transform: uppercase;
+  letter-spacing: .1em; font-weight: 600;
+}
+.veto-spec-row .input {
+  font-family: var(--font-mono); font-size: 12px;
+  background: var(--bg-0); color: var(--text-1);
+}
+@media (max-width: 640px) {
+  .veto-spec-row { grid-template-columns: 1fr; }
+}
+
 /* v0.11.0 polish — MatchZy cvar editor rows (Config → Veto card). */
 .cfg-cvar-list { display: flex; flex-direction: column; gap: 6px; }
 .cfg-cvar-empty {
