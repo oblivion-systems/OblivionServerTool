@@ -678,6 +678,104 @@ def t_spectator_snapshot_strips_pii():
 t('spectator: snapshot strips discord/steam/tokens PII', t_spectator_snapshot_strips_pii)
 
 
+def t_serialize_deserialize_roundtrip_basic():
+    """v0.11.3 — serialize/deserialize round-trip preserves every
+    significant field on a fresh session at every state we can
+    construct in-test."""
+    s = _make_to('finale')
+    s.live_embed_msg_id = 'msg_12345'
+    s.spectator_token = 'spec_xyz'
+    blob = V.serialize_session(s)
+    s2 = V.deserialize_session(blob)
+    return (
+        s2.state == s.state
+        and s2.mode == s.mode
+        and s2.team_a_name == s.team_a_name
+        and s2.team_b_name == s.team_b_name
+        and len(s2.team_a) == len(s.team_a)
+        and s2.team_a[0].name == s.team_a[0].name
+        and s2.team_a[0].steam_id == s.team_a[0].steam_id
+        and s2.captain_a_idx == s.captain_a_idx
+        and s2.captain_b_idx == s.captain_b_idx
+        and s2.final_maps == s.final_maps
+        and s2.decider == s.decider
+        and s2.live_embed_msg_id == 'msg_12345'
+        and s2.spectator_token == 'spec_xyz'
+    ), f'fields drifted on round-trip'
+t('serialize/deserialize: basic round-trip preserves all fields', t_serialize_deserialize_roundtrip_basic)
+
+
+def t_serialize_preserves_tokens_with_claim_state():
+    """v0.11.3 — captain tokens (including claimed_by, used flags) survive
+    JSON round-trip.  This is the load-bearing case: an app restart
+    mid-session must NOT log captains out by losing their claim binding."""
+    s = _make_to('links')
+    tokens = V.issue_tokens(s)
+    V.claim_captain(s, tokens['A'], caller_id='cap_a_phone')
+    V.claim_captain(s, tokens['B'], caller_id='cap_b_laptop')
+    # State has now advanced to 'veto'; tokens are claimed by callers.
+    blob = V.serialize_session(s)
+    # Force through JSON to catch any non-JSONable types.
+    import json
+    s2 = V.deserialize_session(json.loads(json.dumps(blob)))
+    return (
+        s2.state == 'veto'
+        and s2.tokens['A'].used is True
+        and s2.tokens['A'].claimed_by == 'cap_a_phone'
+        and s2.tokens['B'].used is True
+        and s2.tokens['B'].claimed_by == 'cap_b_laptop'
+        and s2.tokens['A'].value == s.tokens['A'].value
+    ), f"tokens={ {t: {'used': v.used, 'claimed_by': v.claimed_by} for t, v in s2.tokens.items()} }"
+t('serialize/deserialize: token claim state survives round-trip', t_serialize_preserves_tokens_with_claim_state)
+
+
+def t_serialize_preserves_partial_veto_sequence():
+    """v0.11.3 — when an app dies mid-veto (e.g. after 2 of 6 ban/picks),
+    serialize must capture the partial sequence + current_step so the
+    resumed session knows whose turn is next."""
+    s = _make_to('links')
+    tokens = V.issue_tokens(s)
+    V.claim_captain(s, tokens['A'], caller_id='a')
+    V.claim_captain(s, tokens['B'], caller_id='b')
+    # We're in 'veto' state now.  Perform 2 steps.
+    V.perform_step(s, 'A', s.map_pool[0])
+    V.perform_step(s, 'B', s.map_pool[1])
+    blob = V.serialize_session(s)
+    import json
+    s2 = V.deserialize_session(json.loads(json.dumps(blob)))
+    return (
+        s2.state == 'veto'
+        and s2.current_step == 2
+        and s2.sequence[0].map_id == s.sequence[0].map_id
+        and s2.sequence[1].map_id == s.sequence[1].map_id
+    ), f'partial sequence not preserved: step={s2.current_step}'
+t('serialize/deserialize: partial veto sequence survives round-trip', t_serialize_preserves_partial_veto_sequence)
+
+
+def t_deserialize_tolerates_unknown_fields():
+    """v0.11.3 — deserialization is defensive: an old persistence file
+    from before a new field was added doesn't crash the load.  Unknown
+    fields ignored; missing fields default sensibly."""
+    blob = {
+        'state':         'roster',
+        'mode':          'BO3',
+        'team_a_name':   'TestA',
+        'team_b_name':   'TestB',
+        'roster':        [],
+        'unknown_future_field': 'whatever',
+    }
+    try:
+        s = V.deserialize_session(blob)
+    except Exception as exc:
+        return False, f'crashed on unknown field: {exc}'
+    return (
+        s.state == 'roster'
+        and s.mode == 'BO3'
+        and s.team_a_name == 'TestA'
+    ), f'state={s.state}'
+t('deserialize: tolerates unknown / missing fields without crashing', t_deserialize_tolerates_unknown_fields)
+
+
 def t_spectator_token_cleared_by_reset():
     """v0.11.0 polish: reset() invalidates any outstanding spectator
     link.  Operator running a rematch should start the next session

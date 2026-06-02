@@ -906,3 +906,87 @@ def reset(session: VetoSession) -> None:
     session.live_embed_msg_id = ""
     session.spectator_token = ""   # v0.11.0 polish — spectator URL invalidated
     session.updated_at = time.time()
+
+
+# ─── v0.11.3 — Active-session persistence ─────────────────────────────────
+# The whole VetoSession round-trips through JSON so an accidental Ctrl+Q
+# / app crash / Windows update doesn't evaporate captains' claimed tokens
+# + partial ban/pick state.  Atomic write pattern (tmp + os.replace +
+# fsync) mirrors save_config / _save_to_match_history.  Operator sees the
+# resumed session immediately when the app reopens; Reset button still
+# their escape hatch.
+
+def serialize_session(session: VetoSession) -> dict:
+    """Snapshot the session to a JSON-able dict.  Round-trippable via
+    `deserialize_session`.  Uses `dataclasses.asdict` so any future field
+    additions to VetoSession / RosterPlayer / CaptainToken / VetoStep
+    survive without touching this code."""
+    from dataclasses import asdict
+    return asdict(session)
+
+
+def _player_from_dict(d: dict) -> RosterPlayer:
+    """Defensive RosterPlayer constructor — unknown fields ignored, missing
+    fields default.  Tolerant of future schema additions removed by hand
+    in oblivion_veto_active.json."""
+    return RosterPlayer(
+        name      = str(d.get("name", "")),
+        steam_id  = str(d.get("steam_id", "")),
+        discord_id= str(d.get("discord_id", "")),
+    )
+
+
+def _token_from_dict(team: str, d: dict) -> CaptainToken:
+    return CaptainToken(
+        team       = team,
+        value      = str(d.get("value", "")),
+        issued_at  = float(d.get("issued_at", 0.0)),
+        claimed_by = str(d.get("claimed_by", "")),
+        used       = bool(d.get("used", False)),
+    )
+
+
+def _step_from_dict(d: dict) -> VetoStep:
+    return VetoStep(
+        kind    = str(d.get("kind", "")),
+        team    = str(d.get("team", "")),
+        map_id  = str(d.get("map_id", "")),
+    )
+
+
+def deserialize_session(d: dict) -> VetoSession:
+    """Reconstruct a VetoSession from `serialize_session` output.  Defensive
+    — unknown fields ignored, missing fields default sensibly.  Raises on
+    nothing; corruption surfaces as a fresh-looking session that the caller
+    can decide to use or discard."""
+    s = VetoSession()
+    s.state          = str(d.get("state", "idle"))
+    s.team_a_name    = str(d.get("team_a_name", "Team Alpha"))
+    s.team_b_name    = str(d.get("team_b_name", "Team Bravo"))
+    s.roster         = [_player_from_dict(p) for p in d.get("roster", [])]
+    s.team_a         = [_player_from_dict(p) for p in d.get("team_a", [])]
+    s.team_b         = [_player_from_dict(p) for p in d.get("team_b", [])]
+    # votes_a / votes_b keys round-trip as strings through JSON — coerce back.
+    s.votes_a        = {int(k): int(v) for k, v in d.get("votes_a", {}).items()}
+    s.votes_b        = {int(k): int(v) for k, v in d.get("votes_b", {}).items()}
+    s.captain_a_idx  = d.get("captain_a_idx")
+    s.captain_b_idx  = d.get("captain_b_idx")
+    s.revote_count   = int(d.get("revote_count", 0))
+    s.tokens         = {
+        str(t): _token_from_dict(str(t), td)
+        for t, td in d.get("tokens", {}).items()
+    }
+    s.mode           = str(d.get("mode", "BO3"))
+    s.map_pool       = [str(m) for m in d.get("map_pool", [])]
+    s.sequence       = [_step_from_dict(x) for x in d.get("sequence", [])]
+    s.current_step   = int(d.get("current_step", 0))
+    s.decider        = str(d.get("decider", ""))
+    s.final_maps     = [str(m) for m in d.get("final_maps", [])]
+    s.matchzy_config = d.get("matchzy_config")
+    s.ready_a        = bool(d.get("ready_a", False))
+    s.ready_b        = bool(d.get("ready_b", False))
+    s.live_embed_msg_id = str(d.get("live_embed_msg_id", ""))
+    s.spectator_token   = str(d.get("spectator_token", ""))
+    s.created_at     = float(d.get("created_at", time.time()))
+    s.updated_at     = float(d.get("updated_at", time.time()))
+    return s

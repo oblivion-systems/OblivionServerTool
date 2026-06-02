@@ -442,6 +442,8 @@ class AppCore:
         self._veto = _veto_module           # bound for callers; avoids re-import per method
         self._veto_session: _veto_module.VetoSession | None = None
         self._veto_lock = threading.Lock()
+        # v0.11.3 — active-session persistence load happens AFTER
+        # _load_config() so self.log() / self.on_log are wired up first.
 
         self.update_available:      bool = False
         self.app_update_available:  bool = False
@@ -569,6 +571,10 @@ class AppCore:
         self.rcon.password = self.rcon_password
         _config.RCON_PASSWORD = self.rcon_password
         _config.ADMIN_PIN     = self.admin_pin
+
+        # v0.11.3 — resume any in-flight veto session.  Called now because
+        # self.log / self.on_log are wired up after _load_config above.
+        self._load_active_veto_session()
 
         # v0.11.0 — Start the Discord bot if a token is configured.  Safe
         # no-op when no token; the bot module imports cleanly without
@@ -722,6 +728,52 @@ class AppCore:
         # that the next startup (and the server launch) uses the same value.
         if not cfg.get("rcon_password"):
             self.save_config()
+
+    def _load_active_veto_session(self) -> None:
+        """v0.11.3 — Resume an in-flight veto session from disk if one
+        exists.  Called at AppCore construction (after _load_config).
+
+        Discards the file silently if:
+          - The file doesn't exist or can't be parsed
+          - The session is older than VETO_ACTIVE_MAX_AGE_SECS (operator
+            opened the app the next day, doesn't want yesterday's stale
+            finale)
+          - The session state is 'idle' (nothing to resume)
+
+        Otherwise loads it into self._veto_session; the SPA's Veto tab
+        will render the resumed state on first load, and operator's
+        Reset button is the escape hatch if they don't want it."""
+        from .config import VETO_ACTIVE_FILE, VETO_ACTIVE_MAX_AGE_SECS
+        if not os.path.isfile(VETO_ACTIVE_FILE):
+            return
+        try:
+            with open(VETO_ACTIVE_FILE, "r", encoding="utf-8") as f:
+                snapshot = json.load(f)
+            if not isinstance(snapshot, dict):
+                raise ValueError("snapshot is not a JSON object")
+            age = time.time() - float(snapshot.get("updated_at", 0))
+            if age > VETO_ACTIVE_MAX_AGE_SECS:
+                self.log(f"[veto] active-session file is {age/3600:.1f}h "
+                         f"old (cutoff {VETO_ACTIVE_MAX_AGE_SECS/3600:.0f}h); "
+                         "discarding without resume")
+                try: os.remove(VETO_ACTIVE_FILE)
+                except OSError: pass
+                return
+            sess = self._veto.deserialize_session(snapshot)
+            if sess.state == "idle":
+                # Nothing meaningful to resume; clean up
+                try: os.remove(VETO_ACTIVE_FILE)
+                except OSError: pass
+                return
+            self._veto_session = sess
+            self.log(f"[veto] resumed active session — state={sess.state} "
+                     f"mode={sess.mode} age={age/60:.1f}min")
+        except Exception as exc:
+            # Corrupt file or schema mismatch — start fresh.  Operator gets
+            # a log line; the corrupted file is left in place so they can
+            # inspect / report.
+            self.log(f"[veto] active-session resume failed ({exc}); "
+                     "starting with fresh session state")
 
     def save_config(self) -> None:
         try:

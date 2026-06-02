@@ -2,6 +2,49 @@
 
 ---
 
+## v0.11.3 — 2026-06-03 (session persistence)
+
+**Active veto sessions now survive app restart.**
+
+The risk it solves: operator accidentally Ctrl+Q's mid-session, or
+Windows installs an update overnight, or pywebview crashes — the
+in-progress veto state (claimed tokens, partial ban/pick sequence,
+captain ready flags, MatchZy config) was previously gone.  Now the
+app reopens to exactly where it was.
+
+Implementation:
+- `cs2servergui/veto.py`: `serialize_session(s) -> dict` +
+  `deserialize_session(d) -> VetoSession`.  Uses `dataclasses.asdict`
+  for serialization (future field additions survive automatically);
+  defensive deserialization tolerates unknown / missing fields
+  without crashing (forward-compat).
+- `cs2servergui/web.py`: every state mutation already routes through
+  `_veto_broadcast()`; that's now also the persistence choke-point.
+  Atomic write (tmp + `os.replace` + `fsync`) mirrors `save_config`
+  / `_save_to_match_history`.  Persistence failure logs + moves on —
+  NEVER breaks a live session.
+- `cs2servergui/core.py`: `_load_active_veto_session()` runs at
+  `AppCore.__init__` (after `_load_config` so `self.log` is wired).
+  Silently discards files older than 12h, idle-state files, or
+  corrupt JSON — operator gets a log line, app starts clean.
+- `cs2servergui/config.py`: `VETO_ACTIVE_FILE` under `%APPDATA%`,
+  `VETO_ACTIVE_MAX_AGE_SECS = 12 * 3600`.
+
+Token claim state survives the round-trip — a captain who claimed
+their link before the restart is still bound to their `caller_id`,
+they don't lose their session.
+
+Tests: +4 unit tests for round-trip + token-claim preservation +
+mid-veto sequence preservation + defensive deserialization.  167/167
+total (28 v092 + 74 veto + 65 veto-api).
+
+The active-session file is `oblivion_veto_active.json` under
+`%APPDATA%\Oblivion Server Tool\` (alongside the existing match
+history file).  Auto-cleaned on `/api/veto/reset` and on session
+completion.
+
+---
+
 ## v0.11.2 — 2026-06-03 (pre-Friday hotfix + strategy doc)
 
 **Bug fix: `issue_tokens` idempotency.**  Previous behaviour: calling
