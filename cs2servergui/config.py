@@ -66,7 +66,7 @@ DEPOTDL_RELEASE_URL = (
 # ── App self-update ────────────────────────────────────────────────────────────
 # Bump APP_VERSION before each release tag, then push and create a GitHub
 # release tagged "v<APP_VERSION>" — all connected clients will see the update.
-APP_VERSION      = "0.11.2"
+APP_VERSION      = "0.11.3"
 APP_REPO         = "jacquesvniekerk-eng/OblivionServerTool"
 APP_RELEASES_URL = f"https://github.com/{APP_REPO}/releases/latest"
 APP_API_URL      = f"https://api.github.com/repos/{APP_REPO}/releases/latest"
@@ -126,6 +126,15 @@ _CONFIG_FILE = os.path.join(_APP_DIR, "oblivion_config.json")
 # history if the in-memory state was lost (e.g. app restart between matches).
 MATCH_HISTORY_FILE = os.path.join(_APP_DIR, "oblivion_matches.json")
 MATCH_HISTORY_KEEP = 10        # how many recent matches to retain on disk
+
+# v0.11.3 — Active veto session persists across app restarts so an accidental
+# Ctrl+Q / Windows update / crash mid-veto doesn't evaporate the captains'
+# claimed tokens + partial ban/pick sequence.  Snapshot written on every state
+# mutation; loaded on AppCore startup; deleted on /api/veto/reset.  Sessions
+# older than VETO_ACTIVE_MAX_AGE_SECS are discarded on load (operator opened
+# the app the next day, doesn't want yesterday's stale finale).
+VETO_ACTIVE_FILE          = os.path.join(_APP_DIR, "oblivion_veto_active.json")
+VETO_ACTIVE_MAX_AGE_SECS  = 12 * 3600      # 12h cutoff for resume-on-load
 
 
 def _load_int_from_config(key: str, default: int) -> int:

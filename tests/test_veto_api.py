@@ -44,7 +44,17 @@ def _new_app():
     machine.  Without this, repeated test runs would litter
     `D:\steamcmd\…\game\csgo\cfg\MatchZy\` with `oblivion-veto-*.json`
     files.
+
+    v0.11.3: clear oblivion_veto_active.json before each AppCore so
+    persistence from a previous test in the same module run doesn't
+    pollute this one (APPDATA tempdir is shared across the module).
     """
+    from cs2servergui.config import VETO_ACTIVE_FILE
+    try:
+        if os.path.isfile(VETO_ACTIVE_FILE):
+            os.remove(VETO_ACTIVE_FILE)
+    except OSError:
+        pass
     ac = AppCore()
     ac.admin_pin = '0000'
     ac.guest_pin = '9999'      # so we can test guest-role rejection

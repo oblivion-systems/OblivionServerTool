@@ -1787,7 +1787,13 @@ def create_flask(core: AppCore) -> Flask:
 
     def _veto_broadcast() -> None:
         """Push a fresh snapshot to every SSE subscriber.  Non-blocking —
-        if a subscriber's queue is full, drop the message for that client."""
+        if a subscriber's queue is full, drop the message for that client.
+
+        v0.11.3 also persists the session to disk here so an accidental
+        Ctrl+Q / app crash mid-session survives.  Persistence is cheap
+        (~5 KB atomic write) and runs synchronously — broadcast is the
+        natural choke-point because EVERY state mutation already routes
+        through it."""
         snap = _veto_snapshot()
         payload = "data: " + __import__("json").dumps(snap) + "\n\n"
         with _veto_subs_lock:
@@ -1795,6 +1801,42 @@ def create_flask(core: AppCore) -> Flask:
         for q in subs:
             try: q.put_nowait(payload)
             except Exception: pass
+        # v0.11.3 — persist the active session.  Cheap, atomic, fail-soft.
+        _persist_active_veto()
+
+    # v0.11.3 — active-session persistence ────────────────────────────────
+    _veto_persist_lock = threading.Lock()
+
+    def _persist_active_veto() -> None:
+        """Atomic write of core._veto_session to VETO_ACTIVE_FILE so an
+        app restart can resume.  If no session is active, the file is
+        deleted (clean state)."""
+        from .config import VETO_ACTIVE_FILE
+        try:
+            with _veto_persist_lock:
+                # Read state under the veto lock then drop it — we don't
+                # need to hold _veto_lock during the disk write.
+                with core._veto_lock:
+                    sess = core._veto_session
+                    snapshot = _veto.serialize_session(sess) if sess else None
+                if snapshot is None:
+                    # No active session → ensure file is gone
+                    try:
+                        if os.path.isfile(VETO_ACTIVE_FILE):
+                            os.remove(VETO_ACTIVE_FILE)
+                    except OSError:
+                        pass
+                    return
+                tmp = VETO_ACTIVE_FILE + ".tmp"
+                with open(tmp, "w", encoding="utf-8") as f:
+                    json.dump(snapshot, f, indent=2, ensure_ascii=False)
+                    f.flush()
+                    try: os.fsync(f.fileno())
+                    except OSError: pass
+                os.replace(tmp, VETO_ACTIVE_FILE)
+        except Exception as exc:
+            # Persistence failure must NEVER break a live session.  Log + move on.
+            core.log(f"[veto] persistence write failed: {exc}")
 
     def _veto_error_response(exc: Exception):
         """Map VetoError subclasses to 400; everything else to 500."""
