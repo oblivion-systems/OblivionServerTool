@@ -2227,6 +2227,8 @@ pages['veto'] = function() {
       <h1>Veto</h1>
       <span class="veto-sub" id="veto-mode-label">match setup</span>
       <div class="veto-spacer"></div>
+      <button class="btn btn-ghost btn-sm" id="veto-history-btn"
+              title="Show the last 10 completed matches">📜 History</button>
       <button class="btn btn-ghost" id="veto-reset-btn" style="display:none">Reset session</button>
     </div>
     <div class="veto-pill" id="veto-pill">
@@ -2239,6 +2241,7 @@ pages['veto'] = function() {
     <div id="veto-content"><div class="card" style="text-align:center;padding:40px;color:var(--text-3)">Loading...</div></div>
   `;
 
+  el('veto-history-btn').addEventListener('click', _vetoOpenHistoryModal);
   el('veto-reset-btn').addEventListener('click', async () => {
     if (!confirm('Reset the active veto session? All roster and progress will be lost.')) return;
     try { await api.veto.reset(); toast('Session reset'); }
@@ -2632,6 +2635,105 @@ async function _vetoOpenDiscordPullModal() {
       </div>
     `;
   }
+}
+
+/* ── v0.11.0 polish — Match history modal ────────────────────────────────
+ * Reads /api/veto/history (last 10 completed sessions, newest last) +
+ * renders a scrollable list.  Each entry shows date + teams + mode +
+ * decider + final maplist.  Useful for "what did we play last week"
+ * and as a base for future per-captain stats. */
+async function _vetoOpenHistoryModal() {
+  let modal = el('veto-history-modal');
+  if (modal) modal.remove();
+  modal = document.createElement('div');
+  modal.id = 'veto-history-modal';
+  modal.className = 'veto-modal-backdrop';
+  modal.innerHTML = `
+    <div class="veto-modal" role="dialog" aria-label="Match history">
+      <div class="veto-modal-head">
+        <h2>📜 Match history</h2>
+        <button class="veto-modal-close" aria-label="Close">×</button>
+      </div>
+      <div class="veto-modal-body" id="veto-history-body">
+        <div style="text-align:center;padding:30px;color:var(--text-3)">
+          Loading…
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  const close = () => { try { modal.remove(); } catch(_){} };
+  modal.querySelector('.veto-modal-close').addEventListener('click', close);
+  modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
+
+  try {
+    const r = await api.veto.history();
+    const matches = (r.matches || []).slice().reverse();      // newest first
+    const body = el('veto-history-body');
+    if (matches.length === 0) {
+      body.innerHTML = `
+        <div style="padding:24px;text-align:center;color:var(--text-3)">
+          No matches in history yet.<br>
+          <small style="color:var(--text-4);font-size:11px;display:block;margin-top:8px">
+            Completed BO sessions are persisted to
+            <code>%APPDATA%\\Oblivion Server Tool\\oblivion_matches.json</code>
+            (last 10 kept).
+          </small>
+        </div>
+      `;
+      return;
+    }
+    body.innerHTML = `
+      <div style="color:var(--text-3);font-size:12px;margin-bottom:14px">
+        ${matches.length} match${matches.length === 1 ? '' : 'es'} on record (newest first).
+      </div>
+      <div class="veto-history-list">
+        ${matches.map(m => _renderHistoryEntry(m)).join('')}
+      </div>
+    `;
+  } catch (err) {
+    el('veto-history-body').innerHTML = `
+      <div style="padding:24px;text-align:center;color:var(--bad)">
+        ${esc(err.message || 'Failed to load history')}
+      </div>
+    `;
+  }
+}
+
+function _renderHistoryEntry(m) {
+  // m: {matchid, created_at, mode, team_a:{name,players}, team_b:{...},
+  //     captain_a, captain_b, final_maps, decider, sequence}
+  const when = m.created_at
+    ? new Date(m.created_at * 1000).toLocaleString()
+    : '(unknown date)';
+  const teamAName = (m.team_a || {}).name || 'A';
+  const teamBName = (m.team_b || {}).name || 'B';
+  const maps = m.final_maps || [];
+  const decider = m.decider || '';
+  return `
+    <div class="veto-history-entry">
+      <div class="veto-history-head">
+        <div class="veto-history-mode">${esc(m.mode || '?')}</div>
+        <div class="veto-history-when">${esc(when)}</div>
+      </div>
+      <div class="veto-history-teams">
+        <strong>${esc(teamAName)}</strong>
+        <span style="color:var(--text-4);margin:0 8px">vs</span>
+        <strong>${esc(teamBName)}</strong>
+      </div>
+      <div class="veto-history-captains">
+        Captains: <code>${esc(m.captain_a || '?')}</code> / <code>${esc(m.captain_b || '?')}</code>
+      </div>
+      <div class="veto-history-maps">
+        ${maps.map((map, i) => `
+          <span class="veto-history-map ${map === decider ? 'decider' : ''}">
+            ${map === decider ? '🏁 ' : `${i+1}. `}${esc(map)}
+          </span>
+        `).join('')}
+      </div>
+      <div class="veto-history-matchid">${esc(m.matchid || '?')}</div>
+    </div>
+  `;
 }
 
 /* ── Teams ─────────────────────────────────────────────────────────────── */
@@ -3461,6 +3563,29 @@ pages['config'] = async function() {
             <!-- Populated by pollState from /api/state.discord_bot -->
           </div>
           <button class="btn btn-accent btn-full mt-16" id="cfg-discord-save">Save Discord Settings</button>
+
+          <!-- v0.11.0 polish — verification helpers for Layer 1A + 1C.
+               Save settings first, then use these to confirm the bot can
+               post to your channel + DM you without walking a full veto. -->
+          <div style="margin-top:18px;padding-top:18px;border-top:1px solid var(--line-1)">
+            <div style="font-family:var(--font-mono);font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--text-3);margin-bottom:10px">
+              Connection check
+            </div>
+            <div class="flex gap-8">
+              <button class="btn btn-ghost flex-1" id="cfg-discord-test-embed"
+                      title="Post a sample embed to your configured veto channel">
+                📤 Send test embed
+              </button>
+              <button class="btn btn-ghost flex-1" id="cfg-discord-test-dm"
+                      title="DM a sample message to a Discord user (paste your own ID for a self-test)">
+                📨 Send test DM
+              </button>
+            </div>
+            <small style="color:var(--text-4);font-size:11px;display:block;margin-top:8px">
+              Use these to verify Layer 1C (embed posting) and Layer 1A (captain DMs) work
+              for your bot without having to walk a full veto session.
+            </small>
+          </div>
         </div>
         ` : ''}
 
@@ -3606,6 +3731,38 @@ pages['config'] = async function() {
       await api.setConfig(data);
       toast('Discord settings saved — bot will connect in a moment if a token is set');
     } catch (e) { toast(e.message, 'var(--bad)'); }
+  });
+
+  // v0.11.0 polish — Discord connection-check buttons
+  const testEmbedBtn = el('cfg-discord-test-embed');
+  if (testEmbedBtn) testEmbedBtn.addEventListener('click', async () => {
+    testEmbedBtn.disabled = true; testEmbedBtn.textContent = 'Posting…';
+    try {
+      const r = await api.discord.testEmbed();
+      toast(`Test embed posted ✓ (msg ${r.message_id})`, 'var(--ok)');
+    } catch (e) {
+      toast(e.message, 'var(--bad)');
+    } finally {
+      testEmbedBtn.disabled = false; testEmbedBtn.textContent = '📤 Send test embed';
+    }
+  });
+  const testDmBtn = el('cfg-discord-test-dm');
+  if (testDmBtn) testDmBtn.addEventListener('click', async () => {
+    const did = prompt('Enter a Discord User ID to send the test DM to (your own ID is fine for a self-test):');
+    if (!did) return;
+    if (!/^\d+$/.test(did.trim())) {
+      toast('Discord User ID must be digits only', 'var(--bad)');
+      return;
+    }
+    testDmBtn.disabled = true; testDmBtn.textContent = 'Sending…';
+    try {
+      await api.discord.testDm(did.trim());
+      toast('Test DM sent ✓ — check your Discord', 'var(--ok)');
+    } catch (e) {
+      toast(e.message, 'var(--bad)');
+    } finally {
+      testDmBtn.disabled = false; testDmBtn.textContent = '📨 Send test DM';
+    }
   });
 
   el('cfg-server-save').addEventListener('click', async () => {

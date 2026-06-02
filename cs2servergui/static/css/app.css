@@ -2703,6 +2703,61 @@ body.compact #content        { padding: 14px 16px; }
 }
 .veto-pull-channel.ready .veto-pull-channel-count { color: var(--ok); }
 
+/* v0.11.0 polish — Match history list (in the History modal). */
+.veto-history-list {
+  display: flex; flex-direction: column; gap: 12px;
+}
+.veto-history-entry {
+  padding: 14px 16px;
+  background: var(--bg-0); border: 1px solid var(--line-1);
+  border-radius: 6px;
+}
+.veto-history-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 8px;
+}
+.veto-history-mode {
+  font-family: var(--font-mono); font-size: 11px; font-weight: 700;
+  letter-spacing: 0.15em; text-transform: uppercase;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg-1));
+  padding: 3px 10px; border-radius: 999px;
+}
+.veto-history-when {
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--text-4);
+}
+.veto-history-teams {
+  font-size: 15px;
+  color: var(--text-1);
+  margin-bottom: 4px;
+}
+.veto-history-captains {
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--text-3); margin-bottom: 8px;
+}
+.veto-history-captains code {
+  background: var(--bg-1); padding: 1px 6px; border-radius: 3px;
+  color: var(--text-2);
+}
+.veto-history-maps {
+  display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px;
+}
+.veto-history-map {
+  font-family: var(--font-mono); font-size: 11px;
+  background: var(--bg-1); border: 1px solid var(--line-1);
+  padding: 3px 8px; border-radius: 3px;
+  color: var(--text-2);
+}
+.veto-history-map.decider {
+  border-color: var(--accent); color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-1));
+}
+.veto-history-matchid {
+  font-family: var(--font-mono); font-size: 10px;
+  color: var(--text-4); margin-top: 8px; text-align: right;
+}
+
 /* v0.10.2 — Captain connect block on the finale (the workflow handoff that
  * was missing from v0.10.0/.1).  Shown to captains AND admins on the
  * finale page; backend only populates `match_connect` at finale/complete

@@ -1773,6 +1773,99 @@ def create_flask(core: AppCore) -> Flask:
             }), 502
         return jsonify({"channels": channels})
 
+    @app.route("/api/discord/test_embed", methods=["POST"])
+    @require_auth
+    def discord_test_embed():
+        """v0.11.0 polish — Post a sample embed to the configured veto
+        channel.  Lets the operator verify channel ID + bot permissions
+        + embed rendering WITHOUT walking a full veto.  Optional body:
+        {channel_id: "..."} overrides the configured channel for a one-
+        off test.  Returns 200 on success with the posted message ID;
+        4xx with a useful error otherwise."""
+        d = request.get_json() or {}
+        cid = (d.get("channel_id") or core.discord_veto_channel_id or "").strip()
+        if not cid:
+            return jsonify({
+                "error": "No channel ID — set discord_veto_channel_id in "
+                         "Config → Discord, or pass channel_id in the body."
+            }), 400
+        try:
+            from . import discord_bot
+        except Exception as exc:
+            return jsonify({"error": f"bot module unavailable: {exc}"}), 503
+        if not discord_bot.bot_status().get("connected"):
+            return jsonify({"error": "Discord bot is not connected"}), 503
+        # Sample embed that mirrors the real live-veto shape so the
+        # operator sees exactly what spectators will see during a match.
+        embed = {
+            "title": "🧪 Oblivion test embed — bot connection OK",
+            "description": ("This is a one-off test message from the Oblivion Server Tool "
+                            "to verify your Discord configuration.  If you can see this, "
+                            "the live veto embed (Layer 1C) will work during real matches."),
+            "color": 0x5865F2,
+            "fields": [
+                {"name": "What this confirms", "value": (
+                    "✓ Bot token valid + connected\n"
+                    "✓ Channel ID points to a channel the bot can post in\n"
+                    "✓ Bot has Embed Links permission\n"
+                    "✓ Discord rendering of the embed format works"
+                ), "inline": False},
+                {"name": "What this does NOT confirm", "value": (
+                    "Live ban/pick updates (edits) — those need a real veto session\n"
+                    "Captain DM delivery — use \"Send test DM\" for that"
+                ), "inline": False},
+            ],
+            "footer": {"text": "Safe to delete this message."},
+        }
+        msg_id = discord_bot.bot_post_embed(cid, embed)
+        if not msg_id:
+            return jsonify({
+                "error": f"Post failed — verify the bot has Send Messages + Embed "
+                         f"Links permissions on channel {cid}.  See log drawer for details."
+            }), 502
+        core.log(f"[discord] test embed posted to channel {cid} (msg {msg_id})")
+        return jsonify({"ok": True, "channel_id": cid, "message_id": msg_id})
+
+    @app.route("/api/discord/test_dm", methods=["POST"])
+    @require_auth
+    def discord_test_dm():
+        """v0.11.0 polish — DM a one-off test message to a Discord user.
+        Lets the operator verify the auto-DM path (Layer 1A) WITHOUT
+        having to walk a full veto + vote themselves captain.  Body:
+        {discord_id: "..."} — typically the operator's own user ID."""
+        d = request.get_json() or {}
+        did = (d.get("discord_id") or "").strip()
+        if not did:
+            return jsonify({
+                "error": "discord_id required (your own Discord User ID is fine for testing)"
+            }), 400
+        try:
+            from . import discord_bot
+        except Exception as exc:
+            return jsonify({"error": f"bot module unavailable: {exc}"}), 503
+        if not discord_bot.bot_status().get("connected"):
+            return jsonify({"error": "Discord bot is not connected"}), 503
+        msg = (
+            "🧪 **Oblivion test DM** — Layer 1A check\n\n"
+            "If you can read this, the auto-DM captain-link flow will work "
+            "during real matches.  During a veto, this is where you'd see "
+            "your captain join URL.\n\n"
+            "Safe to ignore this message."
+        )
+        ok = discord_bot.bot_dm_user(did, msg)
+        if not ok:
+            return jsonify({
+                "error": (
+                    f"DM to {did} failed.  Most likely cause: the user has "
+                    "\"Allow direct messages from server members\" disabled "
+                    "in Discord (User Settings → Privacy & Safety).  The "
+                    "bot can't bypass that.  Verify the User ID is correct "
+                    "and that the user has DMs enabled."
+                )
+            }), 502
+        core.log(f"[discord] test DM sent to user {did}")
+        return jsonify({"ok": True, "discord_id": did})
+
     @app.route("/api/discord/voice_members")
     @require_auth
     def discord_voice_members():
