@@ -12,10 +12,147 @@
 
 ## Single-sentence vision
 
-**Oblivion: an open-source desktop orchestration layer for self-hosting
-your game servers — pulls plugins from upstream, gives you a polished
-operator UI, supports the games people actually play together, and pays
-the bills with donations.**
+**Oblivion: the easiest way to add plugins to your self-hosted game
+server.  Pick from a curated catalog, click install, done — across
+multiple games, with conflict detection and automatic updates.  Free
+and open-source.**
+
+The veto / match-setup / Discord-bot / SPA layers are all real and
+valuable, but they're not the lead.  **Plugin management UX is the
+headline differentiator**, because that's the pain point that
+actually drives people to paid managed hosting.
+
+---
+
+## The "noob-friendly plugin attachment" thesis
+
+Every plugin-managed self-hosting tool today is built for sysadmins:
+
+| Tool | Plugin UX |
+|---|---|
+| **Pterodactyl** | None.  You SFTP plugins to the right directory yourself. |
+| **AMP** | Per-template config files, technical, no curated catalog. |
+| **Hand-rolled** | Find on GitHub → download → extract → copy to right paths → edit config → restart → hope. |
+
+**The market gap**: there is no Steam-Workshop-for-server-plugins
+experience.  Operators who want to add plugins either pay a managed
+host (R200+/month per server, plus zero control) or learn enough
+Linux+RCON+plugin-format to do it manually.  Most give up and pay.
+
+**Oblivion's wedge**: make plugin install feel like installing a
+phone app.  Browse → install → done.  Update notifications.  Conflict
+detection.  Plain-language descriptions.  One-click factory reset
+when things break.
+
+If you nail this for CS2, the same UX trivially extends to TF2,
+Palworld, Valheim, etc. — every game with a plugin/mod ecosystem
+inherits it.  The plugin UX is the franchise.
+
+### What "noob-friendly" actually means — feature shortlist
+
+These are the features that materially move the needle from
+"power tool" to "anyone can do this."  Grouped by priority.
+
+#### Table stakes (v0.12 — must ship for the wedge to mean anything)
+
+1. **Plugin catalog browser inside the SPA** — searchable list of
+   known-good plugins with name, author, license, description,
+   homepage link.
+2. **One-click install with automatic dependency resolution** — picks
+   MatchZy, tool fetches CSS + MetaMod + MatchZy in correct order;
+   patches gameinfo.gi if needed; verifies install.
+3. **Plain-language plugin descriptions** — not "CS#-based competitive
+   matchmaking framework" but "Adds knife rounds, scoring, and
+   pause/unpause for tournament-style matches."
+4. **Update notifications** — when upstream releases a new version,
+   banner in the SPA: "MatchZy v2.5 → v2.6 available. [Update now]
+   [Skip]".
+5. **One-click factory reset** — nuke all plugins, return to vanilla
+   CS2.  For "let me start over without uninstalling the whole tool."
+6. **License + author display per plugin** — credit upstream + trust
+   posture in one stroke.
+
+#### Magic features (v0.13-v0.14 — the differentiators)
+
+7. **Mode-aware plugin packs** — "Competitive 5v5" pack installs
+   MatchZy + CSStats + InGameInfo at known-good versions in one
+   click.  "Casual Deathmatch" pack installs CS2-Deathmatch + good
+   defaults.  "Warcraft" pack installs the right Warcraft variant +
+   ModelPrecacher + tuned configs.
+8. **Conflict detection** — registry knows MatchZy and SimpleAdmin
+   both register `!pause`.  Tell the operator BEFORE install, offer
+   to remap.
+9. **Onboarding wizard** — first run, asks "I want to play
+   [Competitive / Casual / Modded] with [N] friends" → auto-installs
+   the canonical plugin combo, configures the server, done.
+10. **Smart troubleshooter** — server fails to start: parse the log,
+    identify which plugin is failing, suggest "disable this plugin?"
+    Like Windows reliability monitor for game servers.
+11. **Disable-don't-uninstall toggle** — flip a plugin off for one
+    session without losing its config.  Lets operators isolate
+    crashes ("is it CSStats causing the crash?").
+12. **Visual mode→plugin dependency map** — diagram in the SPA
+    showing what plugins each mode needs and why.
+
+#### Compounding magic (v1.0+ — the ecosystem plays)
+
+13. **Shareable plugin packs** — operator exports current setup as a
+    `.oblivion-pack` JSON; another operator one-click imports.
+14. **Community-curated packs** — "Phoenix League Pack" maintained by
+    a tournament organizer, used by 50 servers.
+15. **Plugin presets per friend group** — save "my Tuesday-night
+    setup" + "my Friday-night setup" + switch with a click.
+16. **Plugin health monitor** — periodic checks: all files present?
+    Has upstream had a security advisory?  Version still supported by
+    current CS2?
+17. **Plain-language conflict reasoning** — not "ConVar collision
+    detected"; instead "MatchZy and CS2-Casual both want to set
+    mp_warmuptime.  They'll fight over it.  Pick which one wins."
+18. **Try-before-promote** — install plugin in "preview" mode,
+    auto-uninstall in 24h if not actively kept.  Lets nervous
+    operators experiment.
+
+#### Pro-tier candidates (Year 2+ monetization)
+
+- Multi-server plugin push (deploy a pack to 5 servers at once)
+- Staging environments (test on dev box, promote to prod)
+- Premium curated packs (vetted, supported, breaking-change tested)
+- Custom plugin pack development (consultancy)
+
+### Concrete UX bar
+
+When a non-technical operator visits the Plugin Manager tab, they
+should be able to answer all of these without reading docs:
+
+- **"What's installed?"** → status panel at the top
+- **"What's broken?"** → red ⚠ badges on troubled plugins
+- **"What needs updating?"** → blue ⬆ badges with one-click update
+- **"What plugins exist for what I'm trying to do?"** → catalog
+  filterable by mode
+- **"What does this plugin actually do?"** → plain-language
+  description, not jargon
+- **"Will this conflict with what I already have?"** → conflict check
+  on install
+- **"How do I undo this?"** → one-click rollback / disable
+- **"How do I start over?"** → factory reset
+
+If any of those answers requires the operator to read a README, the
+UX failed.
+
+### What this implies for the architecture
+
+- The plugin registry isn't a hidden internal data structure —
+  **it's the headline product surface**.
+- The Plugin Manager tab in the SPA needs **first-class design
+  attention**, not "wire it up and ship."
+- Plain-language descriptions must be authored per-plugin (you write
+  them, since plugin authors don't think in operator terms).
+- The catalog itself becomes a **community-contributable asset**
+  (separate `OblivionPluginRegistry` repo, PRs welcome from anyone).
+- Dependency resolution gets a proper solver (probably a tiny
+  topological sort over the registry — not heavy, but real code).
+- Plugin packs need their own data shape (a pack is a curated list
+  of {plugin, version pin, config defaults}).
 
 ---
 
@@ -85,19 +222,37 @@ Two combined moves in one cycle:
 - Existing **163/163 tests stay green**
 - User-visible change: **none**
 
-### Move B — Plugin registry (no bundled third-party binaries)
+### Move B — Plugin registry + first-class Plugin Manager UX
+**This is the headline feature, not a footnote.**  See the
+"noob-friendly plugin attachment" thesis above for full feature
+shortlist + UX bar.
+
 - Bundle only your **original work**: `ModelPrecacher`, Warcraft
   patches, generated configs (K4-Arenas 2v2 round-settings, retakes
   bot-quota rewriter), glue scripts
 - Everything third-party → `plugins.json` registry, fetched on-demand
   via `direct` / `github_release` / `composed` sources
-- Per-plugin license display in the SPA
-- New **Plugin Manager tab**: install / update / status / version
-  pin / source override
+- **Plugin Manager tab** with first-class design — searchable
+  catalog, plain-language descriptions, one-click install with
+  dependency resolution, update notifications, factory reset,
+  per-plugin license + author display
+- **Plugin packs** as a first-class concept (curated bundles like
+  "Competitive 5v5" or "Casual Deathmatch" + operator-saved
+  "my Tuesday-night setup")
+- **Conflict detection** at install time (ConVar collisions, chat
+  command duplicates, port clashes)
+- **Disable-don't-uninstall toggle** per plugin (one-session
+  troubleshooting without losing config)
 - First mode-deploy fetches the relevant plugins (~30 sec, one-time);
   cached locally afterwards
 - Plugin author relationships stay clean — Oblivion is an
   orchestrator, not a re-distributor
+- The catalog is a **separate community-contributable repo**
+  (`OblivionPluginRegistry`) — PRs welcome from anyone, including
+  plugin authors themselves
+
+The registry data shape isn't optional polish — it IS the product
+surface for the wedge.  Design it that way from day one.
 
 ### Why combined?
 - Both touch `core.py` deeply; doing them sequentially = touching
@@ -174,6 +329,14 @@ Decision (which non-Source game) → defer to Phase 1.
   no payment processor.
 - **NOT Steam.**
 - **2-3 games supported** at launch (CS2 + TF2 + one non-Source).
+- **Plugin Manager is the lead in marketing copy.**  Landing page,
+  README, and screenshots foreground the install-a-plugin-in-3-clicks
+  experience.  Veto / Discord / SPA shell are secondary value props.
+- **Curated plugin packs ready at launch** — at minimum one canonical
+  pack per supported game.  These are the operator's "I have no idea
+  what I'm doing, just give me something good" button.
+- **Public plugin catalog repo live** (`OblivionPluginRegistry`) with
+  contribution docs so plugin authors can add themselves on day one.
 
 ---
 
