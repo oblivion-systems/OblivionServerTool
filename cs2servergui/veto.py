@@ -584,13 +584,48 @@ def both_captains_ready(session: VetoSession) -> bool:
     return bool(session.ready_a and session.ready_b)
 
 
-def build_matchzy_config(session: VetoSession) -> dict:
+# v0.11.0 polish — Conservative MatchZy cvar defaults.  Operator can
+# override or extend via AppCore.matchzy_cvars (Config tab).  Values are
+# kept as STRINGS — MatchZy's match-config parses them either way, but
+# strings round-trip cleanly through JSON without floating-point surprises
+# (`0.5` becoming `0.5000000001` etc.).
+DEFAULT_MATCHZY_CVARS: dict[str, str] = {
+    "mp_warmup_pausetimer":            "0",
+    "matchzy_minimum_ready_required":  "2",
+}
+
+
+def _merge_cvars(overrides: dict | None) -> dict:
+    """Built-in defaults + operator overrides; operator wins on conflicts.
+    Stringifies values so JSON survives round-trips.  Empty-string values
+    are treated as 'delete this cvar from the default set' so operator can
+    actively suppress something they don't want sent."""
+    merged: dict[str, str] = dict(DEFAULT_MATCHZY_CVARS)
+    if overrides:
+        for k, v in overrides.items():
+            k = str(k).strip()
+            if not k:
+                continue
+            v = "" if v is None else str(v).strip()
+            if v == "":
+                merged.pop(k, None)
+            else:
+                merged[k] = v
+    return merged
+
+
+def build_matchzy_config(session: VetoSession, cvar_overrides: dict | None = None) -> dict:
     """Generate a MatchZy match-config dict from the completed veto.
 
     Output shape mirrors MatchZy's `match.json` schema (matchid, maplist,
     num_maps, players_per_team, team1, team2, etc.).  Caller writes this
     to disk or pipes via RCON `matchzy_loadmatch` to hand the series over
     to MatchZy at the finale.
+
+    `cvar_overrides`: operator-configured cvars (from
+    AppCore.matchzy_cvars).  Merged on top of the conservative built-in
+    defaults — operator wins on conflicts.  Pass None for built-in only
+    (back-compat for callers / tests).
     """
     if session.state not in ("finale", "complete"):
         raise InvalidVetoTransition(
@@ -615,11 +650,7 @@ def build_matchzy_config(session: VetoSession) -> dict:
             "name":    session.team_b_name,
             "players": team_players(session.team_b),
         },
-        "cvars": {
-            # Conservative defaults — operator can override post-hoc.
-            "mp_warmup_pausetimer": 0,
-            "matchzy_minimum_ready_required": "2",
-        },
+        "cvars": _merge_cvars(cvar_overrides),
         # Decider + bans/picks audit trail; useful for the SPA finale page.
         "_oblivion_meta": {
             "mode":     session.mode,

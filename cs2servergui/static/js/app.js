@@ -3693,6 +3693,25 @@ pages['config'] = async function() {
           </div>
           ${isLocal ? `
           <div class="field" style="margin-top:14px">
+            <label>MatchZy cvars (override the defaults baked into the match-config)</label>
+            <div id="cfg-matchzy-cvars-list" class="cfg-cvar-list">
+              <!-- rendered below via _renderMatchzyCvars() -->
+            </div>
+            <button class="btn btn-ghost btn-sm" id="cfg-matchzy-cvar-add" type="button" style="margin-top:6px">
+              + Add cvar
+            </button>
+            <small style="color:var(--text-3);font-size:11px;line-height:1.5;display:block;margin-top:6px">
+              These are merged on top of the built-in defaults
+              (<code>mp_warmup_pausetimer=0</code>, <code>matchzy_minimum_ready_required=2</code>)
+              when the finale writes the MatchZy config.  Your row wins on
+              conflicts.  Leave the <em>value</em> blank to actively suppress
+              a default cvar (so it won't be sent at all).
+              Examples: <code>matchzy_knife_enabled_default 1</code>,
+              <code>matchzy_pause_after_warmup 1</code>,
+              <code>matchzy_demo_path_prefix custom-path/</code>.
+            </small>
+          </div>
+          <div class="field" style="margin-top:14px">
             <label>Discord Webhook URL (post finale results to a channel)</label>
             <input class="input" id="cfg-discord-webhook" type="password"
                    value=""
@@ -3857,6 +3876,61 @@ pages['config'] = async function() {
 
     </div>`;
 
+  // v0.11.0 polish — MatchZy cvar editor (local-only).  Operator adds
+  // key/value rows that get merged into the match-config at finale time.
+  // Kept as a transient _cvarRows array so we can re-render on add/remove
+  // without losing in-flight edits in the live inputs.
+  let _cvarRows = Array.isArray(cfg.matchzy_cvars)
+    ? cfg.matchzy_cvars
+    : Object.entries(cfg.matchzy_cvars || {}).map(([k, v]) => [k, String(v ?? '')]);
+  function _renderMatchzyCvars() {
+    const host = el('cfg-matchzy-cvars-list');
+    if (!host) return;
+    if (_cvarRows.length === 0) {
+      host.innerHTML = `<div class="cfg-cvar-empty">No overrides — defaults only.</div>`;
+      return;
+    }
+    host.innerHTML = _cvarRows.map((row, i) => `
+      <div class="cfg-cvar-row">
+        <input class="input cfg-cvar-key"   type="text" data-i="${i}"
+               value="${esc(row[0])}" placeholder="cvar_name" maxlength="64">
+        <input class="input cfg-cvar-value" type="text" data-i="${i}"
+               value="${esc(row[1])}" placeholder="value (blank = suppress)" maxlength="128">
+        <button class="btn btn-ghost btn-sm cfg-cvar-del" data-i="${i}" type="button"
+                title="Remove this cvar">×</button>
+      </div>
+    `).join('');
+    host.querySelectorAll('.cfg-cvar-key').forEach(inp => {
+      inp.addEventListener('input', (e) => {
+        const i = parseInt(e.target.dataset.i, 10);
+        _cvarRows[i][0] = e.target.value;
+      });
+    });
+    host.querySelectorAll('.cfg-cvar-value').forEach(inp => {
+      inp.addEventListener('input', (e) => {
+        const i = parseInt(e.target.dataset.i, 10);
+        _cvarRows[i][1] = e.target.value;
+      });
+    });
+    host.querySelectorAll('.cfg-cvar-del').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const i = parseInt(e.target.dataset.i, 10);
+        _cvarRows.splice(i, 1);
+        _renderMatchzyCvars();
+      });
+    });
+  }
+  _renderMatchzyCvars();
+  const cvarAddBtn = el('cfg-matchzy-cvar-add');
+  if (cvarAddBtn) cvarAddBtn.addEventListener('click', () => {
+    _cvarRows.push(['', '']);
+    _renderMatchzyCvars();
+    // Focus the new key input
+    const host = el('cfg-matchzy-cvars-list');
+    const inputs = host && host.querySelectorAll('.cfg-cvar-key');
+    if (inputs && inputs.length) inputs[inputs.length - 1].focus();
+  });
+
   // Wire up saves
   const vetoSaveBtn = el('cfg-veto-save');
   if (vetoSaveBtn) vetoSaveBtn.addEventListener('click', async () => {
@@ -3872,6 +3946,17 @@ pages['config'] = async function() {
       public_share_url:          raw,
       veto_auto_launch_on_ready: el('cfg-veto-auto-launch').checked,
     };
+    // v0.11.0 polish — only include matchzy_cvars when the editor was
+    // rendered (local sessions).  Convert _cvarRows back to {k: v} and
+    // drop rows where the key is blank (operator added then forgot).
+    if (el('cfg-matchzy-cvars-list')) {
+      const obj = {};
+      for (const [k, v] of _cvarRows) {
+        const key = (k || '').trim();
+        if (key) obj[key] = (v == null) ? '' : String(v);
+      }
+      data.matchzy_cvars = obj;
+    }
     // Discord webhook only present for local sessions.  "CLEAR" magic
     // word lets the operator empty the field; blank = leave existing.
     const discordEl = el('cfg-discord-webhook');

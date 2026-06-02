@@ -494,6 +494,12 @@ class AppCore:
         #   default — admin clicks GO manually so they can verify the
         #   server's in the right mode first.
         self.veto_auto_launch_on_ready: bool = False
+        # v0.11.0 polish — operator-configurable MatchZy cvars (Config tab
+        # → 'MatchZy cvars').  Merged on top of veto.DEFAULT_MATCHZY_CVARS
+        # at build_matchzy_config() time; operator wins on conflicts; an
+        # empty-string value actively suppresses a default cvar.
+        # Stored as {str: str} for clean JSON round-tripping.
+        self.matchzy_cvars:             dict[str, str] = {}
         # v0.10.2 — Discord webhook URL.  When set, the tool POSTs an
         # embed to this channel on every finale (teams + maplist + decider
         # + connect string).  Captures most of the "spectators see results"
@@ -695,6 +701,12 @@ class AppCore:
         # v0.10.1 — online-primary veto support (see __init__ for prose)
         self.public_share_url            = cfg.get("public_share_url", "")
         self.veto_auto_launch_on_ready   = bool(cfg.get("veto_auto_launch_on_ready", False))
+        # v0.11.0 polish — defensive load: must be a dict of str→str, else drop.
+        raw_cv = cfg.get("matchzy_cvars", {}) or {}
+        if isinstance(raw_cv, dict):
+            self.matchzy_cvars = {str(k): str(v) for k, v in raw_cv.items()}
+        else:
+            self.matchzy_cvars = {}
         # v0.10.2 — Discord webhook (see __init__ for prose)
         self.discord_webhook_url         = cfg.get("discord_webhook_url", "")
         # v0.11.0 — Discord bot (Layer 1)
@@ -746,6 +758,7 @@ class AppCore:
                 # v0.10.1 online-primary veto config
                 "public_share_url":              self.public_share_url,
                 "veto_auto_launch_on_ready":     self.veto_auto_launch_on_ready,
+                "matchzy_cvars":                 dict(self.matchzy_cvars),
                 # v0.10.2 — Discord webhook
                 "discord_webhook_url":           self.discord_webhook_url,
                 # v0.11.0 — Discord bot

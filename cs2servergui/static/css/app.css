@@ -2703,6 +2703,23 @@ body.compact #content        { padding: 14px 16px; }
 }
 .veto-pull-channel.ready .veto-pull-channel-count { color: var(--ok); }
 
+/* v0.11.0 polish — MatchZy cvar editor rows (Config → Veto card). */
+.cfg-cvar-list { display: flex; flex-direction: column; gap: 6px; }
+.cfg-cvar-empty {
+  font-size: 12px; color: var(--text-3); font-style: italic;
+  padding: 8px 0;
+}
+.cfg-cvar-row {
+  display: grid; grid-template-columns: 1fr 1fr auto; gap: 6px;
+  align-items: center;
+}
+.cfg-cvar-row .input { font-family: var(--font-mono); font-size: 12px; }
+.cfg-cvar-del { padding: 4px 10px; font-size: 14px; line-height: 1; }
+@media (max-width: 640px) {
+  .cfg-cvar-row { grid-template-columns: 1fr; }
+  .cfg-cvar-del { justify-self: end; }
+}
+
 /* v0.11.0 polish — "Go Online" banner inside the Veto-idle stage.  Tells
    the operator at a glance whether captain links will reach the
    internet or only the LAN. */
