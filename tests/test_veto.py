@@ -593,6 +593,60 @@ def t_matchzy_config_matchid_format():
 t('build_matchzy_config: matchid uses `oblivion-veto-<ts>` format', t_matchzy_config_matchid_format)
 
 
+def t_matchzy_cvars_defaults_when_no_override():
+    """v0.11.0 polish: with no override dict, cvars contain the
+    conservative defaults (warmup pausetimer 0 + min ready 2)."""
+    s = _make_to('finale')
+    cfg = V.build_matchzy_config(s)
+    cv = cfg.get('cvars', {})
+    return (cv.get('mp_warmup_pausetimer') == '0'
+            and cv.get('matchzy_minimum_ready_required') == '2'), f'cvars={cv}'
+t('build_matchzy_config: default cvars present when no overrides', t_matchzy_cvars_defaults_when_no_override)
+
+
+def t_matchzy_cvars_override_wins():
+    """v0.11.0 polish: operator override wins on conflict + adds new keys."""
+    s = _make_to('finale')
+    cfg = V.build_matchzy_config(s, cvar_overrides={
+        'mp_warmup_pausetimer':    '5',      # override default
+        'matchzy_knife_enabled':   '1',      # new
+    })
+    cv = cfg['cvars']
+    return (cv['mp_warmup_pausetimer'] == '5'
+            and cv['matchzy_knife_enabled'] == '1'
+            and cv['matchzy_minimum_ready_required'] == '2'  # untouched default still there
+           ), f'cvars={cv}'
+t('build_matchzy_config: operator cvar override wins on conflict', t_matchzy_cvars_override_wins)
+
+
+def t_matchzy_cvars_blank_suppresses_default():
+    """v0.11.0 polish: blank-string value actively REMOVES a default
+    so the operator can suppress something they don't want sent."""
+    s = _make_to('finale')
+    cfg = V.build_matchzy_config(s, cvar_overrides={
+        'mp_warmup_pausetimer': '',   # suppress
+    })
+    cv = cfg['cvars']
+    return ('mp_warmup_pausetimer' not in cv
+            and cv['matchzy_minimum_ready_required'] == '2'
+           ), f'cvars={cv}'
+t('build_matchzy_config: blank-value cvar suppresses the default', t_matchzy_cvars_blank_suppresses_default)
+
+
+def t_matchzy_cvars_ignores_blank_keys():
+    """v0.11.0 polish: blank/whitespace keys are dropped silently (an
+    abandoned editor row in the SPA shouldn't crash the finale)."""
+    s = _make_to('finale')
+    cfg = V.build_matchzy_config(s, cvar_overrides={
+        '':       'foo',
+        '   ':    'bar',
+        'real':   'value',
+    })
+    cv = cfg['cvars']
+    return ('' not in cv and '   ' not in cv and cv.get('real') == 'value'), f'cvars={cv}'
+t('build_matchzy_config: blank cvar keys are dropped silently', t_matchzy_cvars_ignores_blank_keys)
+
+
 def t_revoke_before_issue_mints_one_anyway():
     """Documented behaviour: `revoke_token` doesn't gate on
     has-token-already — it just mints a fresh one for the given team.

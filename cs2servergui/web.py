@@ -736,6 +736,9 @@ def create_flask(core: AppCore) -> Flask:
             # leak it anyway, and auto-launch is a UX toggle not a credential)
             "public_share_url":             core.public_share_url,
             "veto_auto_launch_on_ready":    core.veto_auto_launch_on_ready,
+            # v0.11.0 polish — operator-configurable MatchZy cvars.  Not
+            # secret (echoed both local + remote); only local can write.
+            "matchzy_cvars":                dict(getattr(core, "matchzy_cvars", {})),
             # v0.10.2 — Discord webhook (treated as a secret-ish URL: only
             # the local admin sees it.  Remote admins get "***" so they
             # can see "webhook is configured" without leaking the URL —
@@ -788,6 +791,22 @@ def create_flask(core: AppCore) -> Flask:
             core.public_share_url = v.rstrip("/")
         if "veto_auto_launch_on_ready" in d:
             core.veto_auto_launch_on_ready = bool(d["veto_auto_launch_on_ready"])
+        # v0.11.0 polish — MatchZy cvars editor.  Local admin only (the
+        # cvar list can do things like disable demo recording or open RCON
+        # commands; treat it like server config not chat).
+        if "matchzy_cvars" in d:
+            if not is_local:
+                return jsonify({"error": "matchzy_cvars: local admin only"}), 403
+            raw = d["matchzy_cvars"]
+            if not isinstance(raw, dict):
+                return jsonify({"error": "matchzy_cvars must be an object"}), 400
+            # Coerce everything to str; drop empty-key entries (a blank row
+            # in the SPA editor that the operator forgot to delete).
+            core.matchzy_cvars = {
+                str(k).strip(): str(v) if v is not None else ""
+                for k, v in raw.items()
+                if str(k).strip()
+            }
         # v0.11.0 — Discord bot config: local-only writes (token is a secret).
         # When the token / guild changes we restart the bot so the new
         # value is picked up.  Guild + channel can change without
@@ -2244,7 +2263,10 @@ def create_flask(core: AppCore) -> Flask:
                         return jsonify({"team": team, "ready": ready_val,
                                         "ready_a": ra, "ready_b": rb, "both_ready": both,
                                         "auto_launch": f"wrong state {core._veto_session.state}"})
-                    cfg = _veto.build_matchzy_config(core._veto_session)
+                    cfg = _veto.build_matchzy_config(
+                        core._veto_session,
+                        cvar_overrides=getattr(core, "matchzy_cvars", None),
+                    )
                 disk_cfg = {k: v for k, v in cfg.items() if not k.startswith("_")}
                 matchid = str(cfg.get("matchid", f"oblivion-veto-{int(time.time())}"))
                 safe_filename = re.sub(r'[^a-zA-Z0-9_.-]', '_', matchid) + ".json"
@@ -2324,7 +2346,10 @@ def create_flask(core: AppCore) -> Flask:
                              "before starting a new finale handoff."
                 }), 400
             try:
-                cfg = _veto.build_matchzy_config(core._veto_session)
+                cfg = _veto.build_matchzy_config(
+                        core._veto_session,
+                        cvar_overrides=getattr(core, "matchzy_cvars", None),
+                    )
             except Exception as e:
                 return _veto_error_response(e)
 
