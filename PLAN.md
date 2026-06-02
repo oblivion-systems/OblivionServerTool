@@ -14,8 +14,8 @@
 
 **Oblivion: the easiest way to add plugins to your self-hosted game
 server.  Pick from a curated catalog, click install, done — across
-multiple games, with conflict detection and automatic updates.  Free
-and open-source.**
+multiple games, on Windows or Linux, with conflict detection and
+automatic updates.  Free and open-source.**
 
 The veto / match-setup / Discord-bot / SPA layers are all real and
 valuable, but they're not the lead.  **Plugin management UX is the
@@ -219,6 +219,13 @@ Two combined moves in one cycle:
 - `oblivion/drivers/cs2/` — everything CS2-specific: modes, plugins,
   veto, MatchZy, workshop, gameinfo.gi patching, RCON Source-protocol
   specifics
+- **Stub the OS abstraction**: introduce `oblivion/core/platform.py`
+  but only with the Windows implementation.  Every OS-specific
+  call (`taskkill`, `wmic`, `netstat` parsing, `%APPDATA%`)
+  funnels through this module.  Linux implementation lands in
+  Phase 3.5, but the seam exists from v0.12.  This is cheap to do
+  now (5-10 functions, mostly already isolated) and expensive to
+  do later (audit every call site).
 - Existing **163/163 tests stay green**
 - User-visible change: **none**
 
@@ -289,7 +296,105 @@ Niche depth is a feature.
 
 ---
 
-## Phase 4 — v0.14 first non-Source game (3-4 weeks)
+## Phase 3.5 — v0.14 Linux support + headless mode (3-4 weeks)
+
+**Goal:** ship a real Linux build.  Not "pywebview-on-Linux as an
+afterthought" — proper **headless daemon** shape that matches how
+serious self-hosters actually deploy game servers.
+
+### Why Linux matters
+
+- **CS2 dedicated servers run primarily on Linux** in real
+  deployments.  Almost every commercial host (Pterodactyl-based or
+  otherwise) uses it.  Cloud VPSes are Linux by default.  Saying
+  "self-hostable platform" while being Windows-only is a credibility
+  hit with the audience that drives r/selfhosted recommendations.
+- **The headless deployment shape is cleaner than Windows pywebview.**
+  Operator runs Oblivion as a systemd daemon on their Linux box;
+  accesses the SPA from their phone/laptop browser via the existing
+  Cloudflare tunnel.  No local window to crash, no desktop session
+  required, restart-on-boot just works.  This is *Pterodactyl /
+  AMP shape*, and it's the right architecture for unattended
+  server use.
+- **Plugin UX wedge generalizes immediately.**  Linux operators have
+  the same "find on GitHub → SFTP → hope" pain Windows operators do.
+  Maybe more — they're more likely to be running 2-3 servers
+  simultaneously.
+- **Linux hobbyists are the core open-source advocate population.**
+  Half-star reviews for "Windows-only" tools come from this group.
+  Linux support is the easiest single-feature trust win.
+
+### The three Linux deployment shapes
+
+| Shape | Audience | Priority |
+|---|---|---|
+| **Headless daemon** (systemd unit, no GUI, SPA over LAN/tunnel) | Self-hosters with a Linux server / VPS | ⭐ primary |
+| **Docker container** (wraps the headless daemon) | Standard self-hosting deployment style; r/selfhosted norm | ⭐ ships with v0.14 |
+| **Linux desktop (pywebview + QtWebEngine)** | Linux desktop users running server on same machine | nice-to-have, not critical |
+
+**Don't try to ship all three at once.** Headless daemon + Docker is
+the v0.14 scope.  Linux desktop pywebview comes for free if the
+backend is clean, but it's not a target — the headless mode is the
+target.
+
+### Architecture changes
+
+The driver abstraction from v0.12 lays half the groundwork; v0.14
+adds the OS abstraction on top.
+
+- `oblivion/core/platform.py` — abstract OS-specific calls behind
+  an interface.  Windows + Linux implementations.  Covers:
+  process listing (`tasklist` / `wmic` vs `ps`), kill-process
+  (`taskkill` vs `kill`), netstat parsing (different output
+  formats), config dir (`%APPDATA%` vs `~/.config/oblivion`),
+  service registration (`sc.exe` vs `systemctl --user`).
+- `--headless` CLI flag — boots Flask + Discord bot + crash
+  monitor, skips pywebview entirely.  Existing auth + role gate
+  + SPA handle the remote-admin case (they were already designed
+  for it).
+- **Plugin registry gains `os` field per asset** — MetaMod /
+  CSS ship per-OS binaries.  Registry knows which to fetch.
+  `github_release` source gains asset-name pattern matching that
+  accepts an `{os}` placeholder.
+- **Build pipeline produces three artifacts**:
+  - `OblivionServerTool.exe` (Windows desktop, current)
+  - `oblivion-server-tool` (Linux headless binary, PyInstaller
+    onefile)
+  - `ghcr.io/.../oblivion:0.14` (Docker image wrapping the Linux
+    binary; multi-arch for amd64 + arm64 so people running it
+    on a Raspberry Pi 5 work)
+- **systemd unit file** shipped in the Linux binary's
+  `share/` directory with install docs.
+- **CI on GitHub Actions** running tests on both Windows + Ubuntu
+  (already easy to add given existing test suite).
+
+### What Linux unlocks for the product story
+
+- **"Install Oblivion on your home Linux box / Raspberry Pi / VPS,
+  manage from any browser"** — a clean one-liner that lands.
+- **Docker compose snippets** that drop into existing self-hosting
+  stacks (already running Jellyfin / Nextcloud / Pi-hole? Drop
+  Oblivion in).
+- **No display-required dependency** for unattended deployments —
+  the Linux daemon doesn't need an X server or a logged-in user.
+- **Matches the deployment shape paid managed hosts use** — makes
+  the "host this yourself instead" pitch credible.
+
+### Open question for Phase 3.5 planning
+
+- **Discord bot dependency** (`discord.py`) is cross-platform Python,
+  no issue.  But the bot only makes sense if the daemon has an
+  internet connection — confirm during planning that the
+  headless-on-an-internal-LAN edge case degrades cleanly.
+- **Update flow on Linux** — Windows has the in-app self-update
+  badge.  Linux probably ships through package managers (apt repo?
+  AUR?  just GitHub release tarballs?) or Docker tag bumps.  Don't
+  over-engineer; "you'll see a `[oblivion] new release v0.15
+  available — check GitHub`" log line is enough for v0.14.
+
+---
+
+## Phase 4 — v0.15 first non-Source game (3-4 weeks)
 
 **Goal:** stress-test the abstraction with a fundamentally different game.
 
@@ -308,6 +413,8 @@ Decision (which non-Source game) → defer to Phase 1.
 ---
 
 ## Phase 5 — v1.0 public launch (1-2 weeks)
+
+**Now with Linux + Docker + Windows distributions at launch.**
 
 **Goal:** flip to public + monetization-ready posture.
 
@@ -329,6 +436,8 @@ Decision (which non-Source game) → defer to Phase 1.
   no payment processor.
 - **NOT Steam.**
 - **2-3 games supported** at launch (CS2 + TF2 + one non-Source).
+- **3 distribution artifacts at launch**: Windows `.exe`, Linux
+  headless binary, Docker image (multi-arch amd64 + arm64).
 - **Plugin Manager is the lead in marketing copy.**  Landing page,
   README, and screenshots foreground the install-a-plugin-in-3-clicks
   experience.  Veto / Discord / SPA shell are secondary value props.
