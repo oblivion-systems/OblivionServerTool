@@ -2,6 +2,133 @@
 
 ---
 
+## v0.11.0 — 2026-06-02 (release)
+
+**Discord bot integration (Layer 1).**  Four-day push for the optional
+Discord bot.  Operator runs their own bot bound to their own Discord
+server (see DISCORD.md for the 5-min setup).  When configured, the tool
+gains three online-primary workflow wins:
+
+  1. **Auto-DM captain links** (Layer 1A) — when /api/veto/tokens mints
+     captain tokens, the bot DMs each elected captain their join URL.
+     Operator no longer copy-pastes one link per captain into Discord.
+
+  2. **Voice-channel roster pull** (Layer 1B) — new "🎤 Pull from voice
+     channel" button on the Roster stage opens a modal listing every
+     voice channel in the operator's server.  Pick a channel; roster
+     grid auto-fills with the connected members' display names + Discord
+     IDs.  Operator only types SteamIDs by hand.
+
+  3. **Live veto embed** (Layer 1C) — when discord_veto_channel_id is
+     configured, the bot posts an embed in that channel as soon as the
+     veto starts, then EDITS the same message on every ban/pick.
+     Spectators watch the match form in real time.  Embed turns green
+     on finale with "✅ MATCH LOCKED IN".
+
+The bot is fully optional — every feature degrades silently when no
+token is configured, and the existing Copy-for-Discord / manual roster
+entry workflows still work.
+
+### Day-by-day
+
+**Mon — Bot scaffolding** (`cs2servergui/discord_bot.py`, ~280 lines)
+  * discord.py 2.3+ added to requirements + build.bat collect-all
+  * Dedicated daemon thread owns the gateway connection + asyncio loop
+  * Flask threads talk to it via `asyncio.run_coroutine_threadsafe`
+    with per-call timeouts
+  * 5 public actions: `start_bot`, `stop_bot`, `bot_status`,
+    `bot_dm_user`, `bot_voice_members`, `bot_voice_channels`,
+    `bot_post_embed`, `bot_edit_embed`
+  * Lifecycle: starts on AppCore init if token configured; restarts on
+    token change via Config.  LoginFailure → 30s retry loop.
+  * New Config card "Discord (v0.11.0 bot integration)" — local-only.
+    Token + guild ID + (optional) channel ID inputs + live status line
+    "✓ Connected as botname#1234" / "… Connecting" / "○ Not configured"
+  * **DISCORD.md** — 8-step operator runbook (create app, intents,
+    OAuth URL, invite, dev mode, paste tokens, troubleshooting)
+
+**Tue — Layer 1A (DM captain links)**
+  * RosterPlayer gains optional `discord_id` field (32-char cap)
+  * /api/veto/roster + snapshot serialise the new field
+  * SPA roster grid: new 4th column "Discord ID (auto-DM, optional)"
+    with digits-only constraint (`inputmode=numeric`, strip-on-input)
+  * /api/veto/tokens internally calls `_attempt_captain_dms` after
+    minting — resolves captain IDs from elected RosterPlayers, sends
+    a captain-addressed DM per team via `bot_dm_user`
+  * Response includes `dm_sent: bool` per team
+  * SPA link card: new "📨 DM SENT" accent pill on the right when
+    `dm_sent=true`, replaced by CLAIMED pill once captain claims
+  * Mid-day fix: SPA roster hydration was dropping `discord_id` from
+    the snapshot projection — SSE re-renders would clobber the
+    operator's typed input.  Three call sites fixed (hydration +
+    demo + paste buttons).
+  * Same commit added diagnostic logging — every silent fall-through
+    in `_attempt_captain_dms` now emits exactly one `[discord] Layer
+    1A:` line so a missed DM is triagable from the log alone.
+
+**Wed — Layer 1B (voice-channel roster pull)**
+  * Two new HTTP routes:
+    - `GET /api/discord/voice_channels` → `{channels: [...]}`
+    - `GET /api/discord/voice_members?channel_id=…` → `{members: [...]}`
+  * Admin-role (NOT local-only) — voice channel + member names are
+    already public to anyone in the server
+  * SPA: new "🎤 Pull from voice channel" button on Roster stage
+    alongside "Demo names" / "Paste 10 names"
+  * Modal lists every voice channel with live member counts
+    - Disabled (greyed) for empty channels
+    - .ready class + green border for channels with exactly 10 members
+  * Pick a channel → roster grid overwrites with
+    `[{display_name, discord_id, steam_id:''}, ...]` for the connected
+    members.  SteamIDs still typed by hand (Discord doesn't expose them).
+
+**Thu — Layer 1C (live veto embed) + ship**
+  * VetoSession gains `live_embed_msg_id: str` field (cleared by
+    reset).  Storing the message ID lets us EDIT the same Discord
+    message on every step rather than spamming a new one per ban/pick.
+  * New `_build_live_veto_embed(session)` renders a rich embed:
+      Title:        "🎮 BO3 · Team Alpha vs Team Bravo"
+      Description:  "⏳ Team Alpha to BAN  (step 1/6)"   ← yellow
+                    "✅ MATCH LOCKED IN — get ready to battle"   ← green
+      Field: Map veto
+        ❌ `de_mirage    ` banned by **Team Alpha**
+        ✅ `de_inferno   ` picked by **Team Bravo**
+        🏁 `de_nuke      ` **decider**
+        ⬜ `de_anubis    ` —
+      Field: Captains
+        **Team Alpha** — Phoenix
+        **Team Bravo** — Cypher
+      Footer:       matchid: oblivion-veto-1780...
+                    (+ "maplist: A → B → C" on finale)
+  * `_refresh_live_veto_embed()` helper called at three hooks:
+    - Captain claim that flips state to `veto` (initial post)
+    - Every `/api/veto/step` (edit with new map state)
+    - `/api/veto/finale` (edit to "LOCKED IN" + maplist footer)
+  * Fire-and-forget on a daemon thread; no-op when no channel
+    configured or bot offline
+  * Embed message ID survives state transitions until reset() — operator
+    can leave the embed in the channel as match history after the BO
+
+### Tests — 147/147 green at v0.11.0 release (was 144)
+  test_v092.py:      28
+  test_veto.py:      61  (+2 for live_embed_msg_id field + reset)
+  test_veto_api.py:  58  (+1 for perform_step works without channel)
+
+### Version + build
+  APP_VERSION 0.10.2 → 0.11.0
+  installer.iss MyAppVersion 0.10.2 → 0.11.0
+  build.bat: --collect-all discord + --hidden-import cs2servergui.discord_bot
+
+### Explicitly NOT in this release
+  * Layer 2 (full in-Discord veto via bot buttons) — out of scope,
+    fragments the auth model + doesn't actually improve captain UX
+  * Per-operator bot hosting — every operator runs their own bot
+    against their own Discord, by design (no shared infra)
+  * Slash commands (`/veto-pull`, `/status`, etc.) — current SPA-driven
+    flow doesn't need them; reserved for v0.11.x if a real use case
+    surfaces
+
+---
+
 ## v0.10.2 — 2026-06-01 (release)
 
 Audit-driven online-primary polish phase.  Four focused days addressing

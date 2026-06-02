@@ -1335,6 +1335,150 @@ def create_flask(core: AppCore) -> Flask:
                 core.log(f"[discord] DM raise: {type(exc).__name__}: {exc}")
         return results
 
+    # ─── v0.11.0 Layer 1C — Live veto embed in Discord channel ────────────
+    def _build_live_veto_embed(session) -> dict:
+        """Render the current veto session as a Discord embed dict.  Called
+        on every state transition that the bot should reflect (veto entry,
+        each ban/pick, finale).
+
+        Embed shape:
+          * Title    — "{mode} — {team_a} vs {team_b}"  (yellow if active, green if locked)
+          * Description — turn indicator OR "✅ MATCH LOCKED IN" on finale
+          * Field "Maps" — bullet list of maps with state
+                ✅ Mirage         picked by Team Alpha
+                ❌ Inferno        banned by Team Bravo
+                🏁 Anubis         decider
+                ⬜ Nuke           remaining
+          * Field "Captains" — each team's elected captain
+          * Footer  — matchid; on finale also includes "matchzy_loadmatch X"
+        """
+        s = session
+        mode = s.mode
+        teamA, teamB = s.team_a_name, s.team_b_name
+        # Build map state lookup from sequence
+        banned = {}        # map_id → team that banned
+        picked = {}        # map_id → team that picked
+        for st in s.sequence:
+            if not st.map_id:
+                continue
+            if st.kind == "BAN":  banned[st.map_id] = st.team
+            elif st.kind == "PICK": picked[st.map_id] = st.team
+
+        # Current step + whose turn
+        current = None
+        if 0 <= s.current_step < len(s.sequence):
+            cs = s.sequence[s.current_step]
+            if not cs.map_id:    # not yet performed
+                current = cs
+
+        # Build the maps section
+        team_name_of = lambda t: teamA if t == "A" else teamB
+        lines = []
+        for m in s.map_pool:
+            if m in banned:
+                lines.append(f"❌ `{m:<14}` banned by **{team_name_of(banned[m])}**")
+            elif m in picked:
+                lines.append(f"✅ `{m:<14}` picked by **{team_name_of(picked[m])}**")
+            elif m == s.decider:
+                lines.append(f"🏁 `{m:<14}` **decider**")
+            else:
+                lines.append(f"⬜ `{m:<14}` —")
+
+        # Description: turn indicator OR finale message
+        if s.state == "complete" or s.state == "finale":
+            desc = "✅ **MATCH LOCKED IN** — get ready to battle."
+            color = 0x57F287   # discord green
+        elif current:
+            verb = "BAN" if current.kind == "BAN" else "PICK"
+            desc = f"⏳ **{team_name_of(current.team)}** to {verb}  (step {s.current_step + 1}/{len(s.sequence)})"
+            color = 0xFEE75C   # discord yellow
+        else:
+            desc = "Veto starting…"
+            color = 0x5865F2   # discord blurple
+
+        cap_a_name = (s.team_a[s.captain_a_idx].name if s.captain_a_idx is not None and 0 <= s.captain_a_idx < len(s.team_a) else "?")
+        cap_b_name = (s.team_b[s.captain_b_idx].name if s.captain_b_idx is not None and 0 <= s.captain_b_idx < len(s.team_b) else "?")
+
+        matchid = ((s.matchzy_config or {}).get("matchid")
+                   or f"oblivion-veto-{int(s.created_at)}")
+        footer_text = f"matchid: {matchid}"
+        if s.state in ("finale", "complete") and s.final_maps:
+            footer_text += f" · maplist: {' → '.join(s.final_maps)}"
+
+        return {
+            "title":       f"🎮 {mode} · {teamA} vs {teamB}",
+            "description": desc,
+            "color":       color,
+            "fields": [
+                {"name": "Map veto",  "value": "\n".join(lines) or "(no maps yet)", "inline": False},
+                {"name": "Captains",  "value": f"**{teamA}** — {cap_a_name}\n**{teamB}** — {cap_b_name}",
+                 "inline": False},
+            ],
+            "footer": {"text": footer_text},
+        }
+
+    def _refresh_live_veto_embed(reason: str = "step") -> None:
+        """Post or edit the live veto embed.  Called from /api/veto/step
+        and /api/veto/finale + the captain-claim path that flips state to
+        `veto`.  Fire-and-forget on a background thread so the caller's
+        HTTP response isn't held by Discord API latency.
+
+        Reason is logged for triage.  Channel ID + bot connection are
+        checked here so callers don't need to know; silent no-op when
+        either is missing.
+        """
+        try:
+            from . import discord_bot
+        except Exception:
+            return
+        if not core.discord_veto_channel_id:
+            return    # operator hasn't configured a target channel
+        if not discord_bot.bot_status().get("connected"):
+            return
+        # Snapshot the session under lock so the embed reflects a consistent
+        # state (mid-step mutations elsewhere can't interleave).
+        with core._veto_lock:
+            s = core._veto_session
+            if s is None:
+                return
+            if s.state not in ("veto", "finale", "complete"):
+                return     # not yet at a stage worth posting about
+            embed_dict = _build_live_veto_embed(s)
+            existing_msg_id = s.live_embed_msg_id or ""
+            channel_id = core.discord_veto_channel_id
+
+        # Outside the lock — Discord API call shouldn't hold _veto_lock
+        def _do() -> None:
+            try:
+                if existing_msg_id:
+                    ok = discord_bot.bot_edit_embed(channel_id, existing_msg_id, embed_dict)
+                    if ok:
+                        core.log(f"[discord] live veto embed edited ({reason})")
+                    else:
+                        # Edit failed — message may have been deleted manually,
+                        # or permissions revoked.  Try posting a new one.
+                        core.log(f"[discord] live veto embed edit failed — "
+                                 f"posting a fresh one")
+                        msg_id = discord_bot.bot_post_embed(channel_id, embed_dict)
+                        if msg_id:
+                            with core._veto_lock:
+                                if core._veto_session is not None:
+                                    core._veto_session.live_embed_msg_id = msg_id
+                else:
+                    msg_id = discord_bot.bot_post_embed(channel_id, embed_dict)
+                    if msg_id:
+                        with core._veto_lock:
+                            if core._veto_session is not None:
+                                core._veto_session.live_embed_msg_id = msg_id
+                        core.log(f"[discord] live veto embed posted (msg {msg_id})")
+                    else:
+                        core.log(f"[discord] live veto embed post failed — "
+                                 f"check bot permissions on channel {channel_id}")
+            except Exception as exc:
+                core.log(f"[discord] live veto embed failed: "
+                         f"{type(exc).__name__}: {exc}")
+        threading.Thread(target=_do, daemon=True).start()
+
     def _post_discord_finale_webhook(history_entry: dict, matchzy_result: dict) -> None:
         """v0.10.2 — POST a Discord embed to the operator's webhook URL
         when a finale completes.  Fire-and-forget.  10-second timeout;
@@ -1856,6 +2000,10 @@ def create_flask(core: AppCore) -> Flask:
             sess["captain_team"] = team
         core.log(f"[veto] captain {team} claimed from {caller_ip}")
         _veto_broadcast()
+        # v0.11.0 Layer 1C: if this claim flipped state to `veto`, post the
+        # initial live embed.  No-op when discord_veto_channel_id isn't
+        # configured or the bot isn't connected.
+        _refresh_live_veto_embed(reason="captain claim")
         resp = jsonify({"ok": True, "team": team})
         resp.set_cookie("session", session_token, httponly=True, samesite="Strict")
         return resp
@@ -1921,6 +2069,10 @@ def create_flask(core: AppCore) -> Flask:
             except Exception as e:
                 return _veto_error_response(e)
         _veto_broadcast()
+        # v0.11.0 Layer 1C — refresh the live Discord embed after every
+        # ban/pick.  Fire-and-forget background thread; no-op when no
+        # channel configured or bot offline.
+        _refresh_live_veto_embed(reason="perform_step")
         return jsonify(snap)
 
     @app.route("/api/veto/ready", methods=["POST"])
@@ -2197,6 +2349,8 @@ def create_flask(core: AppCore) -> Flask:
                     args=(snapshot, matchzy_result),
                     daemon=True,
                 ).start()
+        # v0.11.0 Layer 1C — flip the live embed to "MATCH LOCKED IN"
+        _refresh_live_veto_embed(reason="finale")
         _veto_broadcast()
         # v0.10.2 — also return the precheck snapshot in the success path
         # so the SPA can show "✓ mode was 5v5" alongside the matchzy result.

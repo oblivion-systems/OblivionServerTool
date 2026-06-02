@@ -192,6 +192,14 @@ class VetoSession:
     ready_a:       bool          = False
     ready_b:       bool          = False
 
+    # v0.11.0 Layer 1C — Live Discord veto embed.  When the operator has
+    # configured `discord_veto_channel_id`, the bot posts an embed in that
+    # channel as soon as state advances to `veto` (both captains claimed),
+    # then EDITS the same message on every ban/pick step, and again on
+    # finale.  Storing the message ID lets us edit instead of spamming a
+    # new message per step.  Cleared by reset().
+    live_embed_msg_id: str        = ""
+
     # Audit
     created_at:  float = field(default_factory=time.time)
     updated_at:  float = field(default_factory=time.time)
@@ -753,4 +761,5 @@ def reset(session: VetoSession) -> None:
     session.matchzy_config = None
     session.ready_a = False
     session.ready_b = False
+    session.live_embed_msg_id = ""
     session.updated_at = time.time()
