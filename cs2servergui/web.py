@@ -2864,6 +2864,116 @@ def create_flask(core: AppCore) -> Flask:
         except Exception as exc:
             lines.append(f"OS/Python info unavailable: {exc}")
 
+        # ─── v0.11.10 — TL;DR auto-scan ────────────────────────────────────
+        # 6-10 line health summary that the reader can grok in 2 seconds
+        # before deciding which detail section to dive into.  Anything
+        # marked ⚠ deserves attention; everything ✓ can be skipped if
+        # the issue points elsewhere.  Designed so a Friday-night
+        # maintainer can triage 5 pasted snapshots in 30 seconds total.
+        tldr: list[tuple[str, str, str]] = []   # (icon, label, detail)
+        # App
+        tldr.append(("✓", "app",
+                     f"running v{_config.APP_VERSION}, "
+                     f"{'frozen' if getattr(sys, 'frozen', False) else 'dev'}"))
+        # Server
+        if core.running:
+            try:
+                up = int(core.uptime_seconds)
+                h, r = divmod(up, 3600); m = r // 60
+                up_str = f"{h}h {m}m" if up > 0 else "(booting)"
+            except Exception:
+                up_str = "(unknown uptime)"
+            cm = getattr(core, "current_map", "") or "(none)"
+            cmode = getattr(core, "current_mode", "") or "(none)"
+            try: pc = core.player_count
+            except Exception: pc = "?"
+            srv_icon = "✓"
+            if getattr(core, "boot_state", "") == "booting":
+                srv_icon = "⚠"
+                tldr.append(("⚠", "server",
+                             f"booting on {cm} ({cmode}) — not ready yet"))
+            else:
+                tldr.append((srv_icon, "server",
+                             f"running on {cm} ({cmode}), {up_str}, {pc} players"))
+        else:
+            last_err = getattr(core, "last_start_error", "") or ""
+            if last_err:
+                tldr.append(("⚠", "server",
+                             f"offline — last start error: {str(last_err)[:80]}"))
+            else:
+                tldr.append(("·", "server", "offline"))
+        # Veto session
+        with core._veto_lock:
+            sess = core._veto_session
+            if sess is None:
+                tldr.append(("·", "veto", "idle (no session)"))
+            else:
+                age_min = (time.time() - sess.updated_at) / 60.0
+                icon = "✓"
+                detail = f"state={sess.state} mode={sess.mode}"
+                # Look for stuck-state heuristics
+                if sess.state == "links":
+                    # Both tokens issued but not both claimed for >5 min
+                    a_used = sess.tokens.get("A", None)
+                    b_used = sess.tokens.get("B", None)
+                    if a_used and b_used:
+                        if a_used.used and not b_used.used and age_min > 5:
+                            icon = "⚠"
+                            detail += f", captain B unclaimed for {age_min:.0f}min"
+                        elif b_used.used and not a_used.used and age_min > 5:
+                            icon = "⚠"
+                            detail += f", captain A unclaimed for {age_min:.0f}min"
+                        elif not a_used.used and not b_used.used and age_min > 10:
+                            icon = "⚠"
+                            detail += f", both unclaimed for {age_min:.0f}min"
+                elif sess.state == "finale" and age_min > 5:
+                    icon = "⚠"
+                    detail += f", at finale for {age_min:.0f}min (matchzy stuck?)"
+                tldr.append((icon, "veto", detail))
+        # Discord
+        try:
+            from . import discord_bot as _dbot
+            if not getattr(core, "discord_bot_token", ""):
+                tldr.append(("·", "discord", "not configured"))
+            else:
+                st = _dbot.bot_status()
+                if st.get("connected"):
+                    tldr.append(("✓", "discord",
+                                 f"connected as {st.get('name', '?')}"))
+                else:
+                    err = st.get("error", "") or "not connected"
+                    tldr.append(("⚠", "discord",
+                                 f"token set but not connected: {str(err)[:60]}"))
+        except Exception as exc:
+            tldr.append(("⚠", "discord", f"status query failed: {exc}"))
+        # Disk
+        try:
+            import shutil as _shutil
+            free_gb = _shutil.disk_usage(os.path.dirname(_CONFIG_FILE) or ".").free / 1e9
+            if free_gb < 1:
+                tldr.append(("⚠", "disk", f"only {free_gb:.1f} GB free at config dir"))
+            else:
+                tldr.append(("✓", "disk", f"{free_gb:.1f} GB free at config dir"))
+        except Exception:
+            tldr.append(("·", "disk", "(could not check)"))
+        # Recent log error count (last 50 lines)
+        _log_lines = core.get_log() or []
+        _recent = _log_lines[-50:]
+        _err_re = re.compile(r"\[(error|warn(?:ing)?|fail)\]|EXCEPTION|TRACEBACK|"
+                             r"\bfailed\b|\bdenied\b|\bcrashed\b|\btimeout\b",
+                             re.IGNORECASE)
+        _err_count = sum(1 for ln in _recent if _err_re.search(ln))
+        if _err_count > 0:
+            tldr.append(("⚠", "recent",
+                         f"{_err_count} error/warn lines in last 50 app-log entries"))
+        else:
+            tldr.append(("·", "recent", "no error markers in recent app log"))
+
+        # Render TL;DR
+        hr("TL;DR (auto-scan)")
+        for icon, label, detail in tldr:
+            lines.append(f"  {icon} {label:9} {detail}")
+
         # ─── Server status ───
         hr("Server status")
         kv("running",       core.running)
@@ -2928,24 +3038,31 @@ def create_flask(core: AppCore) -> Flask:
                 kv("spectator_token", "(issued)" if sess.spectator_token else "(none)")
 
         # ─── Discord bot ───
+        # v0.11.10: collapse to one-liner when not configured.  The full
+        # detail block is noise when there's no bot to debug.
         hr("Discord bot")
-        try:
-            from . import discord_bot as _dbot
-            kv("library_available", getattr(_dbot, "DISCORD_AVAILABLE", False))
-        except Exception as exc:
-            kv("library_available", f"(import failed: {exc})")
-        kv("token_configured", bool(getattr(core, "discord_bot_token", "")))
-        kv("guild_id",         getattr(core, "discord_guild_id", "") or "(not set)")
-        kv("veto_channel_id",  getattr(core, "discord_veto_channel_id", "") or "(not set)")
-        try:
-            from . import discord_bot as _dbot
-            status = _dbot.bot_status()
-            for k in ("connected", "name", "id", "error"):
-                if k in status:
-                    kv(f"bot.{k}", status[k])
-        except Exception as exc:
-            kv("bot.status_query", f"(failed: {exc})")
-        kv("webhook_configured", bool(getattr(core, "discord_webhook_url", "")))
+        if not getattr(core, "discord_bot_token", ""):
+            kv("status", "(not configured — token absent, all Discord features no-op)")
+            if getattr(core, "discord_webhook_url", ""):
+                kv("webhook", "configured (separate from bot)")
+        else:
+            try:
+                from . import discord_bot as _dbot
+                kv("library_available", getattr(_dbot, "DISCORD_AVAILABLE", False))
+            except Exception as exc:
+                kv("library_available", f"(import failed: {exc})")
+            kv("token_configured", True)
+            kv("guild_id",         getattr(core, "discord_guild_id", "") or "(not set)")
+            kv("veto_channel_id",  getattr(core, "discord_veto_channel_id", "") or "(not set)")
+            try:
+                from . import discord_bot as _dbot
+                status = _dbot.bot_status()
+                for k in ("connected", "name", "id", "error"):
+                    if k in status:
+                        kv(f"bot.{k}", status[k])
+            except Exception as exc:
+                kv("bot.status_query", f"(failed: {exc})")
+            kv("webhook_configured", bool(getattr(core, "discord_webhook_url", "")))
 
         # ─── Plugin deployment (current mode) ───
         hr("Plugin manifest")
@@ -2979,10 +3096,15 @@ def create_flask(core: AppCore) -> Flask:
                 kv(label, f"{path} (stat failed: {exc})")
 
         # ─── Recent app log (last 80 lines) ───
-        hr("Recent app log (last 80 lines)")
+        # v0.11.10: lines matching error/warn/fail patterns get a `>`
+        # prefix instead of the usual two-space indent.  Makes anomalies
+        # jump out on a visual scan instead of hiding in 80 lines of
+        # noise.  Same `_err_re` as the TL;DR scan above for consistency.
+        hr("Recent app log (last 80 lines, anomalies prefixed `>`)")
         log_lines = core.get_log()
         for ln in log_lines[-80:]:
-            lines.append(f"  {ln}")
+            prefix = "> " if _err_re.search(ln) else "  "
+            lines.append(f"{prefix}{ln}")
         if not log_lines:
             lines.append("  (log buffer empty)")
 
@@ -3073,10 +3195,13 @@ def create_flask(core: AppCore) -> Flask:
         # The decoded-view section above is human-friendly.  This is the
         # raw on-disk form, which catches schema-corruption issues that
         # round-trip through serialize/deserialize masking.
+        # v0.11.10: collapsed when no session present.
+        from .config import VETO_ACTIVE_FILE
         hr("Active veto session — raw JSON")
-        try:
-            from .config import VETO_ACTIVE_FILE
-            if os.path.isfile(VETO_ACTIVE_FILE):
+        if not os.path.isfile(VETO_ACTIVE_FILE):
+            kv("status", "(no session — file not present, nothing to dump)")
+        else:
+            try:
                 with open(VETO_ACTIVE_FILE, "r", encoding="utf-8") as f:
                     raw = f.read()
                 # Cap at 4 KB — a real session is ~2-3 KB; over 4 KB
@@ -3094,10 +3219,8 @@ def create_flask(core: AppCore) -> Flask:
                     raw_masked = raw_masked[:4096] + "\n  ... (truncated at 4 KB)"
                 for ln in raw_masked.splitlines():
                     lines.append(f"  {ln}")
-            else:
-                kv("file", "(not present — no in-flight session)")
-        except Exception as exc:
-            kv("raw_json_read", f"(failed: {exc})")
+            except Exception as exc:
+                kv("raw_json_read", f"(failed: {exc})")
 
         # ─── v0.11.9 — CS2 server console.log tail ─────────────────────────
         # The #1 most useful artifact when the *server* (not the tool) is
@@ -3120,8 +3243,10 @@ def create_flask(core: AppCore) -> Flask:
                     lines.append("  (file present but empty)")
                 else:
                     lines.append("")
+                    # v0.11.10: same anomaly-prefix treatment as the app log
                     for ln in tail_lines:
-                        lines.append(f"  {ln}")
+                        prefix = "> " if _err_re.search(ln) else "  "
+                        lines.append(f"{prefix}{ln}")
             else:
                 kv("source", f"{csgo_log} (NOT PRESENT)")
                 kv("note", "server may not have been started yet, or "

@@ -1700,6 +1700,47 @@ t('diag (v0.11.9): captain tokens masked in raw veto-active.json section',
   t_diag_snapshot_redacts_captain_tokens_in_raw_json)
 
 
+def t_diag_snapshot_v01110_tldr_and_anomaly_flagging():
+    """v0.11.10 — TL;DR auto-scan block at the top + `>`-prefix on log
+    lines matching error/warn/fail patterns.  Two-second triage win
+    for Friday support: reader scans TL;DR, then jumps to flagged
+    lines."""
+    ac, app, c = _new_app(); _login(c)
+    # Plant a real error in the ring buffer so the scan should flag it
+    ac.log('[veto] session created mode=BO3')
+    ac.log('[error] matchzy_loadmatch failed: connection refused')
+    ac.log('[info] step accepted')
+    ac.log('[discord] DM to 12345 failed: 50007 Cannot send')
+    from cs2servergui import web as _web
+    for tok in list(_web._sessions.keys()):
+        _web._sessions[tok]['is_local'] = True
+    body = c.get('/api/diag/snapshot').get_data(as_text=True)
+    # TL;DR block present + correct shape
+    has_tldr_header   = 'TL;DR (auto-scan)' in body
+    has_app_marker    = '✓ app' in body or '⚠ app' in body or '· app' in body
+    has_recent_flag   = '⚠ recent' in body and 'error/warn lines' in body
+    # Log line anomaly prefixes — check the SPECIFIC line, not the whole body
+    def _is_flagged(text_substring):
+        for ln in body.splitlines():
+            if text_substring in ln:
+                return ln.startswith('> ')
+        return None     # not found
+    has_flagged_error = _is_flagged('matchzy_loadmatch failed') is True
+    has_flagged_dm    = _is_flagged('DM to 12345 failed') is True
+    # The non-error info line should NOT be flagged
+    info_line_present = '[info] step accepted' in body
+    info_line_flagged = _is_flagged('step accepted') is True
+    return (has_tldr_header and has_app_marker and has_recent_flag
+            and has_flagged_error and has_flagged_dm
+            and info_line_present and not info_line_flagged
+           ), (f'tldr={has_tldr_header} app_mark={has_app_marker} '
+               f'recent={has_recent_flag} err_flag={has_flagged_error} '
+               f'dm_flag={has_flagged_dm} info_present={info_line_present} '
+               f'info_wrongly_flagged={info_line_flagged}')
+t('diag (v0.11.10): TL;DR auto-scan + anomaly `>` prefix on log lines',
+  t_diag_snapshot_v01110_tldr_and_anomaly_flagging)
+
+
 def t_diag_snapshot_gated_to_local():
     """/api/diag/snapshot is @require_local — a regular admin (non-local)
     session must be rejected with 403.  Defense: snapshot contains IPs,
