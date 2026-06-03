@@ -22,21 +22,29 @@ Process Lasso is **free for personal use forever** after the
 30-day trial of Pro features — and you don't need any Pro
 features for this setup.
 
-## Step 1 — Turn on ProBalance (the lazy-mode win)
+## Step 1 — Verify ProBalance is on (the lazy-mode win)
 
 ProBalance auto-detects when a foreground app needs more resources
-and temporarily lowers the priority of busy background processes.
-It's the single most useful Process Lasso feature for "I'm playing
-games on my admin PC."
+and temporarily restrains busy background processes.  Enabling
+ProBalance *is* enabling that restraint — there's no separate
+toggle (despite what older guides on the internet claim).
 
-1. In the Process Lasso main window: **Options menu → ProBalance →
-   Enable ProBalance** (should already be on by default).
-2. **Options → ProBalance → Restrain background apps' priority
-   class** (this is what makes the magic work).
-3. Done.  ProBalance now runs in the tray, automatically.
+Two ways to verify:
 
-For most setups this alone makes alt-tab lag spikes disappear.  If
-you want belt-and-suspenders, add the explicit rules below.
+**Tray menu**
+1. Right-click the Process Lasso tray icon (taskbar, near the clock).
+2. Look for "ProBalance" — should have a checkmark.  Click it if not.
+
+**Main window** (if you prefer GUI)
+1. Open Process Lasso (double-click the tray icon).
+2. Look near the top toolbar — there's a "ProBalance" status
+   indicator.  Green/enabled is what you want.
+3. Or **Main menu → Options → Configure ProBalance Settings…** —
+   the first checkbox at the top is "Enable ProBalance".
+
+That's it.  ProBalance is now running.  For most setups this
+single step makes alt-tab hitching noticeably better.  But the
+real win is the explicit rules below.
 
 ## Step 2 — Explicit rules for CS2 server, client, and Oblivion
 
