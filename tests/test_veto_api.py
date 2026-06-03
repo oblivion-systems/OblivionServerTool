@@ -17,7 +17,7 @@ Two ways to run (same dual mode as the other test files):
     python tests/test_veto_api.py
     pytest tests/test_veto_api.py
 """
-import os, sys, tempfile, json
+import os, sys, tempfile, json, time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault('APPDATA', tempfile.mkdtemp(prefix='oblivion_veto_api_'))
@@ -1312,6 +1312,277 @@ def t_spectator_page_strips_unsafe_token_chars():
             and '<script>' in body  # legitimate script tag for the polling JS
            ), f'status={r.status_code}'
 t('spectator: /spectate sanitises token chars in embedded HTML', t_spectator_page_strips_unsafe_token_chars)
+
+
+# ─── v0.11.2 — issue_tokens idempotency via HTTP ──────────────────────────
+def t_tokens_endpoint_idempotent_on_recall():
+    """v0.11.2 fix surfaced through the API: POST /api/veto/tokens twice
+    from the same session returns the SAME token values.  Real trigger:
+    captain refreshes the links page in the SPA, which re-issues."""
+    ac, app, c = _new_app(); _login(c)
+    c.post('/api/veto/create', json={'mode': 'BO3'})
+    c.post('/api/veto/roster', json={
+        'team_a_name': 'Alpha', 'team_b_name': 'Bravo',
+        'players': _ten_player_payload(),
+    })
+    c.post('/api/veto/distribute')
+    c.post('/api/veto/start_voting')
+    for team in ('A', 'B'):
+        for v in range(5):
+            c.post('/api/veto/vote', json={'team': team, 'voter_idx': v, 'votee_idx': 0})
+    c.post('/api/veto/resolve_captains')
+    first  = c.post('/api/veto/tokens').get_json()
+    second = c.post('/api/veto/tokens').get_json()
+    return (first['A']['token'] == second['A']['token']
+            and first['B']['token'] == second['B']['token']), \
+           f'A first={first["A"]["token"][:8]} second={second["A"]["token"][:8]}'
+t('idempotent /api/veto/tokens: same call returns same tokens (v0.11.2 fix)',
+  t_tokens_endpoint_idempotent_on_recall)
+
+
+# ─── v0.11.3 — Session persistence end-to-end via HTTP ────────────────────
+# Unit tests in test_veto.py cover serialize/deserialize; these test the
+# REAL production path: create session via HTTP → AppCore destroyed →
+# new AppCore created → /api/veto/state shows the resumed session.
+# This is what catches wiring bugs unit tests can't.
+
+def t_persistence_resumes_session_across_appcore_recreation():
+    """The whole point of v0.11.3 — full HTTP round-trip including the
+    AppCore restart.  Operator's pywebview window crashes mid-session;
+    they re-open the app; same session should be there."""
+    # First session: drive to the 'teams' state.
+    ac1, app1, c1 = _new_app(); _login(c1)
+    c1.post('/api/veto/create', json={'mode': 'BO3'})
+    c1.post('/api/veto/roster', json={
+        'team_a_name': 'Phoenix', 'team_b_name': 'Wraith',
+        'players': _ten_player_payload(),
+    })
+    c1.post('/api/veto/distribute')
+    state_before = c1.get('/api/veto/state').get_json()
+    # `state` is at top level of the snapshot; `session` is the nested
+    # detail dict.
+    assert state_before['state'] == 'teams', \
+        f"expected state 'teams', got {state_before.get('state')!r}"
+    # Now nuke AppCore + its Flask app; create a fresh one (simulates
+    # app restart).  Critically, we DO NOT delete the persistence file —
+    # that's the whole point of this test.
+    del ac1, app1, c1
+    # The fixture intentionally deletes the persistence file at the top
+    # of _new_app(), so we cannot use it.  Build the second AppCore by
+    # hand, preserving the persistence file.
+    ac2 = AppCore()
+    ac2.admin_pin = '0000'
+    _fake_csgo = tempfile.mkdtemp(prefix='oblivion_veto_csgo_resume_')
+    ac2._csgo_dir = lambda: _fake_csgo  # type: ignore[method-assign]
+    app2 = create_flask(ac2)
+    c2 = app2.test_client()
+    _login(c2)
+    state_after = c2.get('/api/veto/state').get_json()
+    return (state_after['state'] == 'teams'
+            and state_after['session']['team_a_name'] == 'Phoenix'
+            and state_after['session']['team_b_name'] == 'Wraith'
+            and len(state_after['session']['team_a']) == 5
+            and len(state_after['session']['team_b']) == 5
+           ), f"resumed state={state_after.get('state')} " \
+              f"a={state_after['session'].get('team_a_name')}"
+t('persistence: session survives full AppCore destroy+recreate via HTTP',
+  t_persistence_resumes_session_across_appcore_recreation)
+
+
+def t_persistence_preserves_claimed_captain_tokens():
+    """Load-bearing detail: an app restart after captains have already
+    claimed their links must NOT log them out.  Their cookie binds to
+    the token's caller_id, which has to survive the round-trip."""
+    ac1, app1, c1 = _new_app(); _login(c1)
+    c1.post('/api/veto/create', json={'mode': 'BO3'})
+    c1.post('/api/veto/roster', json={
+        'team_a_name': 'Alpha', 'team_b_name': 'Bravo',
+        'players': _ten_player_payload(),
+    })
+    c1.post('/api/veto/distribute'); c1.post('/api/veto/start_voting')
+    for team in ('A', 'B'):
+        for v in range(5):
+            c1.post('/api/veto/vote', json={'team': team, 'voter_idx': v, 'votee_idx': 0})
+    c1.post('/api/veto/resolve_captains')
+    tk = c1.post('/api/veto/tokens').get_json()
+    # Claim both captain tokens with distinct caller_ids
+    cap_a = app1.test_client()
+    cap_b = app1.test_client()
+    cap_a.post('/api/veto/claim', json={'token': tk['A']['token']})
+    cap_b.post('/api/veto/claim', json={'token': tk['B']['token']})
+    # Session is now in 'veto' state.  Tear down + recreate AppCore.
+    del ac1, app1, c1, cap_a, cap_b
+    ac2 = AppCore()
+    ac2.admin_pin = '0000'
+    _fake_csgo = tempfile.mkdtemp(prefix='oblivion_veto_csgo_claim_')
+    ac2._csgo_dir = lambda: _fake_csgo  # type: ignore[method-assign]
+    app2 = create_flask(ac2)
+    # Verify both tokens still marked used + claimed in the resumed session
+    sess = ac2._veto_session
+    return (sess is not None
+            and sess.state == 'veto'
+            and sess.tokens['A'].used is True
+            and sess.tokens['A'].claimed_by != ''
+            and sess.tokens['B'].used is True
+            and sess.tokens['B'].claimed_by != ''
+           ), f"sess={sess.state if sess else None} A.used={sess.tokens['A'].used if sess else None}"
+t('persistence: claimed captain tokens survive AppCore recreation',
+  t_persistence_preserves_claimed_captain_tokens)
+
+
+def t_persistence_file_deleted_on_reset():
+    """/api/veto/reset must clear the persistence file so the NEXT app
+    start doesn't re-resume the just-reset session.  Verified by
+    inspecting the file directly."""
+    from cs2servergui.config import VETO_ACTIVE_FILE
+    ac, app, c = _new_app(); _login(c)
+    c.post('/api/veto/create', json={'mode': 'BO1'})
+    file_existed_during_session = os.path.isfile(VETO_ACTIVE_FILE)
+    c.post('/api/veto/reset')
+    file_exists_after_reset = os.path.isfile(VETO_ACTIVE_FILE)
+    return (file_existed_during_session and not file_exists_after_reset), \
+           f'during={file_existed_during_session} after_reset={file_exists_after_reset}'
+t('persistence: /api/veto/reset deletes the active-session file',
+  t_persistence_file_deleted_on_reset)
+
+
+def t_persistence_no_file_when_no_session():
+    """Fresh AppCore with no in-flight session → no persistence file.
+    Defensive: catches an accidental "always create empty session file"
+    regression."""
+    from cs2servergui.config import VETO_ACTIVE_FILE
+    ac, app, c = _new_app()      # _new_app() pre-deletes the file
+    return (not os.path.isfile(VETO_ACTIVE_FILE)), \
+           f'file exists at fresh boot: {VETO_ACTIVE_FILE}'
+t('persistence: no file present when no session active', t_persistence_no_file_when_no_session)
+
+
+def t_persistence_stale_file_discarded():
+    """v0.11.3 — a persistence file with an updated_at older than
+    VETO_ACTIVE_MAX_AGE_SECS must be discarded silently on AppCore boot,
+    NOT loaded into _veto_session.  Operator who opens the app the next
+    day expects a fresh start, not yesterday's stuck finale."""
+    from cs2servergui.config import VETO_ACTIVE_FILE, VETO_ACTIVE_MAX_AGE_SECS
+    # Hand-write a stale persistence file
+    stale = {
+        'state':         'veto',
+        'mode':          'BO3',
+        'team_a_name':   'StaleA',
+        'team_b_name':   'StaleB',
+        'updated_at':    time.time() - (VETO_ACTIVE_MAX_AGE_SECS + 100),
+        'created_at':    time.time() - (VETO_ACTIVE_MAX_AGE_SECS + 200),
+    }
+    os.makedirs(os.path.dirname(VETO_ACTIVE_FILE), exist_ok=True)
+    with open(VETO_ACTIVE_FILE, 'w', encoding='utf-8') as f:
+        json.dump(stale, f)
+    # Build AppCore manually (bypassing _new_app's pre-delete)
+    ac = AppCore()
+    ac.admin_pin = '0000'
+    return (ac._veto_session is None), \
+           f'stale session was resumed: state={ac._veto_session.state if ac._veto_session else None}'
+t('persistence: stale (> max-age) file discarded on boot', t_persistence_stale_file_discarded)
+
+
+def t_persistence_corrupt_file_handled():
+    """v0.11.3 defensive load: if the persistence file is unreadable JSON,
+    AppCore must start cleanly (no crash, no resumed session, file left
+    in place for operator inspection)."""
+    from cs2servergui.config import VETO_ACTIVE_FILE
+    os.makedirs(os.path.dirname(VETO_ACTIVE_FILE), exist_ok=True)
+    with open(VETO_ACTIVE_FILE, 'w', encoding='utf-8') as f:
+        f.write('{not valid json at all,,,')
+    try:
+        ac = AppCore()
+        ac.admin_pin = '0000'
+    except Exception as exc:
+        return False, f'AppCore construction crashed on corrupt persistence: {exc}'
+    return (ac._veto_session is None), \
+           f'corrupt file produced a session somehow: {ac._veto_session}'
+t('persistence: corrupt JSON file handled without AppCore crash', t_persistence_corrupt_file_handled)
+
+
+# ─── v0.11.1 — MatchZy cvar override via /api/config ──────────────────────
+def t_cvar_override_reaches_matchzy_config():
+    """End-to-end: AppCore.matchzy_cvars overrides flow through finale
+    into the generated MatchZy match config.  Sets cvars directly on
+    AppCore (the /api/config write is local-gated and test_client isn't
+    local-loopback).  _drive_to_finale walks to the `finale` state;
+    `/api/veto/finale` is what actually builds the match config."""
+    ac, app, c = _new_app(); _login(c)
+    ac.matchzy_cvars = {
+        'matchzy_knife_enabled_default': '1',     # new cvar
+        'mp_warmup_pausetimer':          '5',     # override default
+    }
+    _drive_to_finale(c, app)
+    # Trigger /finale (load_match=false so we don't actually need a CS2
+    # server running for RCON).  Inspect the response payload — the
+    # generated config is mirrored back to the SPA there.
+    r = c.post('/api/veto/finale', json={'load_match': False})
+    j = r.get_json()
+    cv = (j.get('matchzy') or {}).get('config', {}).get('cvars', {})
+    if not cv:
+        # The cvars might be inside the session's stored config instead.
+        sess = ac._veto_session
+        cv = (sess.matchzy_config or {}).get('cvars', {}) if sess else {}
+    return (cv.get('matchzy_knife_enabled_default') == '1'
+            and cv.get('mp_warmup_pausetimer') == '5'
+            and cv.get('matchzy_minimum_ready_required') == '2'  # default still present
+           ), f'cvars in match config: {cv}'
+t('cvar override on AppCore reaches the generated MatchZy match config',
+  t_cvar_override_reaches_matchzy_config)
+
+
+# ─── v0.10.2 — /api/capabilities shape ────────────────────────────────────
+def t_capabilities_admin_shape():
+    """v0.10.2: admin session sees role=admin + is_local (any) + a list
+    of capability tags including veto.admin and core server controls.
+    Smoke test ensures the endpoint exists + the shape the SPA depends
+    on hasn't drifted.  is_local is naturally False under test_client
+    (non-loopback) — that's not what we're asserting here."""
+    ac, app, c = _new_app(); _login(c)
+    r = c.get('/api/capabilities')
+    j = r.get_json()
+    can = set(j.get('can', []) or [])
+    expected_subset = {'veto.admin', 'server.start', 'server.stop', 'config.write'}
+    return (r.status_code == 200
+            and j.get('role') == 'admin'
+            and isinstance(j.get('can'), list)
+            and 'is_local' in j
+            and expected_subset.issubset(can)
+           ), f'status={r.status_code} role={j.get("role")} ' \
+              f'missing={expected_subset - can}'
+t('/api/capabilities: admin shape includes role + can[] with expected tags',
+  t_capabilities_admin_shape)
+
+
+# ─── v0.11.0 — Discord graceful degradation ───────────────────────────────
+def t_veto_works_with_no_discord_token():
+    """The entire veto flow must work when Discord isn't configured.
+    The tool's CS2 functionality is the core; Discord is enhancement.
+    A misconfigured bot must not block matches."""
+    ac, app, c = _new_app(); _login(c)
+    ac.discord_bot_token = ''       # explicit
+    # Walk the full happy path
+    c.post('/api/veto/create', json={'mode': 'BO1'})
+    c.post('/api/veto/roster', json={
+        'team_a_name': 'A', 'team_b_name': 'B',
+        'players': _ten_player_payload(),
+    })
+    c.post('/api/veto/distribute')
+    c.post('/api/veto/start_voting')
+    for team in ('A', 'B'):
+        for v in range(5):
+            c.post('/api/veto/vote', json={'team': team, 'voter_idx': v, 'votee_idx': 0})
+    c.post('/api/veto/resolve_captains')
+    tk = c.post('/api/veto/tokens').get_json()
+    # Critical: dm_sent should be False (no bot) but the endpoint must succeed
+    return (isinstance(tk, dict)
+            and 'A' in tk and 'B' in tk
+            and tk.get('dm_sent_a', False) is False
+            and tk.get('dm_sent_b', False) is False
+           ), f'tokens response={tk}'
+t('discord: full veto flow works with no Discord token configured',
+  t_veto_works_with_no_discord_token)
 
 
 # ─── Auto-generated pytest cases ──────────────────────────────────────────
