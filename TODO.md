@@ -21,10 +21,20 @@
 | 4 | Test & release engineering | 🟢 mostly done (smoke battery 161/161; build pipeline + signing still open) |
 | 5 | Polish & 1.0 launch | 🟡 in flight (mobile + role pill + capabilities done; final docs + 1.0 ship pending) |
 
-**Current release:** v0.11.1 (2026-06-02) — 161/161 tests green.
-The path to 1.0 is now: finish Phase 2 mode matrix (Friday), close the
-remaining Phase 3.1/3.2/3.3 error-path items, sign + verify the
-build pipeline, then ship.
+**Current release:** v0.11.14 (2026-06-03) — **183/183 tests green**.
+Fourteen releases in one day; v0.11.x is now Friday-ready.  Diagnostic
+snapshot mechanism validated end-to-end via real Way-3 paste cycle.
+Host + Play perf scripts solve the alt-tab lag spike for operators
+running server + client on the same PC.
+
+The path to v1.0 is now:
+1. Run Friday's session, collect real-user feedback
+2. Phase 2 v0.12 — driver abstraction + plugin registry + in-app
+   Gaming Mode toggle (bake the scripts into Oblivion's Config tab)
+3. v0.13 — TF2 driver (proof point)
+4. v0.14 — Linux + headless + Docker
+5. v0.15 — first non-Source game driver
+6. v1.0 — BSL license, donations live, repo public, 2-3 games supported
 
 ---
 

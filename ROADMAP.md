@@ -7,7 +7,34 @@
 
 ---
 
-## Where We Are — v0.11.1 (released 2026-06-02)
+## Where We Are — v0.11.14 (released 2026-06-03)
+
+**Fourteen releases in one day** pushed the v0.11.x line from "polish
+sweep" to "Friday-ready triage + perf tooling complete."  Highlights
+since v0.11.0:
+
+| Release | Theme |
+|---|---|
+| v0.11.1 | 8-feature polish sweep (history, "Go Online", presets, cvar editor, spectator, etc.) |
+| v0.11.2 | `issue_tokens` idempotency — captain refresh doesn't kill the other captain's link |
+| v0.11.3 | Active session persistence — Ctrl+Q / Windows update no longer evaporates a veto mid-flow |
+| v0.11.4 | Diagnostic snapshot button + `TROUBLESHOOTING.md` |
+| v0.11.5 | `/api/ping` exposes version + build flag |
+| v0.11.6 | Version pill in status bar (always visible) |
+| v0.11.7 | Map dropdown category tinting |
+| v0.11.8 | Mode dropdown category tinting + plugin labels |
+| v0.11.9 | Diag snapshot gap-fill (CS2 console.log tail, plugin verify, disk, UA, raw JSON) |
+| v0.11.10 | Diag snapshot triage optimization (TL;DR auto-scan + anomaly `>` prefix) |
+| v0.11.11 | Two diag bugs from real Way-3 paste (disk could-not-check + Discord `?`) |
+| v0.11.12 | Plugin-verifier false positive on stale manifest |
+| v0.11.13 | CS2 console.log freshness in TL;DR + frame-drop flagging |
+| v0.11.14 | Host + Play perf scripts (alt-tab anti-lag toolkit) |
+
+**183/183 backend tests green** across all releases.
+
+Full prose in [CHANGELOG.md](CHANGELOG.md).
+
+## Previously — v0.11.1 (released 2026-06-02)
 
 **Post-v0.11.0 polish sweep.**  Eight discrete operator-facing wins
 shipped in one day on top of the Discord bot release, plus a
