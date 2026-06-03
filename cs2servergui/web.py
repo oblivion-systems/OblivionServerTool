@@ -458,7 +458,18 @@ def create_flask(core: AppCore) -> Flask:
 
     @app.route("/api/ping")
     def ping():
-        return jsonify({"ok": True})
+        """Unauthenticated health check.  v0.11.5: now also exposes the
+        running app version so an external observer can detect a stale
+        deployment without needing to log in or run the diagnostic
+        snapshot (which is local-only).  Version is not sensitive — it
+        appears in CHANGELOG, GitHub releases, and the SPA header.
+        Build flag indicates frozen .exe vs dev mode so a hot-reload
+        situation is also visible at a glance."""
+        return jsonify({
+            "ok":      True,
+            "version": _config.APP_VERSION,
+            "build":   "frozen" if getattr(sys, "frozen", False) else "dev",
+        })
 
     # ── Server state ───────────────────────────────────────────────────────────
 
