@@ -2,6 +2,45 @@
 
 ---
 
+## v0.11.10 — 2026-06-03 (diagnostic snapshot — triage optimization)
+
+Reader-experience pass on the diagnostic snapshot.  Three changes
+that materially speed up Friday-night triage:
+
+1. **TL;DR auto-scan block at the top** — 6-line health summary
+   with `✓ / ⚠ / ·` icons.  A reader can grok the snapshot's
+   verdict in 2 seconds and skip to the relevant section:
+   ```
+   ─── TL;DR (auto-scan) ───
+     ✓ app       running v0.11.10, frozen
+     ⚠ server    booting on de_inferno (5v5) — not ready yet
+     ⚠ veto      state=links, captain B unclaimed for 8min
+     ✓ discord   connected as Oblivion#1234
+     ✓ disk      82.3 GB free at config dir
+     ⚠ recent    2 error/warn lines in last 50 app-log entries
+   ```
+   Auto-detects stuck-state heuristics: captain not claimed > 5min,
+   stuck-at-finale > 5min, disk < 1 GB, error-marker count > 0.
+
+2. **Log line anomaly prefixing** — both the app log (last 80) and
+   CS2 console.log tail (last 200) now prefix lines matching
+   `[error]|[warn]|[fail]|exception|traceback|failed|denied|crashed
+   |timeout` (case-insensitive) with `> ` instead of the usual
+   `  ` two-space indent.  Visual scan finds problems in ~1s
+   instead of 30s of line-by-line reading.
+
+3. **Empty-section collapse** — Discord-not-configured (was 6
+   lines, now 1), no-active-session raw-JSON (was a multi-line
+   header + read-attempt, now one line).  Healthy-state snapshots
+   are noticeably shorter without losing detail when there IS
+   something to report.
+
+Tests +1 (TL;DR header + recent-error count + per-line flagging
+verified against planted log lines).  test_veto_api 80 → 81.
+Total: 182/182 → **183/183**.
+
+---
+
 ## v0.11.9 — 2026-06-03 (diagnostic snapshot — fill the gaps)
 
 Self-audit pass on the v0.11.4 diagnostic snapshot revealed real
