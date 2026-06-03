@@ -14,16 +14,26 @@ When **anything** misbehaves:
 2. Click **🔧 Copy diagnostic snapshot to clipboard**.
 3. Paste into chat / Discord support channel.
 
-The snapshot contains everything needed to debug 90% of issues:
+The snapshot contains everything needed to debug 95% of issues:
 - App version + build type + OS
 - Server status (running, boot state, map, mode, uptime, public IP)
 - Full active veto session state (mode, teams, captains, ban/pick
   sequence with position marker, decider, ready flags, token usage)
-- Plugin manifest (what's currently deployed)
+- Plugin manifest (what's currently deployed) **+ file-presence
+  verification** *(v0.11.9: catches "deployed-but-missing" silent
+  failures)*
 - Discord bot status (configured, connected, error if any)
 - Persistence file inventory (config, match history, active veto —
   paths + sizes + mtimes)
+- **Active veto session raw JSON** *(v0.11.9: catches schema-corruption
+  issues that the decoded-view masks; captain tokens redacted)*
 - **Last 80 lines** of the app log ring buffer
+- **Last 200 lines of CS2 `console.log`** *(v0.11.9: the #1 file when
+  the server itself is the problem — MatchZy errors, plugin crashes,
+  RCON failures, map load failures)*
+- **Disk free space** *(v0.11.9)* at config dir, csgo dir, server dir
+- **Request context** *(v0.11.9)* — your User-Agent (helps debug
+  browser-specific issues like clipboard / popup blocking)
 - Config (sensitive values masked: PINs, passwords, bot token,
   webhook URL)
 

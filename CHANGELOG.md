@@ -2,6 +2,42 @@
 
 ---
 
+## v0.11.9 — 2026-06-03 (diagnostic snapshot — fill the gaps)
+
+Self-audit pass on the v0.11.4 diagnostic snapshot revealed real
+gaps for Friday-grade troubleshooting.  Five new sections close
+the gaps; two new tests pin the additions.
+
+Added to `/api/diag/snapshot`:
+
+1. **CS2 server console.log tail** (last 200 lines) — the #1 most
+   useful artifact when the *server* (not the tool) is misbehaving.
+   MatchZy errors, plugin crashes, RCON failures, map load failures
+   all surface here.  Reads efficiently via 64 KB tail-seek.
+2. **Plugin file verification** — calls `_verify_plugin_files()` on
+   the currently-deployed plugins.  Catches the "deployed-but-
+   missing" silent failure mode (manifest says X is deployed; X's
+   files have actually been deleted by something).
+3. **Active veto session raw JSON** — the decoded-view section was
+   human-friendly but masked schema-corruption issues that round-
+   trip through serialize/deserialize.  Raw form catches those.
+   Captain token values are masked inline (`***REDACTED***`) so a
+   pasted snapshot can never leak a live captain token.
+4. **Disk free space** at config dir, csgo dir, server dir.  Low
+   disk causes workshop downloads, log saves, and MatchZy config
+   writes to fail silently.
+5. **Request context** — User-Agent of the requesting browser
+   (helps debug clipboard / popup / SSE issues that are
+   browser-specific) plus remote_addr and confirmation the
+   local-only gate passed.
+
+Tests +2 (sections present + captain tokens redacted in raw JSON).
+test_veto_api 78 → 80.  Total: 180/180 → **182/182**.
+
+TROUBLESHOOTING.md updated to reference the new sections.
+
+---
+
 ## v0.11.8 — 2026-06-03 (mode-select category tinting + plugin labels)
 
 Companion to v0.11.7 (map dropdown tinting).  The 16-mode flat
