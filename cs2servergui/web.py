@@ -2939,23 +2939,28 @@ def create_flask(core: AppCore) -> Flask:
                 st = _dbot.bot_status()
                 if st.get("connected"):
                     tldr.append(("✓", "discord",
-                                 f"connected as {st.get('name', '?')}"))
+                                 f"connected as {st.get('user') or '(name unresolved)'}"))
                 else:
                     err = st.get("error", "") or "not connected"
                     tldr.append(("⚠", "discord",
                                  f"token set but not connected: {str(err)[:60]}"))
         except Exception as exc:
             tldr.append(("⚠", "discord", f"status query failed: {exc}"))
-        # Disk
+        # Disk — v0.11.11 fix: pull _CONFIG_FILE locally so the TL;DR
+        # scan doesn't NameError silently (the Persistence-files section
+        # below imports it, but that's AFTER us in the function body).
+        # 5 GB warn threshold because Windows starts misbehaving at 2 GB
+        # (no Recycle Bin, no Volume Shadow Copies, no temp room).
         try:
+            from .config import _CONFIG_FILE as _CFG
             import shutil as _shutil
-            free_gb = _shutil.disk_usage(os.path.dirname(_CONFIG_FILE) or ".").free / 1e9
-            if free_gb < 1:
+            free_gb = _shutil.disk_usage(os.path.dirname(_CFG) or ".").free / 1e9
+            if free_gb < 5:
                 tldr.append(("⚠", "disk", f"only {free_gb:.1f} GB free at config dir"))
             else:
                 tldr.append(("✓", "disk", f"{free_gb:.1f} GB free at config dir"))
-        except Exception:
-            tldr.append(("·", "disk", "(could not check)"))
+        except Exception as exc:
+            tldr.append(("·", "disk", f"(could not check: {exc})"))
         # Recent log error count (last 50 lines)
         _log_lines = core.get_log() or []
         _recent = _log_lines[-50:]
@@ -3057,7 +3062,11 @@ def create_flask(core: AppCore) -> Flask:
             try:
                 from . import discord_bot as _dbot
                 status = _dbot.bot_status()
-                for k in ("connected", "name", "id", "error"):
+                # bot_status returns: configured, connected, user, error
+                # v0.11.11 fix: was looking for the wrong keys (name/id);
+                # the actual return shape exposes `user` as the joined
+                # username#discrim string.
+                for k in ("connected", "user", "error"):
                     if k in status:
                         kv(f"bot.{k}", status[k])
             except Exception as exc:
