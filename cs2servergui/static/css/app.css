@@ -556,6 +556,41 @@ kbd {
   padding-right: 32px;
 }
 
+/* v0.11.7 — Map-select category visual hierarchy.
+   Native <select><optgroup> dropdowns can be styled in Chromium-based
+   browsers (Edge WebView2 included).  Subtle accent tint per category
+   makes the three groups (Official, Workshop-Recommended, Workshop-Other)
+   read at a glance instead of being a flat scroll of one-liners.
+
+   color-mix uses the operator's chosen accent so changing the palette
+   in Appearance (Purple/Blue/Teal/Green/Orange/Red) also retints the
+   dropdown — no extra plumbing needed. */
+#map-select optgroup {
+  font-weight: 600;
+  font-style: normal;                   /* override the default italic */
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg-1));
+  padding: 6px 0;
+}
+#map-select option {
+  background: var(--bg-1);
+  color: var(--text-1);
+  padding: 4px 12px;
+  font-weight: 400;
+}
+/* Per-category tint on the options themselves — strongest for Official
+   (the canonical picks), lighter for Workshop-Recommended, plain for
+   Workshop-Other so it stays the visual default for "everything else". */
+#map-select optgroup[label="Official Maps"] option {
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg-1));
+}
+#map-select optgroup[label^="Workshop — Recommended"] option {
+  background: color-mix(in srgb, var(--accent) 4%, var(--bg-1));
+}
+#map-select optgroup[label="Workshop — Other"] option {
+  background: var(--bg-1);
+}
+
 /* Toggle */
 .toggle-row {
   display: flex; align-items: center; justify-content: space-between;
