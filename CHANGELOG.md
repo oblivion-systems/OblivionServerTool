@@ -2,6 +2,32 @@
 
 ---
 
+## v0.11.7 — 2026-06-03 (map-select category tinting)
+
+Small visual hierarchy improvement to the Map picker dropdown.
+Three optgroups (Official Maps, Workshop — Recommended for X,
+Workshop — Other) now read at a glance instead of as a flat
+single-column scroll of map names.
+
+- Optgroup labels: bold + accent-coloured + subtle accent
+  background tint.
+- Per-category option tint, scaled by canonicity:
+  - **Official Maps**: 7% accent tint (strongest)
+  - **Workshop — Recommended for X**: 4% accent tint (medium)
+  - **Workshop — Other**: plain `--bg-1` (visual default)
+
+Uses `color-mix(in srgb, var(--accent) X%, var(--bg-1))` so the
+operator's chosen accent (Appearance: Purple / Blue / Teal /
+Green / Orange / Red) automatically retints the dropdown —
+no extra plumbing per palette.
+
+Scoped to `#map-select` so other native selects (mode picker,
+preset dropdown, RCON history) stay unchanged.
+
+No tests added — pure visual change.  180/180 still green.
+
+---
+
 ## v0.11.6 — 2026-06-03 (running version visible in the status bar)
 
 Companion to v0.11.5.  The version was visible via curl on
