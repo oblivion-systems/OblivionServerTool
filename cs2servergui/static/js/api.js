@@ -193,6 +193,17 @@ const api = (() => {
     logHistory: ()      => get('/api/log/history'),
     logSave:    ()      => post('/api/log/save'),
 
+    // ── v0.11.4 — Diagnostic snapshot (text/plain, local-only) ────────────
+    // Fetched as text not JSON; SPA copies straight to clipboard for
+    // operator to paste into chat / Discord support.
+    diagSnapshot: async () => {
+      const r = await fetch('/api/diag/snapshot', { credentials: 'same-origin' });
+      if (r.status === 401) { location.reload(); throw new Error('Session expired'); }
+      if (r.status === 403) throw new Error('Diagnostic snapshot is local-only (admin on the host machine).');
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return await r.text();
+    },
+
     // ── Veto (v0.10.0) ─────────────────────────────────────────────────
     veto: {
       state:      ()                 => get('/api/veto/state'),

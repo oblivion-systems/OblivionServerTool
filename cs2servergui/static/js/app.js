@@ -3869,6 +3869,19 @@ pages['config'] = async function() {
         ` : ''}
 
         ${isLocal ? `
+        <div class="config-label">Troubleshooting</div>
+        <div class="card mb-16">
+          <div style="font-size:12px;color:var(--text-3);line-height:1.5;margin-bottom:10px">
+            Generates a single text snapshot covering app state, the
+            active veto session, plugin manifest, Discord bot status,
+            and the last 80 log lines.  Secrets are masked.  Copy +
+            paste into your support channel when something breaks.
+          </div>
+          <button class="btn btn-accent btn-full" id="cfg-diag-snapshot">
+            🔧 Copy diagnostic snapshot to clipboard
+          </button>
+        </div>
+
         <div class="config-label">Security</div>
         <div class="card mb-16">
           <div class="flex-col gap-8">
@@ -4149,6 +4162,39 @@ pages['config'] = async function() {
     }
     try { await api.setConfig(data); toast('Security settings saved'); }
     catch (e) { toast(e.message, 'var(--red)'); }
+  });
+
+  // v0.11.4 — Diagnostic snapshot button (local-only)
+  const diagBtn = el('cfg-diag-snapshot');
+  if (diagBtn) diagBtn.addEventListener('click', async () => {
+    const original = diagBtn.textContent;
+    diagBtn.disabled = true;
+    diagBtn.textContent = 'Generating…';
+    try {
+      const text = await api.diagSnapshot();
+      try {
+        await navigator.clipboard.writeText(text);
+        toast(`Diagnostic snapshot copied (${text.length.toLocaleString()} chars). Paste into your support channel.`);
+      } catch (clipErr) {
+        // Clipboard write blocked (HTTP context, permissions denied).
+        // Fall back to opening a window so operator can copy manually.
+        const w = window.open('', '_blank');
+        if (w) {
+          w.document.write('<pre style="font-family:monospace;font-size:12px;white-space:pre-wrap;padding:16px">' +
+            text.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])) +
+            '</pre>');
+          w.document.close();
+          toast('Clipboard blocked; opened snapshot in a new window for manual copy.');
+        } else {
+          toast(`Clipboard blocked + popup blocked. Snapshot size: ${text.length}`, 'var(--bad)');
+        }
+      }
+    } catch (e) {
+      toast(`Snapshot failed: ${e.message}`, 'var(--bad)');
+    } finally {
+      diagBtn.disabled = false;
+      diagBtn.textContent = original;
+    }
   });
 
   el('cfg-bot-save').addEventListener('click', async () => {

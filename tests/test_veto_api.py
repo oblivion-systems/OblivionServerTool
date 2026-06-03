@@ -1585,6 +1585,77 @@ t('discord: full veto flow works with no Discord token configured',
   t_veto_works_with_no_discord_token)
 
 
+# ─── v0.11.4 — Diagnostic snapshot endpoint ───────────────────────────────
+def t_diag_snapshot_returns_pasteable_text():
+    """v0.11.4 — /api/diag/snapshot returns a single text/plain blob
+    covering app version, active session state, log lines, etc.  Smoke
+    test ensures the endpoint exists, the local gate works (test_client
+    isn't local-loopback so we hit a fake-local AppCore), and the
+    response contains the section headers the operator expects."""
+    ac, app, c = _new_app(); _login(c)
+    # Drop a known marker into the log so we can verify it appears
+    ac.log("[smoke] diagnostic snapshot marker line zZqQ")
+    c.post('/api/veto/create', json={'mode': 'BO3'})
+    # Forge a local session — the @require_local gate would otherwise
+    # 403 the test_client (since test_client isn't loopback).  Mutate
+    # the module-level _sessions store directly; that's what the
+    # redacts-secrets test also does.
+    from cs2servergui import web as _web
+    for tok in list(_web._sessions.keys()):
+        _web._sessions[tok]['is_local'] = True
+    r = c.get('/api/diag/snapshot')
+    body = r.get_data(as_text=True)
+    return (r.status_code == 200
+            and 'text/plain' in r.content_type
+            and 'OBLIVION DIAGNOSTIC SNAPSHOT' in body
+            and 'App version:' in body
+            and 'Active veto session' in body
+            and 'Recent app log' in body
+            and 'diagnostic snapshot marker line zZqQ' in body
+            and 'Config (redacted)' in body
+            and 'END SNAPSHOT' in body
+           ), f'status={r.status_code} len={len(body)} ctype={r.content_type}'
+t('diag: /api/diag/snapshot returns pasteable text with expected sections',
+  t_diag_snapshot_returns_pasteable_text)
+
+
+def t_diag_snapshot_redacts_secrets():
+    """v0.11.4 — sensitive config values must be masked in the snapshot
+    so an operator pasting it into a public Discord doesn't leak their
+    PINs / RCON password / Discord bot token."""
+    ac, app, c = _new_app(); _login(c)
+    # Populate sensitive fields via core directly
+    ac.admin_pin = '7777'
+    ac.sv_password = 'top-secret-pw'
+    ac.discord_bot_token = 'MTAxxxxxxxxxxxxxxxxxxxxxx.xxxxxxx.fakefakefake'
+    ac.save_config()
+    from cs2servergui import web as _web
+    for tok in list(_web._sessions.keys()):
+        _web._sessions[tok]['is_local'] = True
+    body = c.get('/api/diag/snapshot').get_data(as_text=True)
+    return ('7777' not in body
+            and 'top-secret-pw' not in body
+            and 'fakefakefake' not in body
+            and '***' in body            # mask marker should appear
+           ), f'leaked values: pin={"7777" in body} pw={"top-secret-pw" in body} ' \
+              f'token={"fakefakefake" in body}'
+t('diag: /api/diag/snapshot redacts secrets (PINs, sv_password, bot token)',
+  t_diag_snapshot_redacts_secrets)
+
+
+def t_diag_snapshot_gated_to_local():
+    """/api/diag/snapshot is @require_local — a regular admin (non-local)
+    session must be rejected with 403.  Defense: snapshot contains IPs,
+    deployed plugin names, file paths — admin remote sessions shouldn't
+    see it."""
+    ac, app, c = _new_app(); _login(c)
+    # Don't forge is_local — test_client is naturally non-local
+    r = c.get('/api/diag/snapshot')
+    return (r.status_code == 403), f'status={r.status_code}'
+t('diag: /api/diag/snapshot is local-only (403 for non-local admin)',
+  t_diag_snapshot_gated_to_local)
+
+
 # ─── Auto-generated pytest cases ──────────────────────────────────────────
 def _slug(name):
     out = ''.join(c if c.isalnum() else '_' for c in name).strip('_').lower()
