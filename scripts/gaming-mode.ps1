@@ -274,10 +274,21 @@ function Apply-Gaming {
 # -- Apply: default ---------------------------------------------------------
 function Apply-Default {
     Write-Host ""
-    Write-Host "=== Restoring DEFAULT mode (Windows defaults) ===" -ForegroundColor Yellow
+    Write-Host "=== Restoring DEFAULT mode (affinity + Game Mode/DVR only) ===" -ForegroundColor Yellow
 
-    Set-PowerPlan-Internal $PLAN_BALANCED
-    Write-Host "  [OK]  Power Plan -> Balanced"
+    # v0.11.14: do NOT revert power plan to Balanced.  Operator wants
+    # High Performance (or Ultimate) at all times -- Balanced costs
+    # responsiveness for general use too, not just hosting.  Power plan
+    # stays at whatever ON left it.  Only Game Mode / DVR / affinity
+    # get reset by this script.
+    $plan = Get-CurrentPowerPlan
+    $planName = switch ($plan) {
+        $PLAN_BALANCED { 'Balanced' }
+        $PLAN_HIGHPERF { 'High Performance' }
+        $PLAN_ULTIMATE { 'Ultimate Performance' }
+        default { "Other ($plan)" }
+    }
+    Write-Host "  [SKIP] Power Plan unchanged (currently: $planName) -- per operator preference"
 
     Set-GameMode -Enable $true
     Write-Host "  [OK]  Game Mode -> On"
