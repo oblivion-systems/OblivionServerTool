@@ -2,6 +2,42 @@
 
 ---
 
+## v0.11.13 — 2026-06-03 (CS2 console.log freshness + frame-drop flagging)
+
+Two more triage-quality wins from the Way-3 paste analysis:
+
+**1. CS2 console.log staleness now obvious.**  Previously the section
+header showed `mtime 23:19:50` with no age context.  A reader could
+spend 30 seconds skimming what they thought was current-session log
+lines, then realise the data was 2 days old.  Now:
+
+  TL;DR line:   `⚠ cs2_log   2.6 days ago — NOT current session (read context carefully)`
+  Section head: `source: ...console.log (285.2 KB, mtime 2026-06-01 23:19:50 — 2.6 days ago  ⚠ NOT current session)`
+
+Age string is human-readable: `15s ago` / `12m ago` / `3.4h ago` /
+`2.6 days ago`.  Sessions <1h count as current; older flags as stale.
+
+**2. Frame-drop warnings now flagged + counted.**  The CS2 server
+emits `UNEXPECTED LONG FRAME DETECTED: 29.8ms elapsed...` when it
+falls behind tick rate (target ~7.8ms for 128-tick).  Previously
+buried in the 200-line tail.  Now:
+
+- Added to the CS2-specific anomaly regex → `>` prefix on each line
+  for fast visual scan.
+- Counted near the section top: `frame_drop_warnings: 47 'UNEXPECTED
+  LONG FRAME' line(s) in last 200` — actionable number for triage
+  (a handful on a healthy server is normal; 50+ during a session
+  means the Warcraft v0.9.2.1 dispatcher needs another look or the
+  host is starved).
+- Also added `Cannot find map`, `host_workshop_map.*not found`, and
+  `matchzy_loadmatch` to the CS2 regex — these are the high-value
+  signals operators ask about when triaging.
+
+App-log anomaly regex unchanged (these patterns are CS2-specific).
+Total: 183/183 still green.
+
+---
+
 ## v0.11.12 — 2026-06-03 (plugin-verification false positive on stale manifest)
 
 Third bug surfaced by the first Way-3 real-run paste: the plugin
