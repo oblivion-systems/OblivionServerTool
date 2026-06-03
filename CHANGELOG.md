@@ -2,6 +2,33 @@
 
 ---
 
+## v0.11.5 — 2026-06-03 (version visible from /api/ping)
+
+Tiny utility addition.  Previously, finding out which version of
+Oblivion was running required either logging in (`/api/state` is
+auth-gated) or local-admin access (`/api/diag/snapshot` is
+`@require_local`).  Made it hard to answer the simple question "is
+the .exe currently running the latest build?" from outside the
+app.
+
+`/api/ping` now returns:
+```
+{ "ok": true, "version": "0.11.5", "build": "frozen" }
+```
+
+`build` field distinguishes a frozen .exe deployment from a dev
+`python main.py` run.  Version is not sensitive (it appears in
+CHANGELOG, GitHub releases, the SPA header on a self-update).
+Unauthenticated by design — anyone hitting the panel from
+localhost or the tunnel can confirm the version with a one-line
+curl.
+
+No tests added (existing test_v092 covers /api/ping reachability;
+the new fields are additive and don't break the existing
+contract).  180/180 still green.
+
+---
+
 ## v0.11.4 — 2026-06-03 (diagnostic snapshot + troubleshooting doc)
 
 **One-click diagnostic snapshot.**  Pre-Friday tooling so when
