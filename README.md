@@ -3,32 +3,67 @@
 A desktop application for managing a **Counter-Strike 2 dedicated server** on Windows.  
 Built with Python + Flask + pywebview (Edge WebView2). Ships as a single `.exe` with an optional installer.
 
-> **Status: v0.11.3 (released 2026-06-03).**
+> **Status: v0.11.14 (released 2026-06-03).**  Fourteen releases shipped
+> in one day pushing the v0.11.x line to maturity.
 >
 > **What's new since v0.11.0**:
-> - **Active session persistence** *(v0.11.3)* — accidental Ctrl+Q, Windows
->   update, or app crash mid-session no longer evaporates the in-progress
->   veto.  Captain claim bindings, partial ban/pick sequence, ready flags
->   all survive an app restart.  Atomic write to `oblivion_veto_active.json`;
->   12 h cutoff before stale sessions are discarded.
+> - **Host + Play perf scripts** *(v0.11.14)* — `scripts/gaming-mode.ps1`
+>   + desktop shortcuts solve the "alt-tab lag spike when I host AND
+>   play CS2 on the same PC" problem.  Pins server / client to separate
+>   CPU cores so Windows can't reshuffle on foreground change.  See
+>   [scripts/README.md](scripts/README.md) and
+>   [scripts/PROCESS_LASSO_SETUP.md](scripts/PROCESS_LASSO_SETUP.md).
+> - **CS2 console.log freshness + frame-drop detection** *(v0.11.13)* —
+>   diag snapshot now shows "2.6 days ago — NOT current session" when
+>   log is stale, counts `UNEXPECTED LONG FRAME` warnings.
+> - **Plugin-verifier fix** *(v0.11.12)* — stale-manifest "MISSING" false
+>   positive when current mode ≠ last deploy mode.
+> - **Two diag-snapshot bugs from real Way-3 paste** *(v0.11.11)* —
+>   TL;DR disk "could not check" and Discord "connected as ?" both fixed.
+> - **Diagnostic snapshot triage optimization** *(v0.11.10)* — TL;DR
+>   auto-scan block at top, anomaly `>` prefix on log lines, empty-
+>   section collapse.  2-second triage from clipboard paste.
+> - **Diagnostic snapshot — fill the gaps** *(v0.11.9)* — added CS2
+>   console.log tail, plugin file verification, disk free space, request
+>   User-Agent, active session raw JSON dump (tokens redacted).
+> - **Mode dropdown category tinting** *(v0.11.8)* — Vanilla CS2 vs
+>   Plugin-enhanced split with `· pluginName` suffix + `(restart on
+>   switch)` hint for MetaMod modes.
+> - **Map dropdown category tinting** *(v0.11.7)* — Official / Workshop
+>   Recommended / Workshop Other split with accent tint per category.
+> - **Status-bar version pill** *(v0.11.6)* — `v0.11.14` always visible
+>   bottom-right; no more "what version am I running?"
+> - **Version on /api/ping** *(v0.11.5)* — unauthenticated `curl
+>   localhost:5050/api/ping` returns `{version, build}` for fast remote
+>   verification.
+> - **Diagnostic snapshot + TROUBLESHOOTING.md** *(v0.11.4)* — one
+>   button in Config → Troubleshooting → clipboard text blob with app
+>   state, veto state, log, config (secrets masked).  Friday-night
+>   support shortcut.
+> - **Active session persistence** *(v0.11.3)* — accidental Ctrl+Q,
+>   Windows update, or app crash mid-session no longer evaporates the
+>   in-progress veto.  Captain claims, partial ban/pick, ready flags
+>   all survive restart.  Atomic write to `oblivion_veto_active.json`;
+>   12 h cutoff.
 > - **`issue_tokens` idempotency fix** *(v0.11.2)* — captain browser
 >   refresh no longer silently invalidates the other captain's link.
->   Per-team rotation via `revoke_token('A')` / `revoke_token('B')` is the
->   explicit escape hatch.
-> - **v0.11.1 polish sweep**: Discord Test Embed / Test DM buttons, 📜 Match
->   history modal, 🌐 "Go Online" banner, bulk paste with SteamID + Discord
->   ID columns, roster presets (localStorage), MatchZy cvar editor (local),
->   📺 Spectator URL (token-gated read-only `/spectate` page, OBS-friendly,
->   PII stripped, XSS-defended), `MOBILE_CHECK.md` real-device checklist.
-> - **v0.11.0 (Discord bot Layer 1)**: operator runs their own bot bound to
->   their own server ([5-min setup in DISCORD.md](DISCORD.md)).  Auto-DM
->   captain links, voice-channel roster pull, live veto embed.  All Discord
->   features degrade silently when no token is configured.
+> - **v0.11.1 polish sweep**: Discord Test Embed / Test DM buttons,
+>   📜 Match history modal, 🌐 "Go Online" banner, bulk paste with
+>   SteamID + Discord ID columns, roster presets (localStorage),
+>   MatchZy cvar editor (local), 📺 Spectator URL (read-only
+>   `/spectate` page, OBS-friendly, PII stripped, XSS-defended),
+>   [MOBILE_CHECK.md](MOBILE_CHECK.md) real-device checklist.
+> - **v0.11.0 (Discord bot Layer 1)**: operator runs their own bot
+>   bound to their own server
+>   ([5-min setup in DISCORD.md](DISCORD.md)).  Auto-DM captain links,
+>   voice-channel roster pull, live veto embed.  Degrades silently
+>   when no token is configured.
 >
-> **167/167 backend tests green** (28 v092 + 74 veto + 65 veto-api).  Full
-> per-release prose in [CHANGELOG.md](CHANGELOG.md); spec for the
+> **183/183 backend tests green** (28 v092 + 74 veto + 81 veto-api).
+> Full per-release prose in [CHANGELOG.md](CHANGELOG.md); spec for the
 > map-veto feature in [VETO.md](VETO.md); strategic roadmap to v1.0 in
-> [PLAN.md](PLAN.md).
+> [PLAN.md](PLAN.md); operator-facing runbook in
+> [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 
 ---
 

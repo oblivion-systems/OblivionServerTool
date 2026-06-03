@@ -2,6 +2,53 @@
 
 ---
 
+## v0.11.14 — 2026-06-03 (host-and-play perf tooling)
+
+**Standalone scripts for the "I host the server AND play CS2 on the
+same PC" alt-tab-lag problem.**  Real Way-3-paste session surfaced
+operator hitting noticeable lag spikes on alt-tab between CS2,
+Discord, and Oblivion.  Root cause: Windows reshuffles CPU/GPU
+priorities on foreground change, and both `cs2.exe` processes
+(server + client) end up briefly fighting for execution resources.
+
+New `scripts/` folder ships with:
+
+- **`gaming-mode.ps1`** — PowerShell engine.  `-Mode Gaming` applies
+  CPU affinity pinning (server → first 4 cores at High priority,
+  client → remaining cores, Oblivion → core 0), forces Power Plan
+  to High Performance / Ultimate, disables Game Mode + DVR.
+  `-Mode Default` reverts everything EXCEPT power plan (operator
+  preference: High Perf at all times).  `-Mode Status` for inspection.
+- **`gaming-mode-on.bat`** / **`gaming-mode-off.bat`** — convenience
+  launchers, auto-elevate to admin via UAC.
+- **`gaming-mode-status.bat`** — no-admin status check.
+- **`install-shortcuts.ps1`** + **`install-shortcuts.bat`** — one-time
+  setup that drops two desktop shortcuts ("Oblivion - Gaming Mode
+  ON" / "OFF") so toggling is a single double-click.  Auto-elevate
+  bit set in lnk binary.
+- **`scripts/PROCESS_LASSO_SETUP.md`** — guide for the persistent
+  alternative.  Process Lasso configured once survives reboots
+  and process restarts; the script needs re-running each session.
+- **`scripts/README.md`** — operator-facing overview of the problem
+  + when to use each tool.
+
+Companion changes:
+
+- **`build.bat` rewritten** to always log + show last 50 lines of
+  output + clear OK/FAIL banner + always pause.  No more silent-
+  close on early error.  `build_log.txt` + `build_log.prev.txt`
+  capture every run.
+- **TROUBLESHOOTING.md** gains "I get a lag spike every time I
+  alt-tab" section pointing at the scripts.
+- **PLAN.md → Phase 2 → Move C** documents the v0.12 plan to bake
+  this into Oblivion's Config tab as a single toggle so users
+  don't have to run PowerShell.
+
+No Python code changes — APP_VERSION bumped to mark the repo
+state.  183/183 tests still green.
+
+---
+
 ## v0.11.13 — 2026-06-03 (CS2 console.log freshness + frame-drop flagging)
 
 Two more triage-quality wins from the Way-3 paste analysis:
