@@ -2,6 +2,40 @@
 
 ---
 
+## v0.11.4 — 2026-06-03 (diagnostic snapshot + troubleshooting doc)
+
+**One-click diagnostic snapshot.**  Pre-Friday tooling so when
+something breaks during a live session, the operator can paste a
+single text blob into a support channel and get fast triage.
+
+- **`GET /api/diag/snapshot`** (admin local-only) returns a single
+  `text/plain` blob with: app version + build type + OS, server
+  status (running, boot state, map, mode, uptime, public IP),
+  active veto session state fully decoded (mode, teams, captains,
+  ban/pick sequence with position marker, decider, ready flags,
+  token usage), plugin manifest, Discord bot status, persistence
+  file inventory (paths + sizes + mtimes), **last 80 lines of the
+  app log ring buffer**, and the config with sensitive values
+  masked (PINs, passwords, bot token, webhook URL).
+- **Config → Troubleshooting card** with a single **🔧 Copy
+  diagnostic snapshot to clipboard** button.  Fetches via
+  `api.diagSnapshot()`, copies to clipboard with toast feedback;
+  falls back to opening the snapshot in a new tab when clipboard
+  is blocked (Edge WebView2 occasionally does).
+- **`TROUBLESHOOTING.md`** — new operator-facing doc with the
+  one-button path, log locations table, quick triage guide for
+  common breakages (captain link broken, server won't start,
+  MatchZy didn't load, DM didn't arrive, embed didn't post, app
+  crashed, tunnel rotated), and a list of greppable `[tag]`
+  markers.
+
+Tests: +3 integration tests (snapshot returns expected sections
+with log marker; secrets redacted; @require_local gate enforced
+for non-local sessions).  test_veto_api 75/75 → 78/78.  Total:
+**177/177 → 180/180**.
+
+---
+
 ## v0.11.3 — 2026-06-03 (session persistence)
 
 **Active veto sessions now survive app restart.**

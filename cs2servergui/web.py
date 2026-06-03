@@ -19,6 +19,7 @@ from __future__ import annotations
 import functools
 import json
 import os
+import sys
 import queue
 import re
 import secrets
@@ -2820,6 +2821,188 @@ def create_flask(core: AppCore) -> Flask:
     @require_auth
     def log_history():
         return jsonify(core.get_log())
+
+    # ── v0.11.4 — Diagnostic snapshot ─────────────────────────────────────
+    # Single endpoint that returns one text blob covering everything an
+    # operator would need to paste into a Discord support channel.  Local
+    # admin only — contains IPs, deployed plugin names, redacted config.
+    # SPA button copies the result to clipboard.
+
+    @app.route("/api/diag/snapshot")
+    @require_auth
+    @require_local
+    def diag_snapshot():
+        """Returns text/plain.  Pasteable into chat without editing."""
+        import platform, datetime
+        lines: list[str] = []
+        def hr(title: str):
+            lines.append("")
+            lines.append(f"─── {title} ───")
+        def kv(k, v):
+            lines.append(f"  {k}: {v}")
+
+        lines.append("═══ OBLIVION DIAGNOSTIC SNAPSHOT ═══")
+        lines.append(f"Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        lines.append(f"App version: {_config.APP_VERSION}")
+        lines.append(f"Build:       {'frozen .exe' if getattr(sys, 'frozen', False) else 'dev (python)'}")
+        try:
+            lines.append(f"OS:          {platform.system()} {platform.release()} "
+                         f"({platform.version()})")
+            lines.append(f"Python:      {platform.python_version()}")
+        except Exception as exc:
+            lines.append(f"OS/Python info unavailable: {exc}")
+
+        # ─── Server status ───
+        hr("Server status")
+        kv("running",       core.running)
+        kv("boot_state",    getattr(core, "boot_state", "?"))
+        kv("current_map",   getattr(core, "current_map", "") or "(none)")
+        kv("current_mode",  getattr(core, "current_mode", "") or "(none)")
+        try:
+            up = core.uptime_seconds
+            if up > 0:
+                h, r = divmod(int(up), 3600); m = r // 60
+                kv("uptime", f"{h}h {m}m")
+            else:
+                kv("uptime", "(offline)")
+        except Exception:
+            kv("uptime", "(unavailable)")
+        kv("lan_ip",        _config._lan_ip())
+        kv("public_ip",     getattr(core, "public_ip", "") or "(not detected)")
+        kv("public_share_url",
+           getattr(core, "public_share_url", "") or "(not set — captain links use public_ip)")
+        try: kv("player_count", core.player_count)
+        except Exception: kv("player_count", "(unavailable)")
+        kv("last_start_error",
+           getattr(core, "last_start_error", "") or "(none)")
+
+        # ─── Active veto session ───
+        hr("Active veto session")
+        with core._veto_lock:
+            sess = core._veto_session
+            if sess is None:
+                kv("state", "idle (no session)")
+            else:
+                kv("state",         sess.state)
+                kv("mode",          sess.mode)
+                kv("created_at",
+                   datetime.datetime.fromtimestamp(sess.created_at).strftime('%H:%M:%S'))
+                kv("updated_at",
+                   datetime.datetime.fromtimestamp(sess.updated_at).strftime('%H:%M:%S'))
+                kv("team_a", f"{sess.team_a_name} ({len(sess.team_a)} players)")
+                kv("team_b", f"{sess.team_b_name} ({len(sess.team_b)} players)")
+                # Captain identification (without leaking SteamIDs in plain)
+                def _cap_name(team, idx):
+                    if idx is None or not (0 <= idx < len(team)):
+                        return "(not elected)"
+                    return f"{team[idx].name} (idx={idx})"
+                kv("captain_a", _cap_name(sess.team_a, sess.captain_a_idx))
+                kv("captain_b", _cap_name(sess.team_b, sess.captain_b_idx))
+                kv("ready_a/b", f"{sess.ready_a}/{sess.ready_b}")
+                kv("tokens_a/b_used", f"{sess.tokens.get('A').used if 'A' in sess.tokens else 'n/a'}"
+                                      f"/{sess.tokens.get('B').used if 'B' in sess.tokens else 'n/a'}")
+                kv("revote_count", sess.revote_count)
+                kv("map_pool", ", ".join(sess.map_pool) if sess.map_pool else "(empty)")
+                kv("current_step", f"{sess.current_step}/{len(sess.sequence)}")
+                if sess.sequence:
+                    lines.append("  sequence:")
+                    for i, st in enumerate(sess.sequence):
+                        marker = "→" if i == sess.current_step else " "
+                        m = st.map_id if st.map_id else "(pending)"
+                        lines.append(f"    {marker} {i+1}. {st.team} {st.kind:4} → {m}")
+                kv("decider",       sess.decider or "(not yet)")
+                kv("final_maps",    ", ".join(sess.final_maps) if sess.final_maps else "(none)")
+                kv("matchzy_config_built", sess.matchzy_config is not None)
+                kv("spectator_token", "(issued)" if sess.spectator_token else "(none)")
+
+        # ─── Discord bot ───
+        hr("Discord bot")
+        try:
+            from . import discord_bot as _dbot
+            kv("library_available", getattr(_dbot, "DISCORD_AVAILABLE", False))
+        except Exception as exc:
+            kv("library_available", f"(import failed: {exc})")
+        kv("token_configured", bool(getattr(core, "discord_bot_token", "")))
+        kv("guild_id",         getattr(core, "discord_guild_id", "") or "(not set)")
+        kv("veto_channel_id",  getattr(core, "discord_veto_channel_id", "") or "(not set)")
+        try:
+            from . import discord_bot as _dbot
+            status = _dbot.bot_status()
+            for k in ("connected", "name", "id", "error"):
+                if k in status:
+                    kv(f"bot.{k}", status[k])
+        except Exception as exc:
+            kv("bot.status_query", f"(failed: {exc})")
+        kv("webhook_configured", bool(getattr(core, "discord_webhook_url", "")))
+
+        # ─── Plugin deployment (current mode) ───
+        hr("Plugin manifest")
+        try:
+            manifest = core._load_plugin_manifest()
+            if manifest:
+                kv("last_deploy_mode", manifest.get("mode", "?"))
+                kv("plugins",           ", ".join(manifest.get("plugins", [])) or "(none)")
+                kv("deployed_at",       manifest.get("at", "?"))
+            else:
+                kv("manifest", "(no oblivion_plugins.json — nothing deployed yet)")
+        except Exception as exc:
+            kv("manifest", f"(read failed: {exc})")
+
+        # ─── Persistence files on disk ───
+        hr("Persistence files")
+        from .config import MATCH_HISTORY_FILE, VETO_ACTIVE_FILE, _CONFIG_FILE
+        for label, path in (
+            ("config",          _CONFIG_FILE),
+            ("match_history",   MATCH_HISTORY_FILE),
+            ("veto_active",     VETO_ACTIVE_FILE),
+        ):
+            try:
+                if os.path.isfile(path):
+                    sz = os.path.getsize(path)
+                    mt = datetime.datetime.fromtimestamp(os.path.getmtime(path))
+                    kv(label, f"{path} ({sz} bytes, mtime {mt.strftime('%H:%M:%S')})")
+                else:
+                    kv(label, f"{path} (NOT PRESENT)")
+            except Exception as exc:
+                kv(label, f"{path} (stat failed: {exc})")
+
+        # ─── Recent app log (last 80 lines) ───
+        hr("Recent app log (last 80 lines)")
+        log_lines = core.get_log()
+        for ln in log_lines[-80:]:
+            lines.append(f"  {ln}")
+        if not log_lines:
+            lines.append("  (log buffer empty)")
+
+        # ─── Redacted config ───
+        hr("Config (redacted)")
+        try:
+            with open(_CONFIG_FILE, "r", encoding="utf-8") as f:
+                cfg_data = json.load(f)
+            SENSITIVE = {
+                "admin_pin", "guest_pin", "rcon_password", "sv_password",
+                "gslt_token", "steam_password", "discord_bot_token",
+                "discord_webhook_url",
+            }
+            for k, v in sorted(cfg_data.items()):
+                if k in SENSITIVE:
+                    kv(k, "***" if v else "(empty)")
+                elif isinstance(v, (dict, list)):
+                    import json as _json
+                    short = _json.dumps(v)
+                    if len(short) > 100:
+                        short = short[:97] + "..."
+                    kv(k, short)
+                else:
+                    kv(k, v)
+        except Exception as exc:
+            kv("config_read", f"(failed: {exc})")
+
+        lines.append("")
+        lines.append("═══ END SNAPSHOT ═══")
+
+        body = "\n".join(lines)
+        return Response(body, mimetype="text/plain; charset=utf-8")
 
     @app.route("/api/log/save", methods=["POST"])
     @require_auth
