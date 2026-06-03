@@ -2,6 +2,33 @@
 
 ---
 
+## v0.11.6 — 2026-06-03 (running version visible in the status bar)
+
+Companion to v0.11.5.  The version was visible via curl on
+`/api/ping` (v0.11.5) and inside the diagnostic snapshot (v0.11.4),
+but nowhere in the running SPA itself — surprisingly easy to lose
+track of what build is actually running.
+
+`index.html` template now receives `app_version` from the Flask
+render context and pins it into the status-bar right corner as a
+quiet monospace badge `v0.11.6`.  Always visible, no auth required
+to see it.  Hover lifts the colour + ring to accent.  Sits next to
+the existing remote-web-URL link without competing with the live
+status data (map / mode / uptime / IPs).
+
+The pre-existing `app-update-badge` ("⬆ App X.Y.Z") still appears
+in the header when GitHub Releases has a newer tag — that's the
+LATEST available, not the running.  Now both are visible without
+ambiguity:
+  status bar `v0.11.6` = what's running
+  header `⬆ App 0.12.0` = what's available
+
+180/180 tests still green.  No new tests — template variable
+addition; existing `/` reachability test (test_v092) already
+covers the SPA shell render.
+
+---
+
 ## v0.11.5 — 2026-06-03 (version visible from /api/ping)
 
 Tiny utility addition.  Previously, finding out which version of

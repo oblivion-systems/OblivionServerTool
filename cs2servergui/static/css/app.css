@@ -407,9 +407,23 @@ input[type="text"], input[type="password"], input[type="number"], select, textar
 .sb-sep   { display: none; }   /* using border-right now */
 .sb-clickable { cursor: pointer; }
 .sb-clickable:hover .sb-value { color: var(--accent); }
-.sb-right { margin-left: auto; }
+.sb-right { margin-left: auto; display: inline-flex; align-items: center; gap: 12px; }
 .sb-link  { color: var(--text-3); cursor: pointer; font-size: 11px; letter-spacing: 0.04em; }
 .sb-link:hover { color: var(--accent); }
+/* v0.11.6 — always-visible running-version pill in the status bar.  Quiet
+   styling — operator/dev should be able to confirm "what am I running?"
+   at a glance without it competing visually with the live status data. */
+.sb-version {
+  color: var(--text-4);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 2px 8px;
+  border: 1px solid var(--line-1);
+  border-radius: 999px;
+  letter-spacing: 0.02em;
+  background: color-mix(in srgb, var(--bg-0) 60%, transparent);
+}
+.sb-version:hover { color: var(--text-2); border-color: var(--accent); }
 
 /* Toast */
 #toast {
