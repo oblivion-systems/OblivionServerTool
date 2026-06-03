@@ -44,6 +44,9 @@ build_log.txt
 build_log.prev.txt
 build_log_*.txt
 
+# ── Downloaded third-party installers (Process Lasso etc.) ───────────────────
+downloads/
+
 # ── Claude Code session data ──────────────────────────────────────────────────
 .claude/
 
