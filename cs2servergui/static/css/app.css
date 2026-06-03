@@ -556,6 +556,36 @@ kbd {
   padding-right: 32px;
 }
 
+/* v0.11.8 — Mode-select category visual hierarchy.
+   Same pattern as the map picker (below): subtle accent tint per
+   category so Vanilla CS2 vs Plugin-enhanced reads at a glance.
+   Vanilla gets the stronger tint (canonical Valve experience).
+   Plugin-enhanced gets the lighter tint (Oblivion's added value).
+   "Other" stays plain — defensive against future backend modes
+   we haven't categorised yet. */
+#mode-select optgroup {
+  font-weight: 600;
+  font-style: normal;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg-1));
+  padding: 6px 0;
+}
+#mode-select option {
+  background: var(--bg-1);
+  color: var(--text-1);
+  padding: 4px 12px;
+  font-weight: 400;
+}
+#mode-select optgroup[label="Vanilla CS2"] option {
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg-1));
+}
+#mode-select optgroup[label="Plugin-enhanced"] option {
+  background: color-mix(in srgb, var(--accent) 4%, var(--bg-1));
+}
+#mode-select optgroup[label="Other"] option {
+  background: var(--bg-1);
+}
+
 /* v0.11.7 — Map-select category visual hierarchy.
    Native <select><optgroup> dropdowns can be styled in Chromium-based
    browsers (Edge WebView2 included).  Subtle accent tint per category
