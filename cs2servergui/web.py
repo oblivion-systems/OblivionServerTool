@@ -377,6 +377,7 @@ def create_flask(core: AppCore) -> Flask:
             "index.html",
             authed=bool(session),
             pin_len=len(core.admin_pin),
+            app_version=_config.APP_VERSION,
         )
 
     @app.route("/auth/auto")
