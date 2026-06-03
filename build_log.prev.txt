@@ -1,0 +1,123 @@
+=== Build started Wed 06/03/2026 13:47:03.35 ===
+CWD: D:\Jacques Code\CS2 Server GUI
+
+[1/3] Installing dependencies...
+Python    : python
+Python ver: 3.14.5
+segno ver : 1.6.6 ( C:\Users\oblivion\AppData\Roaming\Python\Python314\site-packages\segno\__init__.py )
+discord ver: 2.7.1
+
+[1.5/3] Clearing previous build artefacts...
+
+[2/3] Building executable...
+129 INFO: PyInstaller: 6.20.0, contrib hooks: 2026.5
+129 INFO: Python: 3.14.5
+146 INFO: Platform: Windows-11-10.0.26200-SP0
+146 INFO: Python environment: C:\Python314
+147 INFO: wrote D:\Jacques Code\CS2 Server GUI\OblivionServerTool.spec
+120 WARNING: Failed to collect submodules for 'webview.platforms.android' because importing 'webview.platforms.android' raised: ModuleNotFoundError: No module named 'android'
+2141 INFO: Module search paths (PYTHONPATH):
+['D:\\Jacques Code\\CS2 Server GUI',
+ 'C:\\Python314\\python314.zip',
+ 'C:\\Python314\\DLLs',
+ 'C:\\Python314\\Lib',
+ 'C:\\Python314',
+ 'C:\\Users\\oblivion\\AppData\\Roaming\\Python\\Python314\\site-packages',
+ 'C:\\Python314\\Lib\\site-packages',
+ 'D:\\Jacques Code\\CS2 Server GUI']
+2403 INFO: Appending 'binaries' from .spec
+2403 INFO: Appending 'datas' from .spec
+2427 INFO: checking Analysis
+2427 INFO: Building Analysis because Analysis-00.toc is non existent
+2427 INFO: Looking for Python shared library...
+2427 INFO: Using Python shared library: C:\Python314\python314.dll
+2427 INFO: Running Analysis Analysis-00.toc
+2427 INFO: Target bytecode optimization level: 0
+2427 INFO: Initializing module dependency graph...
+2428 INFO: Initializing module graph hook caches...
+2438 INFO: Analyzing modules for base_library.zip ...
+3575 INFO: Processing standard module hook 'hook-encodings.py' from 'C:\\Users\\oblivion\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks'
+3939 INFO: Processing standard module hook 'hook-pickle.py' from 'C:\\Users\\oblivion\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks'
+4203 INFO: Processing standard module hook 'hook-difflib.py' from 'C:\\Users\\oblivion\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks'
+4212 INFO: Processing standard module hook 'hook-heapq.py' from 'C:\\Users\\oblivion\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks'
+6026 INFO: Caching module dependency graph...
+6055 INFO: Analyzing D:\Jacques Code\CS2 Server GUI\main.py
+6098 INFO: Processing standard module hook 'hook-sysconfig.py' from 'C:\\Users\\oblivion\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks'
+6102 INFO: Processing standard module hook 'hook-_ctypes.py' from 'C:\\Users\\oblivion\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks'
+6418 INFO: Processing standard module hook 'hook-multiprocessing.util.py' from 'C:\\Users\\oblivion\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks'
+6485 INFO: Processing standard module hook 'hook-xml.py' from 'C:\\Users\\oblivion\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks'
+7105 INFO: Processing pre-safe-import-module hook 'hook-typing_extensions.py' from 'C:\\Users\\oblivion\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+7106 INFO: SetuptoolsInfo: initializing cached setuptools info...
+7683 INFO: Processing standard module hook 'hook-platform.py' from 'C:\\Users\\oblivion\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks'
+8215 INFO: Processing pre-safe-import-module hook 'hook-backports.py' from 'C:\\Users\\oblivion\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+8215 INFO: Setuptools: 'backports' appears to be a full setuptools-vendored copy - creating alias to 'setuptools._vendor.backports'!
+8221 INFO: Processing standard module hook 'hook-setuptools.py' from 'C:\\Users\\oblivion\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks'
+8231 INFO: Processing pre-safe-import-module hook 'hook-distutils.py' from 'C:\\Users\\oblivion\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+8256 INFO: Processing pre-safe-import-module hook 'hook-jaraco.py' from 'C:\\Users\\oblivion\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+8256 INFO: Setuptools: 'jaraco' appears to be a partial setuptools-vendored copy - extending search paths to ['C:\\Users\\oblivion\\AppData\\Roaming\\Python\\Python314\\site-packages\\jaraco', 'C:\\Users\\oblivion\\AppData\\Roaming\\Python\\Python314\\site-packages\\setuptools\\_vendor\\jaraco']!
+8256 INFO: Processing pre-safe-import-module hook 'hook-jaraco.functools.py' from 'C:\\Users\\oblivion\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+8265 INFO: Processing pre-safe-import-module hook 'hook-more_itertools.py' from 'C:\\Users\\oblivion\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+8444 INFO: Processing pre-safe-import-module hook 'hook-packaging.py' from 'C:\\Users\\oblivion\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+8617 INFO: Processing pre-safe-import-module hook 'hook-jaraco.text.py' from 'C:\\Users\\oblivion\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+8617 INFO: Setuptools: 'jaraco.text' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.jaraco.text'!
+8626 INFO: Processing standard module hook 'hook-setuptools._vendor.jaraco.text.py' from 'C:\\Users\\oblivion\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks'
+8627 INFO: Processing pre-safe-import-module hook 'hook-importlib_resources.py' from 'C:\\Users\\oblivion\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+8627 INFO: Processing pre-safe-import-module hook 'hook-jaraco.context.py' from 'C:\\Users\\oblivion\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+8771 INFO: Processing pre-safe-import-module hook 'hook-importlib_metadata.py' from 'C:\\Users\\oblivion\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+8772 INFO: Setuptools: 'importlib_metadata' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.importlib_metadata'!
+8795 INFO: Processing standard module hook 'hook-setuptools._vendor.importlib_metadata.py' from 'C:\\Users\\oblivion\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks'
+8814 INFO: Processing pre-safe-import-module hook 'hook-zipp.py' from 'C:\\Users\\oblivion\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+8815 INFO: Setuptools: 'zipp' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.zipp'!
+9034 INFO: Processing pre-safe-import-module hook 'hook-tomli.py' from 'C:\\Users\\oblivion\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+9035 INFO: Setuptools: 'tomli' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.tomli'!
+9798 INFO: Processing pre-safe-import-module hook 'hook-wheel.py' from 'C:\\Users\\oblivion\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+9801 INFO: Setuptools: 'wheel' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.wheel'!
+14401 INFO: Processing standard module hook 'hook-keyring.py' from 'C:\\Users\\oblivion\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks'
+16904 INFO: Processing standard module hook 'hook-jinja2.py' from 'C:\\Users\\oblivion\\AppData\\Roaming\\Python\\Python314\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+18424 INFO: Processing standard module hook 'hook-webview.py' from 'C:\\Users\\oblivion\\AppData\\Roaming\\Python\\Python314\\site-packages\\webview\\__pyinstaller'
+18903 INFO: Processing pre-safe-import-module hook 'hook-gi.py' from 'C:\\Users\\oblivion\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+19068 INFO: Processing standard module hook 'hook-clr.py' from 'C:\\Users\\oblivion\\AppData\\Roaming\\Python\\Python314\\site-packages\\pythonnet\\_pyinstaller'
+19147 INFO: Processing standard module hook 'hook-clr_loader.py' from 'C:\\Users\\oblivion\\AppData\\Roaming\\Python\\Python314\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+19300 INFO: Processing standard module hook 'hook-pycparser.py' from 'C:\\Users\\oblivion\\AppData\\Roaming\\Python\\Python314\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+20611 INFO: Processing standard module hook 'hook-xml.etree.cElementTree.py' from 'C:\\Users\\oblivion\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks'
+20721 INFO: Analyzing hidden import 'keyring.backends.Windows'
+20746 INFO: Processing standard module hook 'hook-win32ctypes.core.py' from 'C:\\Users\\oblivion\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks'
+21335 INFO: Analyzing hidden import 'flask.__main__'
+21336 INFO: Analyzing hidden import 'flask.views'
+21339 INFO: Analyzing hidden import 'jinja2.meta'
+21342 INFO: Analyzing hidden import 'jinja2.nativetypes'
+21346 INFO: Analyzing hidden import 'webview.__pyinstaller'
+21347 INFO: Analyzing hidden import 'webview.__pyinstaller.hook-webview'
+21922 INFO: Analyzing hidden import 'webview._version'
+21924 INFO: Analyzing hidden import 'segno.cli'
+21936 INFO: Analyzing hidden import 'segno.helpers'
+21959 INFO: Analyzing hidden import 'discord.__main__'
+21974 INFO: Analyzing hidden import 'discord.search'
+21994 INFO: Processing module hooks (post-graph stage)...
+21996 WARNING: Hidden import "pycparser.lextab" not found!
+21997 WARNING: Hidden import "pycparser.yacctab" not found!
+22187 INFO: Performing binary vs. data reclassification (900 entries)
+22486 INFO: Looking for ctypes DLLs
+22618 INFO: Analyzing run-time hooks ...
+22622 INFO: Including run-time hook 'pyi_rth_inspect.py' from 'C:\\Users\\oblivion\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks\\rthooks'
+22627 INFO: Including run-time hook 'pyi_rth_pkgutil.py' from 'C:\\Users\\oblivion\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks\\rthooks'
+22630 INFO: Including run-time hook 'pyi_rth_multiprocessing.py' from 'C:\\Users\\oblivion\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks\\rthooks'
+22633 INFO: Including run-time hook 'pyi_rth_setuptools.py' from 'C:\\Users\\oblivion\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks\\rthooks'
+22666 INFO: Creating base_library.zip...
+22689 INFO: Looking for dynamic libraries
+23540 INFO: Extra DLL search directories (AddDllDirectory): []
+23540 INFO: Extra DLL search directories (PATH): []
+23996 WARNING: Library not found: could not resolve 'tier0.dll', dependency of 'D:\\Jacques Code\\CS2 Server GUI\\cs2servergui\\plugins\\zombie\\addons\\cs2fixes\\bin\\win64\\cs2fixes.dll'.
+23996 WARNING: Library not found: could not resolve 'steam_api64.dll', dependency of 'D:\\Jacques Code\\CS2 Server GUI\\cs2servergui\\plugins\\zombie\\addons\\cs2fixes\\bin\\win64\\cs2fixes.dll'.
+23996 WARNING: Library not found: could not resolve 'tier0.dll', dependency of 'D:\\Jacques Code\\CS2 Server GUI\\cs2servergui\\plugins\\zombie_ze\\addons\\multiaddonmanager\\bin\\multiaddonmanager.dll'.
+23996 WARNING: Library not found: could not resolve 'steam_api64.dll', dependency of 'D:\\Jacques Code\\CS2 Server GUI\\cs2servergui\\plugins\\zombie_ze\\addons\\multiaddonmanager\\bin\\multiaddonmanager.dll'.
+24032 INFO: Warnings written to D:\Jacques Code\CS2 Server GUI\build\OblivionServerTool\warn-OblivionServerTool.txt
+24085 INFO: Graph cross-reference written to D:\Jacques Code\CS2 Server GUI\build\OblivionServerTool\xref-OblivionServerTool.html
+24137 INFO: checking PYZ
+24137 INFO: Building PYZ because PYZ-00.toc is non existent
+24137 INFO: Building PYZ (ZlibArchive) D:\Jacques Code\CS2 Server GUI\build\OblivionServerTool\PYZ-00.pyz
+24886 INFO: Building PYZ (ZlibArchive) D:\Jacques Code\CS2 Server GUI\build\OblivionServerTool\PYZ-00.pyz completed successfully.
+24932 INFO: checking PKG
+24932 INFO: Building PKG because PKG-00.toc is non existent
+24933 INFO: Building PKG (CArchive) OblivionServerTool.pkg
+^C

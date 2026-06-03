@@ -2,6 +2,41 @@
 
 ---
 
+## v0.11.11 — 2026-06-03 (two diag-snapshot bugs surfaced on first real run)
+
+Caught by the Way-3 smoke-test paste from a real .exe deployment (the
+whole point of v0.11.4-v0.11.10 was to make these defects findable
+quickly — system worked).
+
+1. **TL;DR disk scan silently "(could not check)"** — the scan ran
+   before `_CONFIG_FILE` was imported into the function's local
+   namespace, so the `os.path.dirname(_CONFIG_FILE)` raised
+   `NameError`, got swallowed by the bare `except`, and produced the
+   useless fallback message.  Bug-fix: local import at the top of the
+   disk-check block.  Also raised the warn threshold from <1 GB to
+   <5 GB (Windows misbehaves below 2 GB; 5 GB gives genuine headroom).
+
+2. **Discord shows `connected as ?` instead of bot name** — the
+   `bot_status()` return shape exposes a `user` key (joined
+   `username#discrim` string), not `name`.  Snapshot's TL;DR + detail
+   section were both looking for the wrong key.  Bug-fix: use `user`.
+   Also use `'(name unresolved)'` as a friendlier fallback than `?`
+   for the brief window between `bot.connected = True` and the
+   Discord gateway resolving the bot user object.
+
+Real-run snapshot before/after:
+  before: `⚠ discord   connected as ?` + `· disk (could not check)`
+  after:  `✓ discord   connected as Oblivion#1234` + `✓ disk 88.7 GB free`
+
+No new tests — the existing TL;DR test in test_veto_api covers the
+section header + recent-anomaly count; the Discord/disk lines aren't
+test-assertable from the integration suite without forging the bot
+runner state.  Manual end-to-end paste covered it.
+
+183/183 still green.
+
+---
+
 ## v0.11.10 — 2026-06-03 (diagnostic snapshot — triage optimization)
 
 Reader-experience pass on the diagnostic snapshot.  Three changes
