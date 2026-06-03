@@ -1643,6 +1643,63 @@ t('diag: /api/diag/snapshot redacts secrets (PINs, sv_password, bot token)',
   t_diag_snapshot_redacts_secrets)
 
 
+def t_diag_snapshot_v0119_sections_present():
+    """v0.11.9 — diagnostic snapshot now also includes Request context,
+    Disk space, Plugin file verification, Active veto raw JSON, and
+    CS2 console.log tail.  Smoke test that all the section headers
+    appear so a refactor doesn't silently lose a section."""
+    ac, app, c = _new_app(); _login(c)
+    from cs2servergui import web as _web
+    for tok in list(_web._sessions.keys()):
+        _web._sessions[tok]['is_local'] = True
+    body = c.get('/api/diag/snapshot', headers={'User-Agent': 'OblivionTest/9.9'}).get_data(as_text=True)
+    expected_sections = (
+        'Request context',
+        'Disk space',
+        'Plugin file verification',
+        'Active veto session — raw JSON',
+        'CS2 console.log',
+    )
+    missing = [s for s in expected_sections if s not in body]
+    return (not missing
+            and 'OblivionTest/9.9' in body          # user_agent surfaced
+           ), f'missing sections: {missing}, ua_in_body={"OblivionTest" in body}'
+t('diag (v0.11.9): new sections (req ctx, disk, plugin verify, raw json, cs2 log) all present',
+  t_diag_snapshot_v0119_sections_present)
+
+
+def t_diag_snapshot_redacts_captain_tokens_in_raw_json():
+    """v0.11.9 — the raw veto-active.json section MUST mask captain
+    token values.  A leaked snapshot containing a live captain token
+    would let anyone with it claim the captain role mid-flow."""
+    ac, app, c = _new_app(); _login(c)
+    from cs2servergui import web as _web
+    for tok in list(_web._sessions.keys()):
+        _web._sessions[tok]['is_local'] = True
+    # Drive the session past token issue so the persistence file
+    # contains real token values
+    c.post('/api/veto/create', json={'mode': 'BO1'})
+    c.post('/api/veto/roster', json={
+        'team_a_name': 'A', 'team_b_name': 'B',
+        'players': _ten_player_payload(),
+    })
+    c.post('/api/veto/distribute'); c.post('/api/veto/start_voting')
+    for team in ('A','B'):
+        for v in range(5):
+            c.post('/api/veto/vote', json={'team':team,'voter_idx':v,'votee_idx':0})
+    c.post('/api/veto/resolve_captains')
+    tk = c.post('/api/veto/tokens').get_json()
+    token_a = tk['A']['token']
+    token_b = tk['B']['token']
+    body = c.get('/api/diag/snapshot').get_data(as_text=True)
+    return (token_a not in body
+            and token_b not in body
+            and '***REDACTED***' in body
+           ), f'token_a leaked={token_a in body} token_b leaked={token_b in body}'
+t('diag (v0.11.9): captain tokens masked in raw veto-active.json section',
+  t_diag_snapshot_redacts_captain_tokens_in_raw_json)
+
+
 def t_diag_snapshot_gated_to_local():
     """/api/diag/snapshot is @require_local — a regular admin (non-local)
     session must be rejected with 403.  Defense: snapshot contains IPs,

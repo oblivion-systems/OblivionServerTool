@@ -3010,6 +3010,125 @@ def create_flask(core: AppCore) -> Flask:
         except Exception as exc:
             kv("config_read", f"(failed: {exc})")
 
+        # ─── v0.11.9 — Browser / request context ───────────────────────────
+        hr("Request context")
+        try:
+            ua = request.headers.get("User-Agent", "(missing)")
+            kv("user_agent", ua[:200] + ("…" if len(ua) > 200 else ""))
+            kv("remote_addr", request.remote_addr or "(unknown)")
+            kv("snapshot_local_only_gate", "passed (this caller is local)")
+        except Exception as exc:
+            kv("request_context", f"(failed: {exc})")
+
+        # ─── v0.11.9 — Disk free space at known write paths ────────────────
+        hr("Disk space")
+        try:
+            import shutil
+            for label, path in (
+                ("config_dir",  os.path.dirname(_CONFIG_FILE) or "."),
+                ("csgo_dir",    core._csgo_dir()),
+                ("server_dir",  getattr(core, "server_dir", "") or "(unset)"),
+            ):
+                if path and path != "(unset)" and os.path.isdir(path):
+                    try:
+                        total, used, free = shutil.disk_usage(path)
+                        kv(label, f"{path} — free {free / 1e9:.1f} GB / total {total / 1e9:.1f} GB")
+                    except Exception as exc:
+                        kv(label, f"{path} (disk_usage failed: {exc})")
+                else:
+                    kv(label, f"{path} (path does not exist)")
+        except Exception as exc:
+            kv("disk_space", f"(failed: {exc})")
+
+        # ─── v0.11.9 — Plugin file verification (current mode) ─────────────
+        # Manifest tells us what was deployed; this verifies the files are
+        # actually still on disk.  Catches the "deployed-but-missing" silent
+        # failure mode (someone deleted addons/, plugin update half-applied).
+        hr("Plugin file verification")
+        try:
+            from .core import _PLUGIN_VERIFY_FILES, _MODE_PLUGIN_NAMES
+            manifest = core._load_plugin_manifest()
+            deployed = manifest.get("plugins", []) if manifest else []
+            if not deployed:
+                kv("status", "(nothing deployed — skipping verification)")
+            else:
+                any_missing = False
+                for plug in deployed:
+                    missing = core._verify_plugin_files(plug)
+                    if missing:
+                        any_missing = True
+                        kv(f"{plug}", f"⚠ MISSING {len(missing)} file(s):")
+                        for path in missing[:5]:    # cap output
+                            lines.append(f"      - {path}")
+                        if len(missing) > 5:
+                            lines.append(f"      ... and {len(missing) - 5} more")
+                    else:
+                        kv(plug, "✓ all expected files present")
+                if not any_missing:
+                    kv("overall", "✓ all deployed plugins verified clean")
+        except Exception as exc:
+            kv("verification", f"(failed: {exc})")
+
+        # ─── v0.11.9 — Active veto session raw JSON (if any) ───────────────
+        # The decoded-view section above is human-friendly.  This is the
+        # raw on-disk form, which catches schema-corruption issues that
+        # round-trip through serialize/deserialize masking.
+        hr("Active veto session — raw JSON")
+        try:
+            from .config import VETO_ACTIVE_FILE
+            if os.path.isfile(VETO_ACTIVE_FILE):
+                with open(VETO_ACTIVE_FILE, "r", encoding="utf-8") as f:
+                    raw = f.read()
+                # Cap at 4 KB — a real session is ~2-3 KB; over 4 KB
+                # signals something weird, truncation actually useful as
+                # a tell.  Captain tokens are sensitive but already
+                # excluded from the user-friendly "Active veto session"
+                # section above — they DO appear here.  Mask them inline.
+                import re as _re
+                raw_masked = _re.sub(
+                    r'"value":\s*"[^"]+"',
+                    '"value": "***REDACTED***"',
+                    raw,
+                )
+                if len(raw_masked) > 4096:
+                    raw_masked = raw_masked[:4096] + "\n  ... (truncated at 4 KB)"
+                for ln in raw_masked.splitlines():
+                    lines.append(f"  {ln}")
+            else:
+                kv("file", "(not present — no in-flight session)")
+        except Exception as exc:
+            kv("raw_json_read", f"(failed: {exc})")
+
+        # ─── v0.11.9 — CS2 server console.log tail ─────────────────────────
+        # The #1 most useful artifact when the *server* (not the tool) is
+        # the problem.  Started via `-condebug`; sits at <csgo>/console.log.
+        hr("CS2 console.log (last 200 lines)")
+        try:
+            csgo_log = os.path.join(core._csgo_dir(), "console.log")
+            if os.path.isfile(csgo_log):
+                sz = os.path.getsize(csgo_log)
+                mt = datetime.datetime.fromtimestamp(os.path.getmtime(csgo_log))
+                kv("source",   f"{csgo_log} ({sz / 1024:.1f} KB, mtime {mt.strftime('%H:%M:%S')})")
+                # Tail efficiently — read last 64 KB then take last 200 lines
+                with open(csgo_log, "rb") as f:
+                    if sz > 64 * 1024:
+                        f.seek(-64 * 1024, 2)
+                        f.readline()    # skip partial line
+                    tail = f.read().decode("utf-8", errors="replace")
+                tail_lines = tail.splitlines()[-200:]
+                if not tail_lines:
+                    lines.append("  (file present but empty)")
+                else:
+                    lines.append("")
+                    for ln in tail_lines:
+                        lines.append(f"  {ln}")
+            else:
+                kv("source", f"{csgo_log} (NOT PRESENT)")
+                kv("note", "server may not have been started yet, or "
+                            "-condebug isn't applying — check launch args")
+        except Exception as exc:
+            kv("console_log_tail", f"(failed: {exc})")
+
         lines.append("")
         lines.append("═══ END SNAPSHOT ═══")
 
