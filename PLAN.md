@@ -353,6 +353,41 @@ Two combined moves in one cycle:
 - Existing **163/163 tests stay green**
 - User-visible change: **none**
 
+### Move C — In-app Gaming Mode toggle (host + play on same PC)
+
+**Audience**: every operator who plays on the same machine as the
+server.  Surfaced via real Way-3 paste analysis 2026-06-03 — operator
+was alt-tabbing between CS2, Discord, and the Oblivion admin panel
+and hitting noticeable lag spikes on alt-tab.
+
+Currently solved via `scripts/gaming-mode.ps1` + `scripts/gaming-mode-on.bat`
++ desktop shortcuts.  v0.12 bakes the same logic into the SPA so:
+
+- New Config tab card "**Gaming Mode** (host + play on this PC)"
+  with a single on/off toggle
+- Backend `core.gaming_mode_on()` / `gaming_mode_off()` using ctypes
+  for process affinity, `powercfg.exe` for power plan, registry
+  edits for Game Mode / DVR
+- State persisted in `oblivion_config.json` so it re-applies on
+  Oblivion startup if it was on last session
+- Reapplies automatically on every server start (the server PID
+  changes each time, so the pinning needs to follow)
+- "Restore Windows defaults" button next to the toggle
+- Status line: shows what's currently pinned to where, so the
+  operator can verify visually
+
+Why bake it in instead of leaving as standalone scripts:
+- Discoverable from the Config tab — every operator sees it
+- No PowerShell / admin / shortcut setup friction
+- Reapplies on server restart (which scripts can't, without a
+  watchdog)
+- Visible state ("Gaming Mode ON" badge in status bar)
+
+The standalone scripts stay in the repo for users who want them
+outside the .exe.  v0.12 installer will also bundle them in
+`scripts/` next to the binary for users who prefer the manual
+route.
+
 ### Move B — Plugin registry + first-class Plugin Manager UX
 **This is the headline feature, not a footnote.**  See the
 "noob-friendly plugin attachment" thesis above for full feature

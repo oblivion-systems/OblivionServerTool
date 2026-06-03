@@ -124,6 +124,31 @@ Secrets are masked.  Safe to paste publicly.
 3. Re-share new captain links (the old ones bind to the old URL
    base; captain tokens themselves still work).
 
+### "I get a lag spike every time I alt-tab to Discord / browser / Oblivion"
+
+You're running CS2 server + game client on the same PC.  Windows
+reshuffles CPU/GPU priorities every time the foreground changes,
+and both `cs2.exe` processes end up briefly fighting for execution
+resources.  This is fixable without new hardware.
+
+**Quick fix** (one-time setup, then double-click before each session):
+1. Run `scripts/install-shortcuts.bat` from the repo (one-time).
+2. Before a hosting + playing session: double-click **Oblivion -
+   Gaming Mode ON** on your desktop.  UAC prompt; ~3 seconds.
+3. When done playing: double-click **Oblivion - Gaming Mode OFF**.
+
+What that does: pins the CS2 server to first 4 cores at High
+priority, client to remaining cores, Oblivion to core 0.  Once
+pinned, Windows can't reshuffle anything on alt-tab because every
+process has been explicitly told which cores it's allowed to use.
+
+**Persistent across reboots** — install Process Lasso and follow
+`scripts/PROCESS_LASSO_SETUP.md`.  Sets up the same pinning to
+re-apply automatically on every process spawn forever.
+
+**Future**: v0.12 bakes this into Oblivion's Config tab as a
+single toggle — no scripts, no Process Lasso, just a checkbox.
+
 ### "Server stuck in a weird state, just reset everything"
 
 1. Veto: `/api/veto/reset` (Reset button on the Veto header).
