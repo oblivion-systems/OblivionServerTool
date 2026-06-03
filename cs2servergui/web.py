@@ -3175,13 +3175,36 @@ def create_flask(core: AppCore) -> Flask:
         # Manifest tells us what was deployed; this verifies the files are
         # actually still on disk.  Catches the "deployed-but-missing" silent
         # failure mode (someone deleted addons/, plugin update half-applied).
+        #
+        # v0.11.12 fix: if the manifest's mode != current_mode, the operator
+        # has switched modes since the last deploy and Oblivion correctly
+        # undeployed the manifest's plugins.  Missing files in that case
+        # are the EXPECTED healthy state, NOT a failure to flag.  Honest
+        # framing avoids the false-positive ⚠ that misled triage on the
+        # first real Way-3 paste.
         hr("Plugin file verification")
         try:
             from .core import _PLUGIN_VERIFY_FILES, _MODE_PLUGIN_NAMES
             manifest = core._load_plugin_manifest()
             deployed = manifest.get("plugins", []) if manifest else []
+            manifest_mode = (manifest.get("mode", "") if manifest else "") or ""
+            current_mode  = getattr(core, "current_mode", "") or ""
+            stale_manifest = bool(
+                deployed and current_mode and manifest_mode
+                and manifest_mode != current_mode
+            )
             if not deployed:
                 kv("status", "(nothing deployed — skipping verification)")
+            elif stale_manifest:
+                # Manifest reflects a previous mode whose plugins were
+                # correctly undeployed when current_mode was selected.
+                # Reporting "MISSING" here is misleading; report the
+                # mismatch instead and skip the verify.
+                kv("status",
+                   f"(manifest stale — last_deploy={manifest_mode}, "
+                   f"current_mode={current_mode}; "
+                   f"undeploy on mode-switch is expected behaviour, "
+                   f"not verifying)")
             else:
                 any_missing = False
                 for plug in deployed:

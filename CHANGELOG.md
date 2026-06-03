@@ -2,6 +2,38 @@
 
 ---
 
+## v0.11.12 — 2026-06-03 (plugin-verification false positive on stale manifest)
+
+Third bug surfaced by the first Way-3 real-run paste: the plugin
+file verification section flagged the Warcraft DLLs as `⚠ MISSING`
+on a freshly-rebooted box where the operator was in Competitive
+mode but the manifest still recorded Warcraft as the last deploy.
+
+Diagnosis: this is the correct, healthy state — Oblivion's
+mode-switch logic undeploys the previous mode's plugins before
+deploying the new one's.  Manifest's "last deploy" record was
+stale-but-correct.  The verifier was naively reading the manifest
+and reporting missing files as failures.
+
+Fix: cross-check `manifest.mode` against `core.current_mode`.  If
+they don't match, the operator has switched modes since the last
+deploy, undeploy is the expected behaviour, and reporting
+"MISSING" misleads triage.  Replace with a clear status line:
+```
+(manifest stale — last_deploy=Warcraft, current_mode=Competitive;
+ undeploy on mode-switch is expected behaviour, not verifying)
+```
+
+If `current_mode == manifest.mode` the verifier still runs and
+catches the actual deployed-but-missing failure mode (someone
+deleted addons/, plugin update half-applied, etc.) — which is the
+case it was built for in v0.11.9.
+
+183/183 still green.  No new tests — change is in the snapshot's
+status-string branch; existing tests cover the verifier-runs path.
+
+---
+
 ## v0.11.11 — 2026-06-03 (two diag-snapshot bugs surfaced on first real run)
 
 Caught by the Way-3 smoke-test paste from a real .exe deployment (the
