@@ -1121,12 +1121,7 @@ function buildStatusPage() {
 
   // Populate mode select
   const modeSel = el('mode-select');
-  state.modes.forEach(m => {
-    const o = document.createElement('option');
-    o.value = m; o.textContent = m;
-    if (m === s.mode) o.selected = true;
-    modeSel.appendChild(o);
-  });
+  _populateModeSelect(modeSel, state.modes, s.mode);
 
   // Populate maps (single unified picker: official + workshop)
   populateMapSelect(modeSel.value);
@@ -1215,6 +1210,78 @@ function updateModeHint(mode) {
   const text = MODE_HINTS[mode];
   if (text) { hint.innerHTML = text; hint.classList.remove('hidden'); }
   else       { hint.innerHTML = '';   hint.classList.add('hidden');    }
+}
+
+/* v0.11.8 — Mode picker categorisation.
+ *
+ * Five "Vanilla CS2" modes (no plugins) split out from eleven
+ * "Plugin-enhanced" modes (auto-deployed by Oblivion).  Mirrors the
+ * map picker's optgroup pattern + tint.  Each plugin-enhanced option
+ * gets a ` · pluginName` suffix so the operator knows what's powering
+ * the mode; the two MetaMod modes additionally show `(restart on
+ * switch)` so the operational cost is visible BEFORE picking, not as
+ * a surprise toast after.
+ *
+ * Modes that aren't recognised here fall back to alphabetical order
+ * inside an "Other" group — defensive against the backend adding a
+ * new mode the SPA hasn't been updated to label.  ROADMAP for v0.12
+ * has this moving into the plugin-registry (`drivers/cs2/modes.json`)
+ * so this client-side table goes away. */
+const _MODE_CATEGORY = {
+  // Vanilla CS2 — no managed plugins, gameinfo.gi stays unpatched.
+  'Competitive':    { group: 'Vanilla CS2' },
+  'Casual':         { group: 'Vanilla CS2' },
+  'Wingman':        { group: 'Vanilla CS2' },
+  'Arms Race':      { group: 'Vanilla CS2' },
+  'Demolition':     { group: 'Vanilla CS2' },
+  // Plugin-enhanced — Oblivion auto-deploys the listed plugin on switch.
+  // MetaMod modes get a restart-on-switch warning suffix because that's
+  // the operationally relevant difference (CSS plugins hot-reload).
+  'Practice':       { group: 'Plugin-enhanced', plugin: 'MatchZy' },
+  '3v3':            { group: 'Plugin-enhanced', plugin: 'MatchZy' },
+  '4v4':            { group: 'Plugin-enhanced', plugin: 'MatchZy' },
+  '5v5':            { group: 'Plugin-enhanced', plugin: 'MatchZy' },
+  '1v1':            { group: 'Plugin-enhanced', plugin: 'K4-Arenas' },
+  '2v2':            { group: 'Plugin-enhanced', plugin: 'K4-Arenas' },
+  'Retakes':        { group: 'Plugin-enhanced', plugin: 'B3none' },
+  'Jailbreak':      { group: 'Plugin-enhanced', plugin: 'CSS-Jailbreak' },
+  'Warcraft':       { group: 'Plugin-enhanced', plugin: 'CS2-Warcraft' },
+  'Deathmatch':     { group: 'Plugin-enhanced', plugin: 'MetaMod', restart: true },
+  'Zombie Escape':  { group: 'Plugin-enhanced', plugin: 'MetaMod', restart: true },
+};
+
+function _populateModeSelect(sel, modes, selectedMode) {
+  if (!sel) return;
+  sel.innerHTML = '';
+  // Bucket modes by category, preserving the order in `modes` (backend-defined).
+  const groups = { 'Vanilla CS2': [], 'Plugin-enhanced': [], 'Other': [] };
+  modes.forEach(m => {
+    const meta = _MODE_CATEGORY[m];
+    if (meta) groups[meta.group].push(m);
+    else groups['Other'].push(m);
+  });
+  const addGroup = (label, list) => {
+    if (!list.length) return;
+    const grp = document.createElement('optgroup');
+    grp.label = label;
+    list.forEach(m => {
+      const o = document.createElement('option');
+      o.value = m;
+      const meta = _MODE_CATEGORY[m];
+      let txt = m;
+      if (meta && meta.plugin) {
+        txt += ` · ${meta.plugin}`;
+        if (meta.restart) txt += ' (restart on switch)';
+      }
+      o.textContent = txt;
+      if (m === selectedMode) o.selected = true;
+      grp.appendChild(o);
+    });
+    sel.appendChild(grp);
+  };
+  addGroup('Vanilla CS2',     groups['Vanilla CS2']);
+  addGroup('Plugin-enhanced', groups['Plugin-enhanced']);
+  addGroup('Other',           groups['Other']);    // defensive: future backend modes
 }
 
 /* Single unified map picker: official maps + workshop maps in one <select>, each

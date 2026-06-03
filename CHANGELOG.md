@@ -2,6 +2,47 @@
 
 ---
 
+## v0.11.8 — 2026-06-03 (mode-select category tinting + plugin labels)
+
+Companion to v0.11.7 (map dropdown tinting).  The 16-mode flat
+list now reads as two intentional categories with plugin
+attribution per option.
+
+**Vanilla CS2** (5 modes — no plugins, runs pure Valve):
+- Competitive, Casual, Wingman, Arms Race, Demolition
+- 7% accent tint (strongest — canonical experience)
+
+**Plugin-enhanced** (11 modes — Oblivion auto-deploys the plugin):
+- Practice / 3v3 / 4v4 / 5v5 · MatchZy
+- 1v1 / 2v2 · K4-Arenas
+- Retakes · B3none
+- Jailbreak · CSS-Jailbreak
+- Warcraft · CS2-Warcraft
+- Deathmatch · MetaMod (restart on switch)
+- Zombie Escape · MetaMod (restart on switch)
+- 4% accent tint (medium — Oblivion's added value)
+
+The `· pluginName` suffix mirrors the map picker's recommended-mode
+suffix pattern.  The `(restart on switch)` hint on MetaMod modes
+surfaces the operational cost BEFORE picking, not as a surprise
+toast after.
+
+Framing rationale: avoided "Official" vs "Plugins installed"
+because that demotes the plugin modes (Warcraft / ZE are the
+marquee features) and implies an installation step that doesn't
+exist (Oblivion auto-deploys).  "Vanilla CS2" + "Plugin-enhanced"
+honours both.
+
+Defensive: any backend mode not recognised by the client-side
+`_MODE_CATEGORY` table falls into an "Other" optgroup with plain
+tint, so adding a new mode server-side never breaks the SPA.
+v0.12 plugin-registry refactor will replace this table with
+`drivers/cs2/modes.json` data — see PLAN.md.
+
+180/180 tests still green.  Pure visual + label change.
+
+---
+
 ## v0.11.7 — 2026-06-03 (map-select category tinting)
 
 Small visual hierarchy improvement to the Map picker dropdown.
