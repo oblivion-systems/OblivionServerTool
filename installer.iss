@@ -10,7 +10,7 @@
 ; ─────────────────────────────────────────────────────────────────────────────
 
 #define MyAppName      "Oblivion Server Tool"
-#define MyAppVersion   "0.11.11"
+#define MyAppVersion   "0.11.12"
 #define MyAppPublisher "Oblivion"
 #define MyAppURL       "https://github.com/jacquesvniekerk-eng/OblivionServerTool"
 #define MyAppExeName   "OblivionServerTool.exe"
