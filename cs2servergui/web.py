@@ -2961,6 +2961,27 @@ def create_flask(core: AppCore) -> Flask:
                 tldr.append(("✓", "disk", f"{free_gb:.1f} GB free at config dir"))
         except Exception as exc:
             tldr.append(("·", "disk", f"(could not check: {exc})"))
+        # v0.11.13 — CS2 server log freshness in TL;DR.  Reader can tell
+        # at a glance whether the console.log section is from the CURRENT
+        # session or stale leftovers from days ago.  Saves them from
+        # wasting time reading data that doesn't apply to "now."
+        try:
+            _cs2_log = os.path.join(core._csgo_dir(), "console.log")
+            if os.path.isfile(_cs2_log):
+                _age_s = time.time() - os.path.getmtime(_cs2_log)
+                if   _age_s < 90:     _age = f"{int(_age_s)}s ago"
+                elif _age_s < 3600:   _age = f"{int(_age_s/60)}m ago"
+                elif _age_s < 86400:  _age = f"{_age_s/3600:.1f}h ago"
+                else:                 _age = f"{_age_s/86400:.1f} days ago"
+                if _age_s > 3600:
+                    tldr.append(("⚠", "cs2_log",
+                                 f"{_age} — NOT current session (read context carefully)"))
+                else:
+                    tldr.append(("✓", "cs2_log", f"current session ({_age})"))
+            else:
+                tldr.append(("·", "cs2_log", "(no console.log — server never started or -condebug missing)"))
+        except Exception:
+            tldr.append(("·", "cs2_log", "(could not check)"))
         # Recent log error count (last 50 lines)
         _log_lines = core.get_log() or []
         _recent = _log_lines[-50:]
@@ -3257,13 +3278,41 @@ def create_flask(core: AppCore) -> Flask:
         # ─── v0.11.9 — CS2 server console.log tail ─────────────────────────
         # The #1 most useful artifact when the *server* (not the tool) is
         # the problem.  Started via `-condebug`; sits at <csgo>/console.log.
-        hr("CS2 console.log (last 200 lines)")
+        #
+        # v0.11.13: human-readable age in the header ("2.6 days ago") so
+        # the reader knows immediately whether this is current-session
+        # data or last-week's leftovers.  Frame-drop warnings now also
+        # match _csgo_err_re for `>` flagging — they're noise on a healthy
+        # server but they're the signal under load (Warcraft v0.9.2.1
+        # dispatcher fix territory).
+        hr("CS2 console.log (last 200 lines, anomalies + frame-drops prefixed `>`)")
         try:
             csgo_log = os.path.join(core._csgo_dir(), "console.log")
             if os.path.isfile(csgo_log):
-                sz = os.path.getsize(csgo_log)
-                mt = datetime.datetime.fromtimestamp(os.path.getmtime(csgo_log))
-                kv("source",   f"{csgo_log} ({sz / 1024:.1f} KB, mtime {mt.strftime('%H:%M:%S')})")
+                sz   = os.path.getsize(csgo_log)
+                mtss = os.path.getmtime(csgo_log)
+                mt   = datetime.datetime.fromtimestamp(mtss)
+                # Friendly age string — load is days/hours/minutes ago
+                age_s = max(0, time.time() - mtss)
+                if   age_s < 90:           age_str = f"{int(age_s)}s ago"
+                elif age_s < 3600:         age_str = f"{int(age_s/60)}m ago"
+                elif age_s < 86400:        age_str = f"{age_s/3600:.1f}h ago"
+                else:                      age_str = f"{age_s/86400:.1f} days ago"
+                staleness_hint = ""
+                if age_s > 3600:           # older than an hour
+                    staleness_hint = "  ⚠ NOT current session"
+                kv("source",
+                   f"{csgo_log} ({sz / 1024:.1f} KB, "
+                   f"mtime {mt.strftime('%Y-%m-%d %H:%M:%S')} — {age_str}{staleness_hint})")
+                # CS2-specific anomaly regex extends the app-log one with
+                # the frame-drop pattern.  Counted separately for the TL;DR
+                # surface line below.
+                _csgo_err_re = re.compile(
+                    _err_re.pattern + r"|UNEXPECTED LONG FRAME|"
+                    r"Cannot find map|host_workshop_map.*not found|"
+                    r"matchzy_loadmatch",
+                    re.IGNORECASE
+                )
                 # Tail efficiently — read last 64 KB then take last 200 lines
                 with open(csgo_log, "rb") as f:
                     if sz > 64 * 1024:
@@ -3274,10 +3323,16 @@ def create_flask(core: AppCore) -> Flask:
                 if not tail_lines:
                     lines.append("  (file present but empty)")
                 else:
+                    # Surface count of frame-drop warnings near the top
+                    _frame_drops = sum(1 for ln in tail_lines
+                                       if "UNEXPECTED LONG FRAME" in ln)
+                    if _frame_drops > 0:
+                        kv("frame_drop_warnings",
+                           f"{_frame_drops} 'UNEXPECTED LONG FRAME' "
+                           f"line(s) in last 200")
                     lines.append("")
-                    # v0.11.10: same anomaly-prefix treatment as the app log
                     for ln in tail_lines:
-                        prefix = "> " if _err_re.search(ln) else "  "
+                        prefix = "> " if _csgo_err_re.search(ln) else "  "
                         lines.append(f"{prefix}{ln}")
             else:
                 kv("source", f"{csgo_log} (NOT PRESENT)")
