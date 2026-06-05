@@ -2266,6 +2266,20 @@ let _vetoLocalRoster = [];   // unsaved roster edits before Distribute commits
 // tapped with a detached node.  Cleared in the click handler's `finally`.
 let _vetoBoardClickInFlight = false;
 
+// v0.11.23 — every veto mutation endpoint returns the fresh snapshot.
+// Apply it directly so the clicker sees instant feedback without
+// waiting for the SSE event to arrive (which, on LAN, often arrives
+// AFTER the API response — making click-driven UI feel laggy or
+// "stuck until tab refresh"). Other connected clients still rely on
+// SSE; this helper only ensures the LOCAL clicker is always in sync.
+function _vetoApply(snap) {
+  if (snap && typeof snap === 'object' && snap.state) {
+    _vetoState = snap;
+    if (currentPage === 'veto') _renderVeto();
+  }
+  return snap;
+}
+
 // ── Animation bookkeeping (Day 5) ────────────────────────────────────────
 // All three are reset when the session goes back to `idle` (operator hit
 // Reset, or a fresh tab open) so a new session gets a fresh round of
@@ -2321,7 +2335,7 @@ pages['veto'] = function() {
   el('veto-spectator-btn').addEventListener('click', _vetoOpenSpectatorModal);
   el('veto-reset-btn').addEventListener('click', async () => {
     if (!confirm('Reset the active veto session? All roster and progress will be lost.')) return;
-    try { await api.veto.reset(); toast('Session reset'); }
+    try { _vetoApply(await api.veto.reset()); toast('Session reset'); }
     catch (e) { toast(e.message, 'var(--bad)'); }
   });
 
@@ -2467,7 +2481,7 @@ function _renderVetoIdle(root) {
     });
   });
   el('veto-create-btn').addEventListener('click', async () => {
-    try { await api.veto.create(_vetoCreateMode); toast('Session created'); }
+    try { _vetoApply(await api.veto.create(_vetoCreateMode)); toast('Session created'); }
     catch (e) { toast(e.message, 'var(--bad)'); }
   });
 }
@@ -2740,11 +2754,11 @@ function _renderVetoRoster(root, sess) {
   const saveBtn = el('veto-roster-save');
   if (saveBtn) saveBtn.addEventListener('click', async () => {
     try {
-      await api.veto.roster(
+      _vetoApply(await api.veto.roster(
         el('veto-team-a-name').value,
         el('veto-team-b-name').value,
         _vetoLocalRoster,
-      );
+      ));
       toast('Roster saved');
       // Reveal Distribute button (kept as a separate click so the operator
       // can review the saved roster before the random split)
@@ -2753,7 +2767,7 @@ function _renderVetoRoster(root, sess) {
     } catch (e) { toast(e.message, 'var(--bad)'); }
   });
   el('veto-distribute-btn').addEventListener('click', async () => {
-    try { await api.veto.distribute(); toast('Teams distributed'); }
+    try { _vetoApply(await api.veto.distribute()); toast('Teams distributed'); }
     catch (e) { toast(e.message, 'var(--bad)'); }
   });
 }
@@ -3296,11 +3310,11 @@ function _renderVetoTeams(root, sess) {
     </div>
   `;
   el('veto-reshuffle-btn').addEventListener('click', async () => {
-    try { await api.veto.distribute(); toast('Re-shuffled'); }
+    try { _vetoApply(await api.veto.distribute()); toast('Re-shuffled'); }
     catch (e) { toast(e.message, 'var(--bad)'); }
   });
   el('veto-to-vote-btn').addEventListener('click', async () => {
-    try { await api.veto.startVoting(); }
+    try { _vetoApply(await api.veto.startVoting()); }
     catch (e) { toast(e.message, 'var(--bad)'); }
   });
 }
@@ -3350,13 +3364,13 @@ function _renderVetoVoting(root, sess) {
       const t = e.target.dataset.team;
       const vi = parseInt(e.target.dataset.vi, 10);
       const ti = parseInt(e.target.dataset.ti, 10);
-      try { await api.veto.vote(t, vi, ti); }
+      try { _vetoApply(await api.veto.vote(t, vi, ti)); }
       catch (err) { toast(err.message, 'var(--bad)'); }
     });
   });
   el('veto-resolve-btn').addEventListener('click', async () => {
     try {
-      const r = await api.veto.resolve();
+      const r = _vetoApply(await api.veto.resolve());
       if (r.outcome === 'elected') toast('Captains elected');
       else toast(`Tie — ${r.outcome} (revote required)`, 'var(--accent)');
     } catch (e) { toast(e.message, 'var(--bad)'); }
@@ -3583,26 +3597,13 @@ function _renderVetoBoard(root, sess) {
       const mapId = c.dataset.map;
       const team  = step?.team;
       if (!team) { _vetoBoardClickInFlight = false; return; }
-      let snap = null;
       try {
-        // v0.11.21 — capture the response.  The endpoint returns the
-        // fresh snapshot AFTER perform_step; we stuff it into _vetoState
-        // directly so the finally-block render is guaranteed to show
-        // the new ban even if the parallel SSE event hasn't arrived at
-        // this client yet.  Previously we relied on SSE timing — when
-        // the API responded faster than SSE (common on LAN), the
-        // finally render used the stale pre-ban snapshot, the card
-        // returned to its non-pending non-banned visual state, and the
-        // user saw the pending-flash but no ban stamp.
-        snap = await api.veto.step(team, mapId);
+        _vetoApply(await api.veto.step(team, mapId));
       } catch (e) {
         toast(e.message, 'var(--bad)');
       } finally {
         _vetoBoardClickInFlight = false;
-        if (snap && typeof snap === 'object' && snap.state) {
-          _vetoState = snap;
-        }
-        _renderVeto();
+        _renderVeto();  // belt-and-braces — _vetoApply already rendered, but ensures we render even on the error path
       }
     });
   });
@@ -3750,7 +3751,7 @@ function _renderVetoFinale(root, sess) {
       const team = idx === 0 ? 'A' : 'B';
       const currently = (team === 'A') ? readyA : readyB;
       try {
-        await api.veto.ready(!currently, team);
+        _vetoApply(await api.veto.ready(!currently, team));
         toast(`${team === 'A' ? sess.team_a_name : sess.team_b_name}: ${currently ? 'un-readied' : 'READY'} (by admin)`);
       } catch (err) { toast(err.message, 'var(--bad)'); }
     });
@@ -3846,7 +3847,7 @@ function _renderVetoFinaleCaptain(root, sess) {
     const sNow      = _vetoState && _vetoState.session ? _vetoState.session : sess;
     const myReadyNow = myTeam === 'A' ? !!sNow.ready_a : !!sNow.ready_b;
     try {
-      await api.veto.ready(!myReadyNow);
+      _vetoApply(await api.veto.ready(!myReadyNow));
       toast(myReadyNow ? 'Un-readied' : 'Ready! Waiting for opponent / operator.');
     } catch (err) { toast(err.message, 'var(--bad)'); }
   });
@@ -3913,12 +3914,12 @@ function _renderVetoComplete(root, sess) {
   if (!isCap) {
     el('veto-rematch-btn').addEventListener('click', async () => {
       try {
-        await api.veto.rematch();
+        _vetoApply(await api.veto.rematch());
         toast('Rematch — same teams, fresh BO. Click "Generate captain links" to mint new tokens.', 'var(--accent)');
       } catch (e) { toast(e.message, 'var(--bad)'); }
     });
     el('veto-new-btn').addEventListener('click', async () => {
-      try { await api.veto.reset(); toast('Ready for a new session'); }
+      try { _vetoApply(await api.veto.reset()); toast('Ready for a new session'); }
       catch (e) { toast(e.message, 'var(--bad)'); }
     });
   }
