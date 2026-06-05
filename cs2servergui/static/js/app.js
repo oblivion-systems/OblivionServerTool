@@ -3583,16 +3583,25 @@ function _renderVetoBoard(root, sess) {
       const mapId = c.dataset.map;
       const team  = step?.team;
       if (!team) { _vetoBoardClickInFlight = false; return; }
+      let snap = null;
       try {
-        await api.veto.step(team, mapId);
+        // v0.11.21 — capture the response.  The endpoint returns the
+        // fresh snapshot AFTER perform_step; we stuff it into _vetoState
+        // directly so the finally-block render is guaranteed to show
+        // the new ban even if the parallel SSE event hasn't arrived at
+        // this client yet.  Previously we relied on SSE timing — when
+        // the API responded faster than SSE (common on LAN), the
+        // finally render used the stale pre-ban snapshot, the card
+        // returned to its non-pending non-banned visual state, and the
+        // user saw the pending-flash but no ban stamp.
+        snap = await api.veto.step(team, mapId);
       } catch (e) {
         toast(e.message, 'var(--bad)');
       } finally {
         _vetoBoardClickInFlight = false;
-        // SSE event for the successful step has likely already arrived
-        // and been queued behind the suppression — kick a render now so
-        // the new state lands immediately rather than waiting for the
-        // next SSE ping.
+        if (snap && typeof snap === 'object' && snap.state) {
+          _vetoState = snap;
+        }
         _renderVeto();
       }
     });
