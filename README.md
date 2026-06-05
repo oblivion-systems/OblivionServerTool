@@ -3,10 +3,16 @@
 A desktop application for managing a **Counter-Strike 2 dedicated server** on Windows.  
 Built with Python + Flask + pywebview (Edge WebView2). Ships as a single `.exe` with an optional installer.
 
-> **Status: v0.11.14 (released 2026-06-03).**  Fourteen releases shipped
-> in one day pushing the v0.11.x line to maturity.
+> **Status: v0.11.15 (released 2026-06-04).**  Fifteen releases shipped
+> pushing the v0.11.x line to maturity.
 >
 > **What's new since v0.11.0**:
+> - **Default voice channel for one-click roster pull** *(v0.11.15)* —
+>   configure your tournament's regular VC once → Veto roster's "🎤 Pull
+>   from voice channel" becomes one click instead of pick-from-modal.
+>   Picker still available as fallback (shift+click) and for first-run
+>   guilds.  Diagnostic snapshot now shows "default VC: #foo (8
+>   connected)" so triage is one snapshot, not a live check.
 > - **Host + Play perf scripts** *(v0.11.14)* — `scripts/gaming-mode.ps1`
 >   + desktop shortcuts solve the "alt-tab lag spike when I host AND
 >   play CS2 on the same PC" problem.  Pins server / client to separate
@@ -31,7 +37,7 @@ Built with Python + Flask + pywebview (Edge WebView2). Ships as a single `.exe` 
 >   switch)` hint for MetaMod modes.
 > - **Map dropdown category tinting** *(v0.11.7)* — Official / Workshop
 >   Recommended / Workshop Other split with accent tint per category.
-> - **Status-bar version pill** *(v0.11.6)* — `v0.11.14` always visible
+> - **Status-bar version pill** *(v0.11.6)* — `v0.11.15` always visible
 >   bottom-right; no more "what version am I running?"
 > - **Version on /api/ping** *(v0.11.5)* — unauthenticated `curl
 >   localhost:5050/api/ping` returns `{version, build}` for fast remote

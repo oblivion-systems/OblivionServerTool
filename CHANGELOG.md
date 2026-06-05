@@ -2,6 +2,58 @@
 
 ---
 
+## v0.11.15 — 2026-06-04 (default voice channel for one-click roster pull)
+
+Recurring-tournament UX polish.  When you run the same event every Friday
+in the same Discord, configuring a default voice channel turns the Veto
+roster's "🎤 Pull from voice channel" button into a **one-click** action
+that pulls members from that VC directly — no picker, no extra clicks.
+
+The picker isn't gone; it's just demoted to fallback.  Shift+click on the
+roster button forces the picker for tonight-only overrides (overflow VC,
+testing in a different guild, etc.).  If the configured VC is empty or
+unreachable, the picker auto-opens with a toast hint.
+
+### New
+* **Default Voice Channel ID** field in Config → Discord card.  Optional
+  — blank keeps the original picker-each-session behaviour.  Includes a
+  🔍 Browse button that reuses the existing voice-channel modal in
+  "pick-only" mode to stamp an ID into the field without leaving the
+  Config tab.
+* **Live preview** under the field showing the configured VC's name +
+  current connected count ("Default VC: **#Pre-Match Lobby** — 8
+  connected").  Refreshes on save.
+* **Diagnostic snapshot** Discord block now reports `voice_channel_id`,
+  `voice_channel_name`, and `voice_channel_count` so "is the bot seeing
+  my VC?" is a one-snapshot answer.
+* New API endpoint `/api/discord/voice_channel_info` — lightweight
+  single-VC info lookup (name + live member_count) without enumerating
+  the entire guild.  Used by the live preview + the snapshot.
+* New discord_bot helper `bot_voice_channel_info(guild_id, channel_id)`.
+
+### Changed
+* Veto roster "🎤 Pull from voice channel" button now honours the
+  configured default VC when set: one-click direct pull from that VC,
+  toast shows the count + VC name.  Shift+click forces the picker
+  regardless.  No default configured → original picker behaviour.
+* `_vetoOpenDiscordPullModal` accepts `{pickOnly, onPick}` opts so the
+  Config-card 🔍 Browse button reuses the same modal shell.
+
+### Tests
+* `voice_channel_info`: 400 without any channel ID
+* `voice_channel_info`: 400 without guild ID
+* `voice_channel_info`: 503 when bot not connected (extends voice_* 503 test)
+* `discord_voice_channel_id`: round-trips through `/api/config` (local)
+* `discord_voice_channel_id`: remote write rejected (local-only gate)
+
+### Migration
+
+No action required.  The new field defaults to empty → existing behaviour
+preserved.  Operators who want the one-click flow: Config → Discord →
+"Default Voice Channel ID" → 🔍 Browse → pick the lobby → Save.
+
+---
+
 ## v0.11.14 — 2026-06-03 (host-and-play perf tooling)
 
 **Standalone scripts for the "I host the server AND play CS2 on the

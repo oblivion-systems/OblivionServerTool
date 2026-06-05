@@ -114,6 +114,12 @@ const api = (() => {
     discord: {
       voiceChannels: ()           => get('/api/discord/voice_channels'),
       voiceMembers:  (channelId)  => get(`/api/discord/voice_members?channel_id=${encodeURIComponent(channelId)}`),
+      // v0.11.15 — single-VC live info (id, name, member_count).  Optional
+      // channelId; omit to use the configured discord_voice_channel_id.
+      voiceChannelInfo: (channelId) => get(
+        '/api/discord/voice_channel_info' +
+        (channelId ? `?channel_id=${encodeURIComponent(channelId)}` : '')
+      ),
       // v0.11.0 polish — connection-check helpers
       testEmbed:     (channelId)  => post('/api/discord/test_embed',
                                           channelId ? { channel_id: channelId } : {}),
