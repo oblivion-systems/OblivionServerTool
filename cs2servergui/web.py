@@ -862,6 +862,8 @@ def create_flask(core: AppCore) -> Flask:
             "discord_bot_token":            core.discord_bot_token if is_local else ("***" if core.discord_bot_token else ""),
             "discord_guild_id":             core.discord_guild_id,
             "discord_veto_channel_id":      core.discord_veto_channel_id,
+            # v0.11.15 — default VC for one-click roster pull
+            "discord_voice_channel_id":     core.discord_voice_channel_id,
             "admin_pin":             core.admin_pin     if is_local else "***",
             "guest_pin":             core.guest_pin     if is_local else "***",
             "rcon_password":         core.rcon_password  if is_local else "***",
@@ -939,6 +941,12 @@ def create_flask(core: AppCore) -> Flask:
             core.discord_guild_id = str(d["discord_guild_id"]).strip()
         if is_local and "discord_veto_channel_id" in d:
             core.discord_veto_channel_id = str(d["discord_veto_channel_id"]).strip()
+        # v0.11.15 — default voice channel for one-click roster pull.
+        # Not a secret (anyone in the guild can see channel IDs), but the
+        # write is local-only for consistency with the other Discord fields.
+        # Bot looks it up per-call so no restart needed on change.
+        if is_local and "discord_voice_channel_id" in d:
+            core.discord_voice_channel_id = str(d["discord_voice_channel_id"]).strip()
         # v0.10.2 — Discord webhook URL: local-only write (it's a secret-ish
         # URL).  Mask-aware so a remote admin's accidental round-trip of
         # "***" doesn't blank the real value.
@@ -1943,6 +1951,41 @@ def create_flask(core: AppCore) -> Flask:
                          "and that the guild ID matches."
             }), 502
         return jsonify({"channels": channels})
+
+    # v0.11.15 — Single-VC info lookup (id, name, live member_count).
+    # Used by the Discord Config card to show "configured default VC: #foo
+    # (N connected)" without enumerating the entire guild, and by the Veto
+    # roster modal to label the one-click pull button with the live count.
+    # Query string: channel_id (optional — falls back to configured
+    # discord_voice_channel_id; useful for the Config-card live preview).
+    @app.route("/api/discord/voice_channel_info")
+    @require_auth
+    def discord_voice_channel_info():
+        cid = (request.args.get("channel_id") or
+               core.discord_voice_channel_id or "").strip()
+        if not cid:
+            return jsonify({
+                "error": "No channel ID — pass channel_id or configure "
+                         "discord_voice_channel_id."
+            }), 400
+        if not core.discord_guild_id:
+            return jsonify({
+                "error": "Discord guild ID not configured — set it in Config → Discord."
+            }), 400
+        try:
+            from . import discord_bot
+        except Exception as exc:
+            return jsonify({"error": f"bot module unavailable: {exc}"}), 503
+        if not discord_bot.bot_status().get("connected"):
+            return jsonify({"error": "Discord bot is not connected"}), 503
+        info = discord_bot.bot_voice_channel_info(core.discord_guild_id, cid)
+        if info is None:
+            return jsonify({
+                "error": "Could not read that voice channel — verify the ID is "
+                         "correct, the bot has View Channels permission, and "
+                         "the channel still exists."
+            }), 502
+        return jsonify({"channel": info})
 
     @app.route("/api/discord/test_embed", methods=["POST"])
     @require_auth
@@ -3080,6 +3123,29 @@ def create_flask(core: AppCore) -> Flask:
             kv("token_configured", True)
             kv("guild_id",         getattr(core, "discord_guild_id", "") or "(not set)")
             kv("veto_channel_id",  getattr(core, "discord_veto_channel_id", "") or "(not set)")
+            # v0.11.15 — default voice channel for one-click roster pull.
+            # Show the configured ID + live member count when the bot can
+            # resolve it; "(not set)" when unconfigured (roster modal will
+            # fall back to the picker).  member_count == "N/A" means the bot
+            # couldn't reach the channel (gone, perms changed, bot offline).
+            _vc_id = getattr(core, "discord_voice_channel_id", "")
+            kv("voice_channel_id", _vc_id or "(not set — roster pull uses picker)")
+            if _vc_id and getattr(core, "discord_guild_id", ""):
+                try:
+                    from . import discord_bot as _dbot
+                    if _dbot.bot_status().get("connected"):
+                        _info = _dbot.bot_voice_channel_info(
+                            core.discord_guild_id, _vc_id, timeout=3.0
+                        )
+                        if _info:
+                            kv("voice_channel_name",  _info.get("name", "?"))
+                            kv("voice_channel_count", f"{_info.get('member_count', 0)} connected")
+                        else:
+                            kv("voice_channel_name",  "(bot cannot resolve — check ID/perms)")
+                    else:
+                        kv("voice_channel_name", "(bot not connected — count unavailable)")
+                except Exception as exc:
+                    kv("voice_channel_name", f"(lookup failed: {exc})")
             try:
                 from . import discord_bot as _dbot
                 status = _dbot.bot_status()

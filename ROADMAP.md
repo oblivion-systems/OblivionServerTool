@@ -7,11 +7,11 @@
 
 ---
 
-## Where We Are — v0.11.14 (released 2026-06-03)
+## Where We Are — v0.11.15 (released 2026-06-04)
 
-**Fourteen releases in one day** pushed the v0.11.x line from "polish
-sweep" to "Friday-ready triage + perf tooling complete."  Highlights
-since v0.11.0:
+**Fifteen releases** pushed the v0.11.x line from "polish sweep" to
+"Friday-ready triage + perf tooling complete + recurring-tournament
+UX nailed."  Highlights since v0.11.0:
 
 | Release | Theme |
 |---|---|
@@ -29,8 +29,9 @@ since v0.11.0:
 | v0.11.12 | Plugin-verifier false positive on stale manifest |
 | v0.11.13 | CS2 console.log freshness in TL;DR + frame-drop flagging |
 | v0.11.14 | Host + Play perf scripts (alt-tab anti-lag toolkit) |
+| v0.11.15 | Default voice channel — one-click roster pull for recurring tournaments |
 
-**183/183 backend tests green** across all releases.
+**187/187 backend tests green** across all releases.
 
 Full prose in [CHANGELOG.md](CHANGELOG.md).
 

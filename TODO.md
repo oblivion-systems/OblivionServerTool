@@ -21,11 +21,12 @@
 | 4 | Test & release engineering | 🟢 mostly done (smoke battery 161/161; build pipeline + signing still open) |
 | 5 | Polish & 1.0 launch | 🟡 in flight (mobile + role pill + capabilities done; final docs + 1.0 ship pending) |
 
-**Current release:** v0.11.14 (2026-06-03) — **183/183 tests green**.
-Fourteen releases in one day; v0.11.x is now Friday-ready.  Diagnostic
-snapshot mechanism validated end-to-end via real Way-3 paste cycle.
-Host + Play perf scripts solve the alt-tab lag spike for operators
-running server + client on the same PC.
+**Current release:** v0.11.15 (2026-06-04) — **187/187 tests green**.
+Fifteen releases; v0.11.x is Friday-ready with recurring-tournament UX
+nailed.  Diagnostic snapshot mechanism validated end-to-end via real
+Way-3 paste cycle.  Host + Play perf scripts solve the alt-tab lag
+spike.  v0.11.15 adds the default-VC field so the "Pull from voice
+channel" roster button becomes one click instead of pick-from-modal.
 
 The path to v1.0 is now:
 1. Run Friday's session, collect real-user feedback

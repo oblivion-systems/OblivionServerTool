@@ -962,9 +962,82 @@ def t_discord_endpoints_503_when_bot_not_connected():
     ac.discord_guild_id = '123456789012345678'
     r1 = c.get('/api/discord/voice_channels')
     r2 = c.get('/api/discord/voice_members?channel_id=234567890123456789')
-    return (r1.status_code == 503 and r2.status_code == 503), \
-           f'voice_channels={r1.status_code} voice_members={r2.status_code}'
+    r3 = c.get('/api/discord/voice_channel_info?channel_id=234567890123456789')
+    return (r1.status_code == 503 and r2.status_code == 503
+            and r3.status_code == 503), \
+           f'voice_channels={r1.status_code} voice_members={r2.status_code} info={r3.status_code}'
 t('/api/discord/voice_*: 503 when bot not connected', t_discord_endpoints_503_when_bot_not_connected)
+
+
+def t_discord_voice_channel_info_400_without_any_id():
+    """v0.11.15: /api/discord/voice_channel_info returns 400 when no
+    channel_id is passed AND no discord_voice_channel_id is configured."""
+    ac, app, c = _new_app()
+    _login(c)
+    ac.discord_guild_id          = '123456789012345678'
+    ac.discord_voice_channel_id  = ''       # explicit empty
+    r = c.get('/api/discord/voice_channel_info')   # no channel_id arg
+    body = r.get_json() or {}
+    return (r.status_code == 400
+            and 'channel id' in body.get('error', '').lower()), \
+           f'status={r.status_code} body={body}'
+t('/api/discord/voice_channel_info: 400 without any channel ID', t_discord_voice_channel_info_400_without_any_id)
+
+
+def t_discord_voice_channel_info_400_without_guild():
+    """v0.11.15: same endpoint returns 400 when channel_id IS given but
+    guild_id is missing — same UX as voice_channels."""
+    ac, app, c = _new_app()
+    _login(c)
+    ac.discord_guild_id = ''       # explicit empty
+    r = c.get('/api/discord/voice_channel_info?channel_id=345678901234567890')
+    body = r.get_json() or {}
+    return (r.status_code == 400
+            and 'guild' in body.get('error', '').lower()), \
+           f'status={r.status_code} body={body}'
+t('/api/discord/voice_channel_info: 400 without guild ID', t_discord_voice_channel_info_400_without_guild)
+
+
+def t_discord_voice_channel_id_round_trips_through_config():
+    """v0.11.15: discord_voice_channel_id is a local-only field (consistent
+    with the other Discord settings).  Confirms POST + GET round-trip when
+    the caller is local, and that the GET reflects the configured value."""
+    ac, app, c = _new_app()
+    _login(c)
+    # Forge the test session as local — same pattern the snapshot tests use.
+    from cs2servergui import web as _web
+    for tok in list(_web._sessions.keys()):
+        _web._sessions[tok]['is_local'] = True
+    # Set via POST
+    r = c.post('/api/config', json={'discord_voice_channel_id': '345678901234567890'})
+    if r.status_code != 200:
+        return False, f'POST status={r.status_code} body={r.get_json()}'
+    # Verify on the core object
+    if ac.discord_voice_channel_id != '345678901234567890':
+        return False, f'core attr={ac.discord_voice_channel_id!r}'
+    # And on the GET round-trip
+    r2 = c.get('/api/config')
+    body = r2.get_json() or {}
+    return body.get('discord_voice_channel_id') == '345678901234567890', \
+           f'GET returned {body.get("discord_voice_channel_id")!r}'
+t('config: discord_voice_channel_id round-trips through /api/config', t_discord_voice_channel_id_round_trips_through_config)
+
+
+def t_discord_voice_channel_id_remote_write_rejected():
+    """v0.11.15: a remote (non-local) caller must NOT be able to set
+    discord_voice_channel_id — the gate is `if is_local and ...`.  The
+    field stays at whatever the core already had."""
+    ac, app, c = _new_app()
+    ac.discord_voice_channel_id = 'untouched'
+    _login(c)
+    # default _login session is NOT local (PIN login from a non-loopback IP)
+    r = c.post('/api/config', json={'discord_voice_channel_id': '345678901234567890'})
+    # The endpoint returns 200 because OTHER non-local-gated fields may have
+    # processed successfully.  What matters is that the gated field is unchanged.
+    return (r.status_code == 200
+            and ac.discord_voice_channel_id == 'untouched'), \
+           f'status={r.status_code} core attr={ac.discord_voice_channel_id!r}'
+t('config: remote write to discord_voice_channel_id is rejected (local-only)', t_discord_voice_channel_id_remote_write_rejected)
 
 
 def t_finale_mode_precheck_rejects_non_matchzy_mode():

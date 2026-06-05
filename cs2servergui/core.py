@@ -516,11 +516,18 @@ class AppCore:
         #   discord_guild_id   — operator's Discord server ID (numeric)
         #   discord_veto_channel_id — channel where live veto embeds are posted
         #                              (Layer 1C); blank = no live embed
+        #   discord_voice_channel_id — v0.11.15 — default VC for "Pull from
+        #                              voice channel" roster import.  When
+        #                              set, the roster modal pulls members
+        #                              from THIS VC directly (one-click);
+        #                              when blank, the picker modal opens
+        #                              and the operator chooses each session.
         # The bot lifecycle is owned by cs2servergui/discord_bot.py — see
         # the prose there for the asyncio-on-thread architecture.
         self.discord_bot_token:           str = ""
         self.discord_guild_id:            str = ""
         self.discord_veto_channel_id:     str = ""
+        self.discord_voice_channel_id:    str = ""
 
         # Runtime state
         self.public_ip:           str                      = ""
@@ -719,6 +726,8 @@ class AppCore:
         self.discord_bot_token           = cfg.get("discord_bot_token", "")
         self.discord_guild_id            = cfg.get("discord_guild_id", "")
         self.discord_veto_channel_id     = cfg.get("discord_veto_channel_id", "")
+        # v0.11.15 — default voice channel for one-click roster pull
+        self.discord_voice_channel_id    = cfg.get("discord_voice_channel_id", "")
 
         # Workshop command-filter detection results + manual overrides (wid → bool).
         self._cmdfilter_auto       = dict(cfg.get("cmdfilter_auto", {}))
@@ -817,6 +826,8 @@ class AppCore:
                 "discord_bot_token":             self.discord_bot_token,
                 "discord_guild_id":              self.discord_guild_id,
                 "discord_veto_channel_id":       self.discord_veto_channel_id,
+                # v0.11.15 — default VC for one-click roster pull
+                "discord_voice_channel_id":      self.discord_voice_channel_id,
             }
             # Atomic write: serialize via _config_save_lock so concurrent
             # save_config calls don't interleave (Flask is threaded), and use

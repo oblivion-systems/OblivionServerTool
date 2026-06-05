@@ -24,7 +24,8 @@ discord.py is async-first; the Flask app is threaded.  Bridging:
   * One dedicated background thread owns the discord asyncio event loop
     (`_BotRunner`).  Started by `start_bot(core)` when a token exists.
   * Flask-side code communicates with the loop via thread-safe wrappers
-    (`bot_dm_user`, `bot_voice_members`, `bot_post_embed`, `bot_edit_embed`).
+    (`bot_dm_user`, `bot_voice_members`, `bot_voice_channel_info`,
+    `bot_post_embed`, `bot_edit_embed`).
     Each wrapper schedules a coroutine on the bot's loop via
     `asyncio.run_coroutine_threadsafe` and waits for the result with a
     timeout.
@@ -352,6 +353,44 @@ def bot_voice_channels(guild_id: str, *, timeout: float = 8.0) -> list[dict] | N
         return fut.result(timeout=timeout)
     except Exception as exc:
         _log.info("bot_voice_channels(%s) failed: %s", guild_id, exc)
+        return None
+
+
+def bot_voice_channel_info(guild_id: str, channel_id: str, *,
+                           timeout: float = 8.0) -> dict | None:
+    """v0.11.15 — Return {id, name, member_count} for a single VC.
+
+    Lightweight helper used by the diagnostic snapshot and the Config card's
+    "default voice channel" preview, so the operator can see the configured
+    VC's live member count without populating the full picker list (which
+    requires enumerating every VC in the guild).  Returns None on any
+    failure (bot not running, guild/channel not found, not a voice channel,
+    fetch error).
+    """
+    if _runner is None or not _runner.ready.is_set():
+        return None
+    try:
+        gid = int(str(guild_id).strip())
+        cid = int(str(channel_id).strip())
+    except (TypeError, ValueError):
+        return None
+    async def _do():
+        guild = _runner.bot.get_guild(gid)
+        if guild is None:
+            guild = await _runner.bot.fetch_guild(gid)
+        channel = guild.get_channel(cid)
+        if channel is None or not isinstance(channel, discord.VoiceChannel):
+            return None
+        return {
+            "id":           str(channel.id),
+            "name":         channel.name,
+            "member_count": len(channel.members),
+        }
+    try:
+        fut = _runner.submit(_do())
+        return fut.result(timeout=timeout)
+    except Exception as exc:
+        _log.info("bot_voice_channel_info(%s/%s) failed: %s", guild_id, channel_id, exc)
         return None
 
 

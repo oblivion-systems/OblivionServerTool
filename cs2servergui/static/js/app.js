@@ -2510,7 +2510,7 @@ function _renderVetoRoster(root, sess) {
           <option value="">— Load preset —</option>
         </select>
         <button class="btn btn-ghost" id="veto-roster-discord"
-                title="Pull a voice channel's connected members into the roster (auto-fills name + Discord ID)">
+                title="Pull connected members from your default voice channel (configure in Config → Discord).  Shift+click to pick a different channel.">
           🎤 Pull from voice channel
         </button>
         <div class="spacer"></div>
@@ -2672,8 +2672,16 @@ function _renderVetoRoster(root, sess) {
   // connected counts); operator picks one + the modal fetches the members
   // and overwrites _vetoLocalRoster with their {display_name, discord_id}
   // pairs.  SteamIDs still typed by hand (Discord doesn't expose them).
-  el('veto-roster-discord').addEventListener('click', async () => {
-    await _vetoOpenDiscordPullModal();
+  //
+  // v0.11.15: If a default voice channel is configured
+  // (discord_voice_channel_id), this becomes ONE CLICK — we pull directly
+  // from that VC.  The picker only opens as a fallback (no default set,
+  // or the configured channel is unreachable).  Shift-click forces the
+  // picker regardless ("I want to use a different VC tonight").
+  el('veto-roster-discord').addEventListener('click', async (ev) => {
+    const forcePicker = ev.shiftKey === true;
+    if (forcePicker) { await _vetoOpenDiscordPullModal(); return; }
+    await _vetoPullFromConfiguredVoiceOrPicker();
   });
   const saveBtn = el('veto-roster-save');
   if (saveBtn) saveBtn.addEventListener('click', async () => {
@@ -2696,18 +2704,113 @@ function _renderVetoRoster(root, sess) {
   });
 }
 
+/* ── v0.11.15 — One-click roster pull from configured default VC ─────── */
+//
+// Tournament-night happy path: operator has configured discord_voice_channel_id
+// once.  This function pulls members directly from it — no picker, no extra
+// click.  Falls back to the picker modal in any failure case (no VC
+// configured, channel unreachable, 0 members, fetch error) so the operator
+// is never stuck.  Shift-click on the roster button bypasses this entirely
+// and goes straight to the picker for tonight-only overrides.
+async function _vetoPullFromConfiguredVoiceOrPicker() {
+  let info;
+  try {
+    const r = await api.discord.voiceChannelInfo();   // no arg → server uses configured ID
+    info = r.channel;
+  } catch (e) {
+    // 400 "No channel ID" → no default set, fall back to picker silently
+    // anything else → fall back to picker with a toast hint
+    const msg = e.message || '';
+    if (!/No channel ID/i.test(msg)) {
+      toast(`Default VC unreachable — opening picker (${msg})`, 'var(--accent)');
+    }
+    await _vetoOpenDiscordPullModal();
+    return;
+  }
+  if (!info || !info.id) { await _vetoOpenDiscordPullModal(); return; }
+  // 0 members → fall back to picker so the operator can pick a different VC
+  if (!info.member_count) {
+    toast(`#${info.name} is empty — opening picker`, 'var(--accent)');
+    await _vetoOpenDiscordPullModal();
+    return;
+  }
+  // Direct pull
+  try {
+    const r2 = await api.discord.voiceMembers(info.id);
+    const members = r2.members || [];
+    if (members.length === 0) {
+      toast(`#${info.name} reported empty after second check — opening picker`, 'var(--accent)');
+      await _vetoOpenDiscordPullModal();
+      return;
+    }
+    if (members.length > 10) {
+      toast(`#${info.name} has ${members.length} members — only first 10 used`, 'var(--accent)');
+    }
+    _vetoLocalRoster = Array.from({length: 10}, (_, i) => {
+      const m = members[i];
+      return m
+        ? { name: m.display_name || '', steam_id: m.steam_id || '',
+            discord_id: m.discord_id || '' }
+        : { name: '', steam_id: '', discord_id: '' };
+    });
+    _renderVeto();
+    toast(`Pulled ${Math.min(members.length, 10)} from #${info.name} (default VC)`, 'var(--ok)');
+  } catch (e) {
+    toast(`Pull failed: ${e.message} — opening picker`, 'var(--bad)');
+    await _vetoOpenDiscordPullModal();
+  }
+}
+
+/* ── v0.11.15 — Live preview of configured default voice channel ─────── */
+//
+// Called on Config-tab render + after Save Discord Settings.  Asks the
+// server to resolve discord_voice_channel_id via the bot and prints a
+// "[name] — N connected" line so the operator gets immediate feedback
+// that the bot can reach the channel.  Silent if no VC is configured.
+async function _refreshVoiceChannelPreview() {
+  const inp    = el('cfg-discord-voice-channel-id');
+  const status = el('cfg-discord-voice-status');
+  if (!inp || !status) return;
+  const id = (inp.value || '').trim();
+  if (!id) {
+    status.textContent = 'No default VC set — Veto roster modal will show the channel picker each session.';
+    return;
+  }
+  status.textContent = 'Looking up channel…';
+  try {
+    const r = await api.discord.voiceChannelInfo(id);
+    const ch = r.channel || {};
+    const ok = (ch.member_count === 10) ? ' ✓' : '';
+    status.innerHTML =
+      `Default VC: <strong>#${esc(ch.name || '?')}</strong> — ${ch.member_count || 0} connected${ok}`;
+    status.style.color = (ch.member_count === 10) ? 'var(--ok)' : 'var(--text-3)';
+  } catch (e) {
+    status.innerHTML =
+      `<span style="color:var(--bad)">Could not reach channel</span> — ${esc(e.message || 'unknown error')}`;
+  }
+}
+
 /* ── v0.11.0 Layer 1B — Discord voice-channel roster pull modal ───────── */
-async function _vetoOpenDiscordPullModal() {
+//
+// v0.11.15: opts.pickOnly + opts.onPick let the Config card reuse this same
+// modal as an "ID browser" (clicking a channel returns its {id, name,
+// member_count} via onPick instead of pulling members).  Defaults preserve
+// the original Layer 1B roster-pull behaviour.
+async function _vetoOpenDiscordPullModal(opts) {
+  opts = opts || {};
+  const pickOnly = !!opts.pickOnly;
+  const onPick   = typeof opts.onPick === 'function' ? opts.onPick : null;
   // Build the modal shell.  Removed on close to keep the DOM clean.
   let modal = el('veto-discord-pull-modal');
   if (modal) modal.remove();
   modal = document.createElement('div');
   modal.id = 'veto-discord-pull-modal';
   modal.className = 'veto-modal-backdrop';
+  const title = pickOnly ? '🔍 Pick a voice channel' : '🎤 Pull from voice channel';
   modal.innerHTML = `
-    <div class="veto-modal" role="dialog" aria-label="Pull from voice channel">
+    <div class="veto-modal" role="dialog" aria-label="${title}">
       <div class="veto-modal-head">
-        <h2>🎤 Pull from voice channel</h2>
+        <h2>${title}</h2>
         <button class="veto-modal-close" aria-label="Close">×</button>
       </div>
       <div class="veto-modal-body" id="veto-pull-body">
@@ -2738,17 +2841,20 @@ async function _vetoOpenDiscordPullModal() {
       `;
       return;
     }
+    const intro = pickOnly
+      ? 'Pick a voice channel to set as the default for one-click roster pull.  Member counts shown are live.'
+      : 'Pick a voice channel.  The connected members will overwrite your current roster (names + Discord IDs).  Need exactly 10 connected.';
     body.innerHTML = `
       <div style="color:var(--text-3);font-size:13px;margin-bottom:14px">
-        Pick a voice channel.  The connected members will overwrite your
-        current roster (names + Discord IDs).  Need exactly 10 connected.
+        ${intro}
       </div>
       <div class="veto-pull-channel-list">
         ${channels.map(ch => `
           <button class="veto-pull-channel ${ch.member_count === 10 ? 'ready' : (ch.member_count >= 1 ? 'has' : '')}"
                   data-channel-id="${esc(ch.id)}"
                   data-channel-name="${esc(ch.name)}"
-                  ${ch.member_count === 0 ? 'disabled' : ''}>
+                  data-channel-count="${ch.member_count}"
+                  ${(!pickOnly && ch.member_count === 0) ? 'disabled' : ''}>
             <span class="veto-pull-channel-name">${esc(ch.name)}</span>
             <span class="veto-pull-channel-count">
               ${ch.member_count} ${ch.member_count === 1 ? 'member' : 'members'}
@@ -2758,11 +2864,19 @@ async function _vetoOpenDiscordPullModal() {
         `).join('')}
       </div>
     `;
-    // Wire each channel button → fetch members → fill roster → close
+    // Wire each channel button.
+    //   pickOnly mode → invoke onPick({id, name, member_count}) + close.
+    //   roster-pull mode (default) → fetch members + overwrite roster + close.
     body.querySelectorAll('.veto-pull-channel').forEach(btn => {
       btn.addEventListener('click', async () => {
-        const channelId   = btn.dataset.channelId;
-        const channelName = btn.dataset.channelName;
+        const channelId    = btn.dataset.channelId;
+        const channelName  = btn.dataset.channelName;
+        const channelCount = parseInt(btn.dataset.channelCount, 10) || 0;
+        if (pickOnly) {
+          if (onPick) onPick({ id: channelId, name: channelName, member_count: channelCount });
+          close();
+          return;
+        }
         btn.textContent = '… loading members';
         try {
           const r2 = await api.discord.voiceMembers(channelId);
@@ -3905,6 +4019,28 @@ pages['config'] = async function() {
                    value="${esc(cfg.discord_veto_channel_id||'')}"
                    placeholder="234567890123456789">
           </div>
+          <!-- v0.11.15 — default voice channel for one-click roster pull.
+               When set, the Veto "Pull from voice channel" button skips
+               the picker modal and pulls members directly.  Blank keeps
+               the picker behaviour. -->
+          <div class="field" style="margin-top:10px">
+            <label>Default Voice Channel ID
+              <span style="color:var(--text-4)">(optional — blank shows picker each session)</span>
+            </label>
+            <div class="flex gap-8">
+              <input class="input flex-1" id="cfg-discord-voice-channel-id" type="text" inputmode="numeric"
+                     value="${esc(cfg.discord_voice_channel_id||'')}"
+                     placeholder="345678901234567890">
+              <button class="btn btn-ghost" id="cfg-discord-voice-browse"
+                      title="Browse the bot's voice channels and pick one">
+                🔍 Browse
+              </button>
+            </div>
+            <div id="cfg-discord-voice-status" class="text-sm"
+                 style="margin-top:6px;color:var(--text-4);min-height:18px">
+              <!-- Populated by _refreshVoiceChannelPreview() on save + on load -->
+            </div>
+          </div>
           <div id="cfg-discord-status" class="text-sm" style="margin-top:12px;color:var(--text-3)">
             <!-- Populated by pollState from /api/state.discord_bot -->
           </div>
@@ -4145,9 +4281,12 @@ pages['config'] = async function() {
     const tokenVal = el('cfg-discord-bot-token').value.trim();
     const guild    = el('cfg-discord-guild-id').value.trim();
     const channel  = el('cfg-discord-channel-id').value.trim();
+    // v0.11.15 — default voice channel for one-click roster pull
+    const voiceCh  = (el('cfg-discord-voice-channel-id')?.value || '').trim();
     const data = {
       discord_guild_id:          guild,
       discord_veto_channel_id:   channel,
+      discord_voice_channel_id:  voiceCh,
     };
     if (tokenVal === 'CLEAR') data.discord_bot_token = '';
     else if (tokenVal) data.discord_bot_token = tokenVal;
@@ -4155,8 +4294,34 @@ pages['config'] = async function() {
     try {
       await api.setConfig(data);
       toast('Discord settings saved — bot will connect in a moment if a token is set');
+      // Refresh the live VC preview after save so the operator sees
+      // immediate feedback that the configured channel is reachable.
+      _refreshVoiceChannelPreview();
     } catch (e) { toast(e.message, 'var(--bad)'); }
   });
+
+  // v0.11.15 — Browse voice channels picker (writes ID into the input).
+  // Same picker shape as the Veto roster modal, but its click handler
+  // stamps the channel ID + name into the Config field instead of pulling
+  // members.  Saves a round-trip to Discord for the IDs.
+  const voiceBrowseBtn = el('cfg-discord-voice-browse');
+  if (voiceBrowseBtn) voiceBrowseBtn.addEventListener('click', async () => {
+    await _vetoOpenDiscordPullModal({ pickOnly: true,
+      onPick: (ch) => {
+        const inp = el('cfg-discord-voice-channel-id');
+        if (inp) {
+          inp.value = ch.id;
+          // Show immediate label without waiting for next save
+          const status = el('cfg-discord-voice-status');
+          if (status) status.innerHTML =
+            `Selected: <strong>${esc(ch.name)}</strong> — ${ch.member_count} connected (unsaved — click Save Discord Settings)`;
+        }
+      }
+    });
+  });
+
+  // Populate the VC preview on Config tab render
+  _refreshVoiceChannelPreview();
 
   // v0.11.0 polish — Discord connection-check buttons
   const testEmbedBtn = el('cfg-discord-test-embed');
