@@ -2059,6 +2059,32 @@ def create_flask(core: AppCore) -> Flask:
             }), 502
         return jsonify({"channels": channels})
 
+    # v0.11.18 — Text-channel picker: lists every text channel in the guild
+    # so the operator's Discord Config card can offer a 🔍 Browse helper
+    # next to the Veto Embed Channel ID field.  Same auth + gates as
+    # /api/discord/voice_channels.  Returns {channels: [{id, name}, ...]}.
+    @app.route("/api/discord/text_channels")
+    @require_auth
+    def discord_text_channels():
+        if not core.discord_guild_id:
+            return jsonify({
+                "error": "Discord guild ID not configured — set it in Config → Discord."
+            }), 400
+        try:
+            from . import discord_bot
+        except Exception as exc:
+            return jsonify({"error": f"bot module unavailable: {exc}"}), 503
+        if not discord_bot.bot_status().get("connected"):
+            return jsonify({"error": "Discord bot is not connected"}), 503
+        channels = discord_bot.bot_text_channels(core.discord_guild_id)
+        if channels is None:
+            return jsonify({
+                "error": "Could not read text channels — verify the bot has "
+                         "View Channels permission on the server, and that "
+                         "the guild ID matches."
+            }), 502
+        return jsonify({"channels": channels})
+
     # v0.11.15 — Single-VC info lookup (id, name, live member_count).
     # Used by the Discord Config card to show "configured default VC: #foo
     # (N connected)" without enumerating the entire guild, and by the Veto
