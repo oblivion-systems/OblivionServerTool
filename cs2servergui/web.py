@@ -3660,7 +3660,7 @@ def create_flask(core: AppCore) -> Flask:
         try:
             import glob as _glob
             _plugin_err_re = re.compile(
-                r"\[(?:ERROR|FATAL|CRIT|WARN(?:ING)?)\]|"
+                r"\[(?:ERROR|EROR|FATAL|FATL|CRIT|WARN(?:ING)?)\]|"
                 r"\bException(?:\s|:)|"
                 r"\bSystem\.[A-Z]\w*Exception\b|"
                 r"^\s*at\s+[A-Z]\w*(?:\.[A-Z]\w*)+\(|"
