@@ -2,6 +2,32 @@
 
 ---
 
+## v0.11.18 — 2026-06-05 (🔍 Browse for Veto Embed Channel ID)
+
+Tiny consistency add: the Veto Embed Channel ID field now has a 🔍
+Browse button next to it, just like the v0.11.15 Default Voice Channel
+ID field.  Operators no longer have to enable Discord Developer Mode +
+right-click → Copy Channel ID to populate it — pick from the list.
+
+### New
+* `bot_text_channels(guild_id)` helper in `discord_bot.py` — returns
+  `[{id, name}, ...]` for every text channel in the guild.
+* `/api/discord/text_channels` endpoint mirroring `/voice_channels`.
+* SPA: 🔍 Browse button next to the Veto Embed Channel ID field
+  reuses the existing pull-modal in `kind: 'text'` mode.
+* `_vetoOpenDiscordPullModal` now accepts `opts.kind = 'voice' | 'text'`
+  (default `'voice'`).  Text mode is browse-only; voice mode is
+  unchanged.
+
+### Tests
++1 new (text_channels 400 without guild ID).  Existing 503-when-bot-not-
+connected test extended to cover the new endpoint.  **198/198 green.**
+
+### Migration
+None.  Existing setups are unaffected.
+
+---
+
 ## v0.11.17 — 2026-06-05 (Friday-eve thorough sweep, Tier A + Tier B fixes)
 
 Four parallel adversarial audits of the whole codebase (veto lifecycle,

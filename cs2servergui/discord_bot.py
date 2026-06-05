@@ -25,7 +25,8 @@ discord.py is async-first; the Flask app is threaded.  Bridging:
     (`_BotRunner`).  Started by `start_bot(core)` when a token exists.
   * Flask-side code communicates with the loop via thread-safe wrappers
     (`bot_dm_user`, `bot_voice_members`, `bot_voice_channel_info`,
-    `bot_post_embed`, `bot_edit_embed`).
+    `bot_voice_channels`, `bot_text_channels`, `bot_post_embed`,
+    `bot_edit_embed`).
     Each wrapper schedules a coroutine on the bot's loop via
     `asyncio.run_coroutine_threadsafe` and waits for the result with a
     timeout.
@@ -363,6 +364,43 @@ def bot_voice_channels(guild_id: str, *, timeout: float = 8.0) -> list[dict] | N
         return fut.result(timeout=timeout)
     except Exception as exc:
         _log.info("bot_voice_channels(%s) failed: %s", guild_id, exc)
+        return None
+
+
+def bot_text_channels(guild_id: str, *, timeout: float = 8.0) -> list[dict] | None:
+    """v0.11.18 — Return {id, name}[] for every TEXT channel in the guild.
+
+    Used by the Discord Config card's 🔍 Browse helper next to the Veto
+    Embed Channel ID field, so the operator can pick a channel without
+    leaving the SPA to fish a channel ID out of Discord's right-click
+    menu.  Mirrors `bot_voice_channels` shape (id, name) but omits
+    member_count — text channels don't have a "connected" notion.
+
+    Returns None on failure (bot not running, guild not found, no
+    permission).
+    """
+    if _runner is None or not _runner.ready.is_set():
+        return None
+    try:
+        gid = int(str(guild_id).strip())
+    except (TypeError, ValueError):
+        return None
+    async def _do():
+        guild = _runner.bot.get_guild(gid)
+        if guild is None:
+            guild = await _runner.bot.fetch_guild(gid)
+        out = []
+        for ch in guild.text_channels:
+            out.append({
+                "id":   str(ch.id),
+                "name": ch.name,
+            })
+        return out
+    try:
+        fut = _runner.submit(_do())
+        return fut.result(timeout=timeout)
+    except Exception as exc:
+        _log.info("bot_text_channels(%s) failed: %s", guild_id, exc)
         return None
 
 

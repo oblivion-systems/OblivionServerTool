@@ -7,12 +7,12 @@
 
 ---
 
-## Where We Are — v0.11.17 (released 2026-06-05)
+## Where We Are — v0.11.18 (released 2026-06-05)
 
-**Seventeen releases** with the v0.11.x line at "Friday-ready triage +
+**Eighteen releases** with the v0.11.x line at "Friday-ready triage +
 perf tooling complete + recurring-tournament UX nailed + self-review
-hotfixes locked in + adversarial sweep findings landed."  Highlights
-since v0.11.0:
+hotfixes locked in + adversarial sweep findings landed + Discord
+Config card fully browse-able."  Highlights since v0.11.0:
 
 | Release | Theme |
 |---|---|
@@ -33,8 +33,9 @@ since v0.11.0:
 | v0.11.15 | Default voice channel — one-click roster pull for recurring tournaments |
 | v0.11.16 | v0.11.15 adversarial-review hotfixes (double-click guard, mobile picker button, silent fallback) |
 | v0.11.17 | Friday-eve thorough sweep — Tier A + B fixes (12 findings across veto/Discord/server/SPA) |
+| v0.11.18 | 🔍 Browse for Veto Embed Channel ID (text-channel picker) |
 
-**197/197 backend tests green** across all releases.
+**198/198 backend tests green** across all releases.
 
 Full prose in [CHANGELOG.md](CHANGELOG.md).
 

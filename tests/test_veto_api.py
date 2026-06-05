@@ -963,10 +963,26 @@ def t_discord_endpoints_503_when_bot_not_connected():
     r1 = c.get('/api/discord/voice_channels')
     r2 = c.get('/api/discord/voice_members?channel_id=234567890123456789')
     r3 = c.get('/api/discord/voice_channel_info?channel_id=234567890123456789')
+    r4 = c.get('/api/discord/text_channels')
     return (r1.status_code == 503 and r2.status_code == 503
-            and r3.status_code == 503), \
-           f'voice_channels={r1.status_code} voice_members={r2.status_code} info={r3.status_code}'
-t('/api/discord/voice_*: 503 when bot not connected', t_discord_endpoints_503_when_bot_not_connected)
+            and r3.status_code == 503 and r4.status_code == 503), \
+           f'voice_channels={r1.status_code} voice_members={r2.status_code} info={r3.status_code} text={r4.status_code}'
+t('/api/discord/voice_* + text_channels: 503 when bot not connected', t_discord_endpoints_503_when_bot_not_connected)
+
+
+def t_discord_text_channels_400_without_guild():
+    """v0.11.18: /api/discord/text_channels returns 400 when guild_id is
+    not configured (mirrors voice_channels)."""
+    ac, app, c = _new_app()
+    _login(c)
+    ac.discord_guild_id = ''
+    r = c.get('/api/discord/text_channels')
+    body = r.get_json() or {}
+    return (r.status_code == 400
+            and 'guild' in body.get('error', '').lower()), \
+           f'status={r.status_code} body={body}'
+t('/api/discord/text_channels: 400 without guild ID (v0.11.18)',
+  t_discord_text_channels_400_without_guild)
 
 
 def t_discord_voice_channel_info_400_without_any_id():

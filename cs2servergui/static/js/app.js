@@ -2857,9 +2857,16 @@ async function _refreshVoiceChannelPreview() {
 // modal as an "ID browser" (clicking a channel returns its {id, name,
 // member_count} via onPick instead of pulling members).  Defaults preserve
 // the original Layer 1B roster-pull behaviour.
+//
+// v0.11.18: opts.kind = 'voice' (default) | 'text'.  With kind='text', the
+// modal fetches text channels via api.discord.textChannels() and renders
+// them without member counts.  pickOnly is enforced for text mode (you
+// can't "pull members" from a text channel).
 async function _vetoOpenDiscordPullModal(opts) {
   opts = opts || {};
-  const pickOnly = !!opts.pickOnly;
+  const kind = opts.kind === 'text' ? 'text' : 'voice';
+  // Text mode is browse-only by construction
+  const pickOnly = (kind === 'text') ? true : !!opts.pickOnly;
   const onPick   = typeof opts.onPick === 'function' ? opts.onPick : null;
   // Build the modal shell.  Removed on close to keep the DOM clean.
   let modal = el('veto-discord-pull-modal');
@@ -2867,7 +2874,10 @@ async function _vetoOpenDiscordPullModal(opts) {
   modal = document.createElement('div');
   modal.id = 'veto-discord-pull-modal';
   modal.className = 'veto-modal-backdrop';
-  const title = pickOnly ? '🔍 Pick a voice channel' : '🎤 Pull from voice channel';
+  let title;
+  if (kind === 'text')   title = '🔍 Pick a text channel';
+  else if (pickOnly)     title = '🔍 Pick a voice channel';
+  else                   title = '🎤 Pull from voice channel';
   modal.innerHTML = `
     <div class="veto-modal" role="dialog" aria-label="${title}">
       <div class="veto-modal-head">
@@ -2888,41 +2898,64 @@ async function _vetoOpenDiscordPullModal(opts) {
     if (e.target === modal) close();      // backdrop click closes
   });
 
-  // Fetch + render channel list
+  // Fetch + render channel list — pick the right API by kind
   try {
-    const r = await api.discord.voiceChannels();
+    const r = (kind === 'text')
+      ? await api.discord.textChannels()
+      : await api.discord.voiceChannels();
     const channels = r.channels || [];
     const body = el('veto-pull-body');
     if (channels.length === 0) {
+      const what = (kind === 'text') ? 'text' : 'voice';
       body.innerHTML = `
         <div style="padding:24px;text-align:center;color:var(--text-3)">
-          No voice channels found in this server.  Check that the bot has
+          No ${what} channels found in this server.  Check that the bot has
           <strong>View Channels</strong> permission.
         </div>
       `;
       return;
     }
-    const intro = pickOnly
-      ? 'Pick a voice channel to set as the default for one-click roster pull.  Member counts shown are live.'
-      : 'Pick a voice channel.  The connected members will overwrite your current roster (names + Discord IDs).  Need exactly 10 connected.';
+    let intro;
+    if (kind === 'text') {
+      intro = 'Pick the text channel where the bot should post the live veto embed.';
+    } else if (pickOnly) {
+      intro = 'Pick a voice channel to set as the default for one-click roster pull.  Member counts shown are live.';
+    } else {
+      intro = 'Pick a voice channel.  The connected members will overwrite your current roster (names + Discord IDs).  Need exactly 10 connected.';
+    }
     body.innerHTML = `
       <div style="color:var(--text-3);font-size:13px;margin-bottom:14px">
         ${intro}
       </div>
       <div class="veto-pull-channel-list">
-        ${channels.map(ch => `
-          <button class="veto-pull-channel ${ch.member_count === 10 ? 'ready' : (ch.member_count >= 1 ? 'has' : '')}"
-                  data-channel-id="${esc(ch.id)}"
-                  data-channel-name="${esc(ch.name)}"
-                  data-channel-count="${ch.member_count}"
-                  ${(!pickOnly && ch.member_count === 0) ? 'disabled' : ''}>
-            <span class="veto-pull-channel-name">${esc(ch.name)}</span>
-            <span class="veto-pull-channel-count">
-              ${ch.member_count} ${ch.member_count === 1 ? 'member' : 'members'}
-              ${ch.member_count === 10 ? ' ✓' : ''}
-            </span>
-          </button>
-        `).join('')}
+        ${channels.map(ch => {
+          if (kind === 'text') {
+            // v0.11.18 — text channels: no member_count, always enabled.
+            // Use a leading # to make Discord conventions obvious.
+            return `
+              <button class="veto-pull-channel"
+                      data-channel-id="${esc(ch.id)}"
+                      data-channel-name="${esc(ch.name)}"
+                      data-channel-count="0">
+                <span class="veto-pull-channel-name">#${esc(ch.name)}</span>
+              </button>
+            `;
+          }
+          // Voice channels: keep the existing renderer with live counts.
+          return `
+            <button class="veto-pull-channel ${ch.member_count === 10 ? 'ready' : (ch.member_count >= 1 ? 'has' : '')}"
+                    data-channel-id="${esc(ch.id)}"
+                    data-channel-name="${esc(ch.name)}"
+                    data-channel-count="${ch.member_count}"
+                    ${(!pickOnly && ch.member_count === 0) ? 'disabled' : ''}>
+              <span class="veto-pull-channel-name">${esc(ch.name)}</span>
+              <span class="veto-pull-channel-count">
+                ${ch.member_count} ${ch.member_count === 1 ? 'member' : 'members'}
+                ${ch.member_count === 10 ? ' ✓' : ''}
+              </span>
+            </button>
+          `;
+        }).join('')}
       </div>
     `;
     // Wire each channel button.
@@ -4109,9 +4142,18 @@ pages['config'] = async function() {
           </div>
           <div class="field" style="margin-top:10px">
             <label>Veto Embed Channel ID <span style="color:var(--text-4)">(optional — blank skips live embeds)</span></label>
-            <input class="input" id="cfg-discord-channel-id" type="text" inputmode="numeric"
-                   value="${esc(cfg.discord_veto_channel_id||'')}"
-                   placeholder="234567890123456789">
+            <!-- v0.11.18 — 🔍 Browse helper for text channels, mirrors the
+                 v0.11.15 default-VC Browse.  Pick the channel from a list
+                 instead of fishing the ID out of Discord's right-click menu. -->
+            <div class="flex gap-8">
+              <input class="input flex-1" id="cfg-discord-channel-id" type="text" inputmode="numeric"
+                     value="${esc(cfg.discord_veto_channel_id||'')}"
+                     placeholder="234567890123456789">
+              <button class="btn btn-ghost" id="cfg-discord-channel-browse"
+                      title="Browse the bot's text channels and pick one">
+                🔍 Browse
+              </button>
+            </div>
           </div>
           <!-- v0.11.15 — default voice channel for one-click roster pull.
                When set, the Veto "Pull from voice channel" button skips
@@ -4400,7 +4442,7 @@ pages['config'] = async function() {
   // members.  Saves a round-trip to Discord for the IDs.
   const voiceBrowseBtn = el('cfg-discord-voice-browse');
   if (voiceBrowseBtn) voiceBrowseBtn.addEventListener('click', async () => {
-    await _vetoOpenDiscordPullModal({ pickOnly: true,
+    await _vetoOpenDiscordPullModal({ pickOnly: true, kind: 'voice',
       onPick: (ch) => {
         const inp = el('cfg-discord-voice-channel-id');
         if (inp) {
@@ -4409,6 +4451,23 @@ pages['config'] = async function() {
           const status = el('cfg-discord-voice-status');
           if (status) status.innerHTML =
             `Selected: <strong>${esc(ch.name)}</strong> — ${ch.member_count} connected (unsaved — click Save Discord Settings)`;
+        }
+      }
+    });
+  });
+
+  // v0.11.18 — Browse text channels picker for the Veto Embed Channel ID.
+  // Same picker shape, kind='text' → calls api.discord.textChannels().
+  const textChannelBrowseBtn = el('cfg-discord-channel-browse');
+  if (textChannelBrowseBtn) textChannelBrowseBtn.addEventListener('click', async () => {
+    await _vetoOpenDiscordPullModal({ pickOnly: true, kind: 'text',
+      onPick: (ch) => {
+        const inp = el('cfg-discord-channel-id');
+        if (inp) {
+          inp.value = ch.id;
+          // No live status div for text-channel picks; toast as feedback.
+          toast(`Veto embed channel set to #${ch.name} (unsaved — click Save Discord Settings)`,
+                'var(--accent)');
         }
       }
     });
