@@ -2298,8 +2298,35 @@ function _vetoStageIndex(stateStr) {
   return m[stateStr] ?? -1;
 }
 
+// v0.11.25 — polling fallback timer.  Belt-and-braces: even if SSE is
+// blocked by a webview/proxy or app.js is somehow stale, every 3s we
+// refetch /api/veto/state and apply via _vetoApply.  Cheap (~1 KB),
+// guarantees the UI catches up within ≤3s regardless of SSE health.
+let _vetoPollTimer = null;
+function _vetoStartPolling() {
+  if (_vetoPollTimer) return;
+  _vetoPollTimer = setInterval(async () => {
+    if (currentPage !== 'veto') return;
+    if (document.hidden) return;        // tab background — don't waste cycles
+    if (_vetoBoardClickInFlight) return; // skip during in-flight click
+    try {
+      const snap = await api.veto.state();
+      if (snap && snap.session && _vetoState && _vetoState.session
+          && snap.session.updated_at === _vetoState.session.updated_at
+          && snap.state === _vetoState.state) {
+        return;   // no change — skip render
+      }
+      _vetoApply(snap);
+    } catch (_) { /* network blip — try again next tick */ }
+  }, 3000);
+}
+function _vetoStopPolling() {
+  if (_vetoPollTimer) { clearInterval(_vetoPollTimer); _vetoPollTimer = null; }
+}
+
 function _vetoCleanup() {
   if (_vetoEs) { try { _vetoEs.close(); } catch (_) {} _vetoEs = null; }
+  _vetoStopPolling();
   _vetoState = null;
   _vetoLocalRoster = [];
   _vetoLastRenderedState = null;
@@ -2361,6 +2388,7 @@ function _vetoSubscribe() {
       } catch (_) {}
     },
   });
+  _vetoStartPolling();   // v0.11.25 — 3s fallback poll alongside SSE
 }
 
 function _renderVeto() {
