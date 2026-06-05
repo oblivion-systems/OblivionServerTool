@@ -294,6 +294,24 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden) tick
 def create_flask(core: AppCore) -> Flask:
     app = Flask(__name__)   # static_folder=<pkg>/static, template_folder=<pkg>/templates
 
+    # v0.11.24 — no-cache headers on the SPA assets.  Without this the
+    # embedded WebView2 (or any browser) ETag-caches app.js / api.js /
+    # app.css across rebuilds.  The .exe ships a new app.js, but the
+    # browser serves the stale one from cache — fixes don't take effect
+    # until the user manually hard-refreshes.  Symptom this caused on
+    # tournament night: SPA still using v0.11.20 click handlers while
+    # the .exe was v0.11.23, votes/bans needed a tab refresh to show.
+    @app.after_request
+    def _no_cache_static(resp):
+        try:
+            if request.path.startswith("/static/"):
+                resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+                resp.headers["Pragma"] = "no-cache"
+                resp.headers["Expires"] = "0"
+        except Exception:
+            pass
+        return resp
+
     # ── Discord bot status helper (v0.11.0) ───────────────────────────────────
     # Wraps discord_bot.bot_status() so a missing discord.py doesn't crash
     # /api/state.  The bot module itself has a DISCORD_AVAILABLE flag for
