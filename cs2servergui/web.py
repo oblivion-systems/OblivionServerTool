@@ -2984,6 +2984,19 @@ def create_flask(core: AppCore) -> Flask:
             # crashed handler that exited before reaching that point
             # might have left it stuck True.
             core._finale_firing = False
+        # v0.11.20 — invalidate every captain HTTP session.  Without this,
+        # captains who claimed tokens for the previous session keep their
+        # session cookie with captain_team set, and when they reconnect
+        # they appear authenticated as captain of a team whose tokens are
+        # already dead.  They need to re-claim with a fresh token DM'd
+        # from the new session.
+        with _sessions_lock:
+            dropped = [tok for tok, s in _sessions.items()
+                       if s.get("role") == "captain"]
+            for tok in dropped:
+                _sessions.pop(tok, None)
+        if dropped:
+            core.log(f"[veto] invalidated {len(dropped)} captain session(s)")
         _veto_broadcast()
         core.log("[veto] session reset")
         return jsonify({"ok": True, "state": "idle"})
