@@ -27,7 +27,7 @@ import threading
 import time
 from collections.abc import Callable
 
-from flask import (Flask, Response, abort, jsonify, redirect,
+from flask import (Flask, Response, abort, jsonify, make_response, redirect,
                    render_template, request, send_file)
 
 from . import config as _config
@@ -428,7 +428,7 @@ def create_flask(core: AppCore) -> Flask:
             resp = redirect("/")
             resp.set_cookie(
                 "session", session_token,
-                httponly=True, samesite="Strict",
+                httponly=True, samesite="Lax",
                 secure=_request_is_https(),     # v0.11.17 A3
             )
             return resp
@@ -459,7 +459,7 @@ def create_flask(core: AppCore) -> Flask:
             resp = jsonify({"ok": True, "role": role})
             resp.set_cookie(
                 "session", session_token,
-                httponly=True, samesite="Strict",
+                httponly=True, samesite="Lax",
                 secure=_request_is_https(),     # v0.11.17 A3
             )
             return resp
@@ -2445,7 +2445,7 @@ def create_flask(core: AppCore) -> Flask:
         # configured or the bot isn't connected.
         _refresh_live_veto_embed(reason="captain claim")
         resp = jsonify({"ok": True, "team": team})
-        resp.set_cookie("session", session_token, httponly=True, samesite="Strict",
+        resp.set_cookie("session", session_token, httponly=True, samesite="Lax",
                         secure=_request_is_https())    # v0.11.17 A3
         return resp
 
@@ -2473,9 +2473,27 @@ def create_flask(core: AppCore) -> Flask:
                 if sess is not None:
                     sess["captain_team"] = team
                 _veto_broadcast()
-                resp = redirect("/#veto")
-                resp.set_cookie("session", session_token, httponly=True, samesite="Strict",
-                                secure=_request_is_https())    # v0.11.17 A3
+                # Serve a real HTML page (not a 302 redirect) so that iOS
+                # WKWebView / Discord in-app browser doesn't treat this as a
+                # "bounce redirect" and strip the Set-Cookie header via ITP.
+                # The JS redirect to /#veto happens same-origin after the
+                # cookie is safely stored.
+                html = (
+                    "<!doctype html><html><head>"
+                    "<meta charset=utf-8>"
+                    "<meta name=viewport content='width=device-width,initial-scale=1'>"
+                    "<title>Connecting…</title>"
+                    "<style>body{margin:0;display:flex;align-items:center;"
+                    "justify-content:center;min-height:100vh;"
+                    "background:#0d0d0f;color:#ccc;font-family:sans-serif;font-size:1.1rem}"
+                    "</style></head>"
+                    "<body><span>Connecting to veto…</span>"
+                    "<script>window.location.replace('/#veto');</script>"
+                    "</body></html>"
+                )
+                resp = make_response(html, 200)
+                resp.set_cookie("session", session_token, httponly=True, samesite="Lax",
+                                secure=_request_is_https())    # v0.11.17 A3 / v0.11.20
                 return resp
         # Fall through — render the SPA shell; the frontend handles the rest.
         return redirect("/#veto")
