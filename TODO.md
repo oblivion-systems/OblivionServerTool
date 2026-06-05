@@ -21,12 +21,14 @@
 | 4 | Test & release engineering | 🟢 mostly done (smoke battery 161/161; build pipeline + signing still open) |
 | 5 | Polish & 1.0 launch | 🟡 in flight (mobile + role pill + capabilities done; final docs + 1.0 ship pending) |
 
-**Current release:** v0.11.18 (2026-06-05) — **198/198 tests green**.
-Eighteen releases; v0.11.x is Friday-ready with recurring-tournament
-UX nailed, self-review hotfixes locked in, Friday-eve adversarial sweep
-findings landed, and the Discord Config card fully browse-able.
-v0.11.18 added a 🔍 Browse for the Veto Embed Channel ID field
-(text-channel picker; mirrors v0.11.15's default-VC Browse).
+**Current release:** v0.11.19 (2026-06-05) — **200/200 tests green**.
+Nineteen releases; v0.11.x is Friday-ready with recurring-tournament UX
+nailed, self-review hotfixes locked in, Friday-eve adversarial sweep
+findings landed, the Discord Config card fully browse-able, and the
+diagnostic snapshot now sees the plugin layer.  v0.11.19 fills the
+visibility gap when MatchZy redirects CS2's console.log — the new
+Plugin logs section tails CSS host + MatchZy match logs with anomaly
+prefixing, plus a TL;DR `plugin_log` health indicator.
 
 The path to v1.0 is now:
 1. Run Friday's session, collect real-user feedback

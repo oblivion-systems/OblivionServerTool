@@ -7,12 +7,13 @@
 
 ---
 
-## Where We Are — v0.11.18 (released 2026-06-05)
+## Where We Are — v0.11.19 (released 2026-06-05)
 
-**Eighteen releases** with the v0.11.x line at "Friday-ready triage +
+**Nineteen releases** with the v0.11.x line at "Friday-ready triage +
 perf tooling complete + recurring-tournament UX nailed + self-review
 hotfixes locked in + adversarial sweep findings landed + Discord
-Config card fully browse-able."  Highlights since v0.11.0:
+Config card fully browse-able + plugin-layer log visibility."
+Highlights since v0.11.0:
 
 | Release | Theme |
 |---|---|
@@ -34,8 +35,9 @@ Config card fully browse-able."  Highlights since v0.11.0:
 | v0.11.16 | v0.11.15 adversarial-review hotfixes (double-click guard, mobile picker button, silent fallback) |
 | v0.11.17 | Friday-eve thorough sweep — Tier A + B fixes (12 findings across veto/Discord/server/SPA) |
 | v0.11.18 | 🔍 Browse for Veto Embed Channel ID (text-channel picker) |
+| v0.11.19 | Snapshot plugin log diagnostics — CSS + MatchZy log tail + TL;DR plugin_log indicator |
 
-**198/198 backend tests green** across all releases.
+**200/200 backend tests green** across all releases.
 
 Full prose in [CHANGELOG.md](CHANGELOG.md).
 
