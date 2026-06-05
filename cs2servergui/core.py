@@ -442,6 +442,12 @@ class AppCore:
         self._veto = _veto_module           # bound for callers; avoids re-import per method
         self._veto_session: _veto_module.VetoSession | None = None
         self._veto_lock = threading.Lock()
+        # v0.11.17 B3 — single-shot guard against double-firing the
+        # matchzy_loadmatch handoff.  Set under _veto_lock when a finale
+        # is committed; checked by both the admin /api/veto/finale button
+        # and the captain-ready auto-launch path so concurrent triggers
+        # serialize through one MatchZy load.  Cleared on reset/rematch.
+        self._finale_firing: bool = False
         # v0.11.3 — active-session persistence load happens AFTER
         # _load_config() so self.log() / self.on_log are wired up first.
 
@@ -771,6 +777,26 @@ class AppCore:
             sess = self._veto.deserialize_session(snapshot)
             if sess.state == "idle":
                 # Nothing meaningful to resume; clean up
+                try: os.remove(VETO_ACTIVE_FILE)
+                except OSError: pass
+                return
+            # v0.11.17 B2 — tighter cutoff for sessions PAST the captain-
+            # links stage.  The original 12h window made sense for "I
+            # built a roster last night, finishing today" but was way too
+            # generous for actively-played stages: a session left at
+            # `voting`/`veto`/`finale`/`complete` from yesterday's test
+            # run would resume today with its captain tokens still live,
+            # and yesterday's tunnel URL could hijack today's setup.
+            # Sessions in early stages (idle/roster/teams/links) still get
+            # the full window; sessions past `links` get only 1 hour.
+            _PAST_LINKS = ("voting", "veto", "finale", "complete")
+            _PAST_LINKS_MAX_AGE = 3600.0     # 1 hour
+            if sess.state in _PAST_LINKS and age > _PAST_LINKS_MAX_AGE:
+                self.log(f"[veto] active-session is in state={sess.state} "
+                         f"and {age/3600:.1f}h old (past-links cutoff "
+                         f"{_PAST_LINKS_MAX_AGE/3600:.1f}h); discarding "
+                         "without resume so yesterday's tokens can't "
+                         "hijack today's session")
                 try: os.remove(VETO_ACTIVE_FILE)
                 except OSError: pass
                 return

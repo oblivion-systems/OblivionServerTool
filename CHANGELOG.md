@@ -2,6 +2,120 @@
 
 ---
 
+## v0.11.17 — 2026-06-05 (Friday-eve thorough sweep, Tier A + Tier B fixes)
+
+Four parallel adversarial audits of the whole codebase (veto lifecycle,
+Discord integration, server/RCON control, SPA/captain UX) surfaced 12
+real findings worth landing pre-tournament.  All fixed.  No
+ship-blockers among them — all SHIP_RISK / NICE_TO_FIX category — but
+each one is a known failure mode the operator would hit during a real
+session.  **197/197 backend tests green (+10 new).**
+
+### Tier A — high-impact small fixes
+
+* **A1** (`veto.py` `set_roster`): reject duplicate non-empty SteamIDs.
+  Pre-fix, two captains pasting the same ID silently produced a
+  MatchZy team config with 9-and-5 players, which the plugin refuses
+  to load.  Error message names the duplicated ID so the operator can
+  fix it before voting starts.
+* **A2** (`veto.py` `rematch`): clear `live_embed_msg_id`.  Pre-fix,
+  the bot kept editing the prior series's "MATCH LOCKED IN" embed,
+  showing yesterday's result during today's veto.
+* **A3** (`web.py` four `set_cookie` sites): add `secure=True` on
+  HTTPS-via-tunnel requests.  Pre-fix, captains clicking their DM'd
+  token link from Discord/Slack in-app webviews sometimes silently
+  dropped the cookie → "no active session" loop.  New
+  `_request_is_https()` helper honours `X-Forwarded-Proto` so the
+  flag is set correctly behind a Cloudflare tunnel.
+* **A4** (`app.css`): `.veto-stage-actions { flex-wrap: wrap }` so the
+  v0.11.16 🔀 Pick channel button doesn't overflow on iPhone SE.
+* **A5** (`discord_bot.py`): drop `intents.message_content = True`.
+  Privileged intent that the bot never used — leaving it enabled
+  meant fresh-guild migrations silently failed to connect if the
+  operator hadn't ticked the toggle in the Developer Portal.
+* **A6** (`web.py` `/api/server/start`): return 409 when a workshop
+  download is in flight.  Pre-fix, cs2.exe could boot against a
+  half-extracted addon folder → silent fallback to dust2 or broken map.
+* **A7** (`web.py` `config_set` Discord token branch): re-save with
+  the same token now restarts the bot if it's disconnected, giving
+  the operator a recovery lever instead of having to restart the
+  whole app when the bot loop dies.
+
+### Tier B — defended through real-tournament failure modes
+
+* **B1** (`web.py` `_refresh_live_veto_embed`): coalescing serializer.
+  Pre-fix, every step spawned a fresh thread → captains rage-clicking
+  could produce out-of-order edits or duplicate embed posts.  Now a
+  single in-flight worker drains the "latest pending snapshot" slot;
+  rapid clicks coalesce so only the newest state hits Discord.
+* **B2** (`core.py` `_load_active_veto_session`): tighter cutoff for
+  past-`links` sessions.  Sessions in voting/veto/finale/complete
+  states get a 1-hour resume window (was 12h).  Earlier-stage
+  sessions still get the original 12h.  Prevents yesterday's
+  half-played session from coming back as a "captain link from
+  yesterday hijacks today's setup."
+* **B3** (`core.py` + `web.py`): finale double-fire guard via
+  `_finale_firing` flag set under `_veto_lock`.  Both the captain-
+  ready auto-launch path and the admin Finale button check the flag
+  first; concurrent triggers serialize through ONE
+  `matchzy_loadmatch` call.  Cleared on success, error, and reset.
+* **B4** (`app.js` `_renderVetoBoard`): captain-tap guard.  While an
+  API call is in flight, suppress `_renderVeto()` rebuilds of the
+  board AND visually mark the tapped card as `.pending` with the
+  other cards `.locked-during-pending`.  Pre-fix, a fast-clicking
+  captain on a 3G phone could lose their tap to an SSE-driven
+  rebuild.
+* **B5** (`app.js` `_renderVetoFinaleCaptain`): re-derive `myReady`
+  from live `_vetoState` at click time, not the closure captured
+  at render time.  Pre-fix, a captain who saw a fresh ✓ READY badge
+  via SSE then tapped to un-ready could send `ready(true)` (no-op)
+  because the closure still had the old value.
+
+### Tests
+* +10 backend tests for A1/A2/A6/B2/B3 (+3 in `test_veto.py`, +7 in
+  `test_veto_api.py`).  Total **197/197 green**.
+* No SPA tests added — A3/A4/A7/B1/B4/B5 are behavioural changes the
+  Friday-night smoke battery will exercise end-to-end.
+
+### Migration
+None required.
+
+---
+
+## v0.11.16 — 2026-06-04 (v0.11.15 adversarial-review hotfixes)
+
+Self-imposed code-review pass on v0.11.15 surfaced three ship-risks that
+matter on tournament night.  All three fixed.  No new behaviour, no API
+changes.
+
+### Fixed
+* **Double-click race on the 🎤 Pull from voice channel button.**  Two
+  rapid clicks no longer fire two concurrent `voice_channel_info` +
+  `voice_members` round-trips.  Disabled+try/finally guard ensures the
+  second click is a no-op until the first completes.
+* **Confusing two-error UX when default VC is set but bot is offline.**
+  Previously: toast "Default VC unreachable" → then picker modal which
+  also failed for the same reason.  Now: silent fallback to the picker
+  for the predictable failure modes (no default set, guild ID not
+  configured, bot not connected, bot module unavailable).  Toast still
+  fires for genuinely unexpected errors so they aren't swallowed.
+* **No mobile path to the picker** when a default VC is configured —
+  Shift+click only worked on desktop.  Added a small 🔀 **Pick
+  channel…** secondary button next to 🎤 that always opens the picker.
+  Tablet/phone operators no longer get locked into the default.
+
+### Changed
+* Diagnostic snapshot's bot voice-channel lookup timeout dropped 3.0s
+  → 1.5s.  If the bot is mid-reconnect during a triage, the snapshot
+  no longer feels frozen for 3 seconds.
+* Roster button tooltip clarified — "Uses your default voice channel
+  if configured; otherwise opens the picker."
+
+### Tests
+187/187 green (no new tests — all SPA changes, behavioural).
+
+---
+
 ## v0.11.15 — 2026-06-04 (default voice channel for one-click roster pull)
 
 Recurring-tournament UX polish.  When you run the same event every Friday

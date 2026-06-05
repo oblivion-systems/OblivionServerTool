@@ -40,7 +40,12 @@ DEPENDENCIES
 INTENTS
 -------
   members  — required for voice-channel member enumeration + DM resolve
-  message_content — currently unused but reserved for /commands
+
+  v0.11.17 A5 — dropped `message_content` (privileged, requires Dev
+  Portal toggle).  We never read message content, only post embeds and
+  enumerate voice-channel members.  Leaving it enabled meant a
+  fresh-guild migration could silently fail to connect if the operator
+  hadn't enabled the toggle in the Developer Portal.
 
 The bot does NOT need the presence intent (we don't track online status).
 
@@ -220,11 +225,16 @@ def start_bot(core) -> bool:
                 _runner._thread.join(timeout=3)
             _runner = None
 
-        # Minimal intents — members for voice-channel reads + DM resolve;
-        # message_content reserved for slash-cmd handlers (Tue/Wed work).
+        # Minimal intents — members for voice-channel reads + DM resolve.
+        # v0.11.17 A5: message_content intent dropped.  It's privileged
+        # (must be enabled in Discord Dev Portal) and we don't actually
+        # read message content anywhere — only post embeds + enumerate VC
+        # members.  Leaving it enabled meant fresh-guild migrations could
+        # silently fail to connect if the operator hadn't ticked the
+        # toggle in the Dev Portal (raises PrivilegedIntentsRequired
+        # which our outer except swallows into the 30s retry loop).
         intents = discord.Intents.default()
         intents.members = True
-        intents.message_content = True
 
         _runner = _BotRunner(token, core, intents)
         _runner.start_thread()

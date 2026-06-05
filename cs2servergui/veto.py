@@ -286,6 +286,28 @@ def set_roster(
         raise VetoStageError("Every roster slot must have a non-empty name")
     if len(set(names)) != 10:
         raise VetoStageError("Roster names must be unique")
+    # v0.11.17 A1 — reject duplicate SteamIDs.  Two players paste the same
+    # ID by accident (copy-paste from Discord, or the bot pulled the same
+    # user twice from overlapping VCs) → `team_players()` later builds a
+    # dict keyed by SteamID and SILENTLY drops the duplicate, producing a
+    # MatchZy team config with 4 players + the other team with 5.  MatchZy
+    # refuses the config and the operator sees an opaque error mid-veto.
+    # Catch it at roster-save so the operator can correct it BEFORE the
+    # captains start voting.  Empty SteamIDs are still permitted (some
+    # players might not have linked Steam yet); only non-empty dupes fail.
+    non_empty_sids = [p.steam_id.strip() for p in players if p.steam_id.strip()]
+    if len(non_empty_sids) != len(set(non_empty_sids)):
+        # Report which ID is duplicated for fast operator triage.
+        seen: set[str] = set()
+        dupes: list[str] = []
+        for sid in non_empty_sids:
+            if sid in seen and sid not in dupes:
+                dupes.append(sid)
+            seen.add(sid)
+        raise VetoStageError(
+            f"Duplicate SteamID(s) in roster: {', '.join(dupes)}.  "
+            f"Each SteamID may appear at most once."
+        )
     session.team_a_name = team_a_name.strip() or "Team Alpha"
     session.team_b_name = team_b_name.strip() or "Team Bravo"
     session.roster = list(players)
@@ -870,6 +892,12 @@ def rematch(session: VetoSession, mode: str | None = None,
     session.matchzy_config = None
     session.ready_a = False
     session.ready_b = False
+    # v0.11.17 A2 — clear the live embed message ID so the bot posts a FRESH
+    # embed for the new series instead of editing the prior one (which still
+    # showed "MATCH LOCKED IN" with the old final maps).  Spectators
+    # following the channel were seeing yesterday's result while today's
+    # veto played out.
+    session.live_embed_msg_id = ""
     # Votes stay cleared (no revote needed — captains are already elected)
     session.votes_a.clear()
     session.votes_b.clear()

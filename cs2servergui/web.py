@@ -69,6 +69,31 @@ def _create_session(ip: str, is_local: bool = False, role: str = "admin") -> str
     return token
 
 
+def _request_is_https() -> bool:
+    """v0.11.17 A3 — was the original client request HTTPS?
+
+    `request.is_secure` only knows about the immediate hop's scheme.
+    For tunneled traffic the chain is:
+        captain's browser (HTTPS)
+          → Cloudflare edge
+          → cloudflared on this machine (terminates TLS)
+          → Werkzeug socket (plain HTTP loopback)
+    So `is_secure` reports False even when the captain is on HTTPS.
+    Cloudflare quick tunnels set `X-Forwarded-Proto: https`, so check
+    that explicitly.  Returns True if either the direct hop is HTTPS or
+    a trusted Cloudflare-style header reports the original was HTTPS.
+
+    Used to gate the `Secure` flag on session cookies — without it,
+    captains clicking their DM'd token link from Discord's in-app
+    browser sometimes silently drop the cookie (samesite=Strict + no
+    Secure on an HTTPS page is treated inconsistently by mobile
+    webviews), leaving the captain in an unauthed loop.
+    """
+    if request.is_secure:
+        return True
+    return request.headers.get("X-Forwarded-Proto", "").lower() == "https"
+
+
 def _get_session(token: str) -> dict | None:
     now = time.time()
     with _sessions_lock:
@@ -404,6 +429,7 @@ def create_flask(core: AppCore) -> Flask:
             resp.set_cookie(
                 "session", session_token,
                 httponly=True, samesite="Strict",
+                secure=_request_is_https(),     # v0.11.17 A3
             )
             return resp
         return redirect("/")
@@ -434,6 +460,7 @@ def create_flask(core: AppCore) -> Flask:
             resp.set_cookie(
                 "session", session_token,
                 httponly=True, samesite="Strict",
+                secure=_request_is_https(),     # v0.11.17 A3
             )
             return resp
         _record_fail(ip)
@@ -619,6 +646,20 @@ def create_flask(core: AppCore) -> Flask:
             return jsonify({"error": "Server directory not configured"}), 400
         if not core.is_installed:
             return jsonify({"error": "CS2 is not installed — use Config → Install to download it first"}), 400
+        # v0.11.17 A6 — refuse Start while a workshop download is in flight.
+        # Otherwise cs2.exe boots against a half-extracted addon folder and
+        # either silently falls back to dust2 OR loads a broken map that
+        # crashes mid-match.  Worse: the download process keeps writing to
+        # files the server has open, producing Windows file-lock errors and
+        # potentially corrupting both the server's view and the download.
+        # 409 (Conflict) is the right HTTP code for "wait for the other
+        # in-progress operation to finish."
+        if getattr(core, "_active_dl_proc", None) is not None:
+            return jsonify({
+                "error": ("A workshop download is still running.  Wait for it "
+                          "to finish (or cancel it) before starting the server."),
+                "dl_progress": dict(getattr(core, "_dl_progress", {})),
+            }), 409
         d        = request.get_json() or {}
         map_name = d.get("map", "de_dust2").strip()
         mode     = d.get("mode", "Competitive")
@@ -928,15 +969,33 @@ def create_flask(core: AppCore) -> Flask:
             if v != "***":
                 old = core.discord_bot_token
                 core.discord_bot_token = v
-                if v != old:
-                    try:
-                        from . import discord_bot
-                        if v:
-                            discord_bot.start_bot(core)
-                        else:
+                # v0.11.17 A7 — restart on token CHANGE (original behaviour) OR
+                # when the operator re-saves the SAME token while the bot is
+                # disconnected.  Previously a dead bot could only be revived
+                # by restarting the whole app: `if v != old:` skipped the
+                # restart, so re-saving did nothing.  Now Save Discord
+                # Settings is also a "reconnect bot" lever.
+                try:
+                    from . import discord_bot
+                    if not v:
+                        # Token cleared → stop the bot regardless of prior state.
+                        if v != old:
                             discord_bot.stop_bot(core)
-                    except Exception as exc:
-                        core.log(f"[discord] bot lifecycle on token change failed: {exc}")
+                    elif v != old:
+                        # New token → always (re)start.
+                        discord_bot.start_bot(core)
+                    else:
+                        # Same token re-saved — only restart if the bot is
+                        # actually disconnected.  Avoids needlessly bouncing
+                        # a healthy bot when the operator clicked Save just
+                        # to change guild_id / channel_id / voice_channel_id
+                        # (which are also processed in this same handler).
+                        status = discord_bot.bot_status()
+                        if not status.get("connected"):
+                            core.log("[discord] re-save with disconnected bot — restarting")
+                            discord_bot.start_bot(core)
+                except Exception as exc:
+                    core.log(f"[discord] bot lifecycle on token change failed: {exc}")
         if is_local and "discord_guild_id" in d:
             core.discord_guild_id = str(d["discord_guild_id"]).strip()
         if is_local and "discord_veto_channel_id" in d:
@@ -1554,15 +1613,37 @@ def create_flask(core: AppCore) -> Flask:
             "footer": {"text": footer_text},
         }
 
+    # v0.11.17 B1 — coalescing serializer for live embed refreshes.
+    #
+    # Original behaviour: every `_refresh_live_veto_embed(...)` call spawned
+    # a fresh daemon thread that immediately raced into the Discord API.
+    # Two failure modes during rapid clicks (captain rage-clicks during the
+    # ban phase, BO5 with 7+ steps, etc.):
+    #
+    #   1. Out-of-order edits: thread for step N+1 acquires its Discord
+    #      socket before thread for step N completes → spectators see
+    #      step N's state AFTER step N+1.
+    #   2. Duplicate posts: when the existing message edit fails, BOTH
+    #      threads (each having snapshotted `existing_msg_id == ""`)
+    #      decide to post a fresh embed → two embeds in the channel.
+    #
+    # Fix: serialize via a single in-flight worker + a "pending" slot that
+    # always holds the LATEST snapshot.  The worker drains the slot in a
+    # loop, so a new refresh request arriving mid-send doesn't spawn a new
+    # thread; the in-flight worker picks it up after the current API call
+    # finishes.  Stale snapshots get coalesced away — only the newest
+    # snapshot since the last send actually hits Discord.
+    _embed_send_lock     = threading.Lock()
+    _embed_pending_lock  = threading.Lock()
+    _embed_pending: dict = {"snap": None}
+
     def _refresh_live_veto_embed(reason: str = "step") -> None:
         """Post or edit the live veto embed.  Called from /api/veto/step
         and /api/veto/finale + the captain-claim path that flips state to
-        `veto`.  Fire-and-forget on a background thread so the caller's
-        HTTP response isn't held by Discord API latency.
-
-        Reason is logged for triage.  Channel ID + bot connection are
-        checked here so callers don't need to know; silent no-op when
-        either is missing.
+        `veto`.  Coalesces concurrent calls (v0.11.17 B1) so spectators
+        always see the LATEST state and rapid clicks can't produce
+        duplicate posts or out-of-order edits.  Silent no-op when the
+        target channel isn't configured or the bot isn't connected.
         """
         try:
             from . import discord_bot
@@ -1584,36 +1665,62 @@ def create_flask(core: AppCore) -> Flask:
             existing_msg_id = s.live_embed_msg_id or ""
             channel_id = core.discord_veto_channel_id
 
-        # Outside the lock — Discord API call shouldn't hold _veto_lock
+        # Hand off the latest snapshot to the worker.  Drops any older
+        # pending snapshot — only the newest matters because the embed
+        # message itself is what the operator sees; intermediate states
+        # are irrelevant once a newer one is available.
+        with _embed_pending_lock:
+            _embed_pending["snap"] = (channel_id, embed_dict, existing_msg_id, reason)
+
+        # Try to become the in-flight worker.  If someone else is already
+        # in flight, they'll drain our snapshot on their next loop and we
+        # have nothing more to do.
+        if not _embed_send_lock.acquire(blocking=False):
+            return
+
         def _do() -> None:
             try:
-                if existing_msg_id:
-                    ok = discord_bot.bot_edit_embed(channel_id, existing_msg_id, embed_dict)
-                    if ok:
-                        core.log(f"[discord] live veto embed edited ({reason})")
-                    else:
-                        # Edit failed — message may have been deleted manually,
-                        # or permissions revoked.  Try posting a new one.
-                        core.log(f"[discord] live veto embed edit failed — "
-                                 f"posting a fresh one")
-                        msg_id = discord_bot.bot_post_embed(channel_id, embed_dict)
-                        if msg_id:
-                            with core._veto_lock:
-                                if core._veto_session is not None:
-                                    core._veto_session.live_embed_msg_id = msg_id
-                else:
-                    msg_id = discord_bot.bot_post_embed(channel_id, embed_dict)
-                    if msg_id:
-                        with core._veto_lock:
-                            if core._veto_session is not None:
-                                core._veto_session.live_embed_msg_id = msg_id
-                        core.log(f"[discord] live veto embed posted (msg {msg_id})")
-                    else:
-                        core.log(f"[discord] live veto embed post failed — "
-                                 f"check bot permissions on channel {channel_id}")
-            except Exception as exc:
-                core.log(f"[discord] live veto embed failed: "
-                         f"{type(exc).__name__}: {exc}")
+                while True:
+                    with _embed_pending_lock:
+                        snap = _embed_pending["snap"]
+                        _embed_pending["snap"] = None
+                    if snap is None:
+                        return    # nothing more queued; exit worker
+                    cid, ed, mid, rsn = snap
+                    try:
+                        if mid:
+                            ok = discord_bot.bot_edit_embed(cid, mid, ed)
+                            if ok:
+                                core.log(f"[discord] live veto embed edited ({rsn})")
+                            else:
+                                # Edit failed — message may have been deleted manually
+                                # or perms revoked.  Try posting a fresh one.
+                                core.log(f"[discord] live veto embed edit failed — "
+                                         f"posting a fresh one")
+                                msg_id = discord_bot.bot_post_embed(cid, ed)
+                                if msg_id:
+                                    with core._veto_lock:
+                                        if core._veto_session is not None:
+                                            core._veto_session.live_embed_msg_id = msg_id
+                        else:
+                            msg_id = discord_bot.bot_post_embed(cid, ed)
+                            if msg_id:
+                                with core._veto_lock:
+                                    if core._veto_session is not None:
+                                        core._veto_session.live_embed_msg_id = msg_id
+                                core.log(f"[discord] live veto embed posted (msg {msg_id})")
+                            else:
+                                core.log(f"[discord] live veto embed post failed — "
+                                         f"check bot permissions on channel {cid}")
+                    except Exception as exc:
+                        core.log(f"[discord] live veto embed failed: "
+                                 f"{type(exc).__name__}: {exc}")
+                    # Loop: if another refresh request arrived while we
+                    # were in the Discord API call, drain that one too.
+                    # Otherwise the next loop iteration's pop returns None
+                    # and we exit.
+            finally:
+                _embed_send_lock.release()
         threading.Thread(target=_do, daemon=True).start()
 
     def _post_discord_finale_webhook(history_entry: dict, matchzy_result: dict) -> None:
@@ -2312,7 +2419,8 @@ def create_flask(core: AppCore) -> Flask:
         # configured or the bot isn't connected.
         _refresh_live_veto_embed(reason="captain claim")
         resp = jsonify({"ok": True, "team": team})
-        resp.set_cookie("session", session_token, httponly=True, samesite="Strict")
+        resp.set_cookie("session", session_token, httponly=True, samesite="Strict",
+                        secure=_request_is_https())    # v0.11.17 A3
         return resp
 
     @app.route("/veto")
@@ -2340,7 +2448,8 @@ def create_flask(core: AppCore) -> Flask:
                     sess["captain_team"] = team
                 _veto_broadcast()
                 resp = redirect("/#veto")
-                resp.set_cookie("session", session_token, httponly=True, samesite="Strict")
+                resp.set_cookie("session", session_token, httponly=True, samesite="Strict",
+                                secure=_request_is_https())    # v0.11.17 A3
                 return resp
         # Fall through — render the SPA shell; the frontend handles the rest.
         return redirect("/#veto")
@@ -2449,6 +2558,11 @@ def create_flask(core: AppCore) -> Flask:
             # three-way outcome handling stays in /api/veto/finale for the
             # admin button.
             try:
+                # v0.11.17 B3 — check-and-set _finale_firing under the lock.
+                # If another thread already claimed the right to fire (admin
+                # finale button, or another ready-toggle thread), we bail
+                # cleanly without writing a second config file or firing a
+                # second matchzy_loadmatch.
                 with core._veto_lock:
                     if core._veto_session is None:
                         return jsonify({"team": team, "ready": ready_val,
@@ -2458,6 +2572,13 @@ def create_flask(core: AppCore) -> Flask:
                         return jsonify({"team": team, "ready": ready_val,
                                         "ready_a": ra, "ready_b": rb, "both_ready": both,
                                         "auto_launch": f"wrong state {core._veto_session.state}"})
+                    if core._finale_firing:
+                        core.log("[veto] auto-launch: another thread is already "
+                                 "firing finale — skipping duplicate")
+                        return jsonify({"team": team, "ready": ready_val,
+                                        "ready_a": ra, "ready_b": rb, "both_ready": both,
+                                        "auto_launch": "already firing"})
+                    core._finale_firing = True
                     cfg = _veto.build_matchzy_config(
                         core._veto_session,
                         cvar_overrides=getattr(core, "matchzy_cvars", None),
@@ -2487,9 +2608,16 @@ def create_flask(core: AppCore) -> Flask:
                 with core._veto_lock:
                     if core._veto_session is not None and core._veto_session.state == "finale":
                         _veto.complete(core._veto_session)
+                    core._finale_firing = False    # v0.11.17 B3 — release the guard
                 _veto_broadcast()
             except Exception as exc:
                 core.log(f"[veto] auto-launch failed: {exc}")
+                # Release the guard on any failure so the admin Finale
+                # button (or a future retry) can take over.  Otherwise a
+                # stuck `_finale_firing = True` from a crashed handler
+                # would lock everyone out until app restart.
+                with core._veto_lock:
+                    core._finale_firing = False
 
         return jsonify({
             "team": team, "ready": ready_val,
@@ -2540,12 +2668,26 @@ def create_flask(core: AppCore) -> Flask:
                     "error": "session already complete — call /api/veto/reset "
                              "before starting a new finale handoff."
                 }), 400
+            # v0.11.17 B3 — check-and-set the finale-firing guard.  If the
+            # captain-ready auto-launch path (or another concurrent click of
+            # this same button) is already in flight, refuse cleanly so we
+            # don't write a second config + fire a second matchzy_loadmatch.
+            if core._finale_firing:
+                return jsonify({
+                    "error": "another finale handoff is already in flight — "
+                             "wait a moment, then check the SPA state."
+                }), 409
+            core._finale_firing = True
             try:
                 cfg = _veto.build_matchzy_config(
                         core._veto_session,
                         cvar_overrides=getattr(core, "matchzy_cvars", None),
                     )
             except Exception as e:
+                # v0.11.17 B3 — release the guard on any failure path so
+                # the operator can retry (the admin button or auto-launch
+                # would otherwise stay locked out until app restart).
+                core._finale_firing = False
                 return _veto_error_response(e)
 
         # v0.10.2 — Mode pre-flight.  matchzy_loadmatch only works on
@@ -2560,6 +2702,10 @@ def create_flask(core: AppCore) -> Flask:
         _MATCHZY_MODES = {"Practice", "3v3", "4v4", "5v5", "Competitive"}
         current_mode = (core.current_mode or "").strip()
         if load_match and not force and current_mode not in _MATCHZY_MODES:
+            # v0.11.17 B3 — operator's going to switch mode + retry, so
+            # release the guard.
+            with core._veto_lock:
+                core._finale_firing = False
             return jsonify({
                 "error": (
                     f"server is on mode {current_mode or '(unknown)'} which "
@@ -2612,6 +2758,9 @@ def create_flask(core: AppCore) -> Flask:
         # needs to know they can't proceed.  Don't complete the session so
         # they can retry after fixing the disk issue.
         if write_error:
+            # v0.11.17 B3 — operator may fix disk + retry, so release guard.
+            with core._veto_lock:
+                core._finale_firing = False
             return jsonify({"error": write_error}), 500
 
         # File write OK — try the RCON handoff if requested and possible.
@@ -2651,6 +2800,14 @@ def create_flask(core: AppCore) -> Flask:
                 _veto.complete(core._veto_session)
             else:
                 snapshot = None
+            # v0.11.17 B3 — release the finale-firing guard now that
+            # we've reached the success path.  Clearing on the way out
+            # only (not on RCON failure earlier) is intentional: the
+            # session is now `complete`, so a duplicate finale call from
+            # auto-launch will hit the `state == "complete"` guard and
+            # bail cleanly — and clearing here lets a Reset+new session
+            # fire a new finale eventually.
+            core._finale_firing = False
         if snapshot is not None:
             _save_to_match_history(snapshot)
             # v0.10.2 — Discord webhook (operator-configured).  Fire-and-
@@ -2777,6 +2934,12 @@ def create_flask(core: AppCore) -> Flask:
             if core._veto_session is not None:
                 _veto.reset(core._veto_session)
             core._veto_session = None
+            # v0.11.17 B3 — reset clears the finale-firing guard so the
+            # next session's finale can fire normally.  Belt-and-braces:
+            # the success path of veto_finale already clears it, but a
+            # crashed handler that exited before reaching that point
+            # might have left it stuck True.
+            core._finale_firing = False
         _veto_broadcast()
         core.log("[veto] session reset")
         return jsonify({"ok": True, "state": "idle"})
@@ -3134,8 +3297,14 @@ def create_flask(core: AppCore) -> Flask:
                 try:
                     from . import discord_bot as _dbot
                     if _dbot.bot_status().get("connected"):
+                        # v0.11.16: 1.5s timeout (was 3.0s).  If the bot is
+                        # mid-reconnect or wedged, "snapshot feels frozen for
+                        # 3 seconds" is exactly the opposite of what an
+                        # operator hitting the triage button needs.  Half a
+                        # tick of bot latency is fine; longer → mark unknown
+                        # and let the operator move on.
                         _info = _dbot.bot_voice_channel_info(
-                            core.discord_guild_id, _vc_id, timeout=3.0
+                            core.discord_guild_id, _vc_id, timeout=1.5
                         )
                         if _info:
                             kv("voice_channel_name",  _info.get("name", "?"))

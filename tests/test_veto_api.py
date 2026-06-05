@@ -1040,6 +1040,209 @@ def t_discord_voice_channel_id_remote_write_rejected():
 t('config: remote write to discord_voice_channel_id is rejected (local-only)', t_discord_voice_channel_id_remote_write_rejected)
 
 
+# ─── v0.11.17 hotfixes ────────────────────────────────────────────────────
+
+def t_server_start_409_during_workshop_download():
+    """v0.11.17 A6: /api/server/start refuses with 409 when a workshop
+    download is in flight.  Otherwise cs2.exe boots against a half-
+    extracted addon folder.
+
+    Note: `is_installed` is a @property; monkey-patch via the class to
+    bypass the on-disk check (we don't have CS2 installed in the test
+    env)."""
+    ac, app, c = _new_app()
+    _login(c)
+    ac.server_dir = tempfile.mkdtemp(prefix='oblivion_dl_test_')   # bypass dir-not-configured
+    # Bypass the property check by overriding it on the instance.
+    type(ac).is_installed = property(lambda _self: True)   # type: ignore[assignment]
+    try:
+        # Simulate an active download
+        class _FakeProc:
+            def poll(self): return None
+        ac._active_dl_proc = _FakeProc()
+        r = c.post('/api/server/start', json={'map': 'de_dust2', 'mode': 'Competitive'})
+        body = r.get_json() or {}
+        return (r.status_code == 409
+                and 'download' in body.get('error', '').lower()), \
+               f'status={r.status_code} body={body}'
+    finally:
+        # Restore the original property so subsequent tests get the real check.
+        from cs2servergui.core import AppCore as _AC
+        # Walk MRO to find the original descriptor (defined on AppCore itself).
+        for klass in type(ac).__mro__:
+            if 'is_installed' in klass.__dict__ and klass is not type(ac):
+                type(ac).is_installed = klass.__dict__['is_installed']
+                break
+        else:
+            # If we mutated AppCore itself, just delete to restore inheritance.
+            try: delattr(type(ac), 'is_installed')
+            except AttributeError: pass
+t('/api/server/start: 409 during workshop download (v0.11.17 A6)',
+  t_server_start_409_during_workshop_download)
+
+
+def t_finale_double_fire_guard_blocks_second_call():
+    """v0.11.17 B3: the _finale_firing flag prevents a second concurrent
+    finale call from re-firing matchzy_loadmatch.  Simulate by setting
+    the flag manually then posting /api/veto/finale."""
+    ac, app, c = _new_app()
+    _login(c)
+    _drive_to_finale(c, app)
+    # Pre-set the guard as if another thread is already firing.
+    ac._finale_firing = True
+    ac.running = True
+    calls = []
+    class _RecRCON:
+        def execute(self, cmd): calls.append(cmd); return "OK"
+    ac.rcon = _RecRCON()
+    ac.current_mode = '5v5'      # MatchZy mode so pre-flight passes
+    r = c.post('/api/veto/finale', json={'load_match': True})
+    body = r.get_json() or {}
+    return (r.status_code == 409
+            and 'already in flight' in body.get('error', '').lower()
+            and len(calls) == 0     # no RCON fired
+            ), f'status={r.status_code} body={body} rcon_calls={calls}'
+t('/api/veto/finale: 409 when _finale_firing already set (v0.11.17 B3)',
+  t_finale_double_fire_guard_blocks_second_call)
+
+
+def t_finale_clears_firing_guard_on_success():
+    """v0.11.17 B3: successful finale clears the _finale_firing guard so
+    the next session (after reset+new) can fire its own finale."""
+    ac, app, c = _new_app()
+    _login(c)
+    _drive_to_finale(c, app)
+    ac.running = True
+    class _OKRCON:
+        def execute(self, cmd): return "OK"
+    ac.rcon = _OKRCON()
+    ac.current_mode = '5v5'
+    r = c.post('/api/veto/finale', json={'load_match': True})
+    if r.status_code != 200:
+        return False, f'finale failed: {r.status_code} {r.get_json()}'
+    # Guard should be cleared after a successful run.
+    return ac._finale_firing == False, f'_finale_firing={ac._finale_firing!r}'
+t('/api/veto/finale: clears _finale_firing on success (v0.11.17 B3)',
+  t_finale_clears_firing_guard_on_success)
+
+
+def t_veto_reset_clears_finale_firing_guard():
+    """v0.11.17 B3: /api/veto/reset clears _finale_firing as belt-and-
+    braces in case a crashed handler left it stuck True."""
+    ac, app, c = _new_app()
+    _login(c)
+    c.post('/api/veto/create', json={'mode': 'BO3'})
+    ac._finale_firing = True
+    r = c.post('/api/veto/reset')
+    return (r.status_code == 200
+            and ac._finale_firing == False), \
+           f'status={r.status_code} _finale_firing={ac._finale_firing}'
+t('/api/veto/reset: clears stuck _finale_firing flag (v0.11.17 B3)',
+  t_veto_reset_clears_finale_firing_guard)
+
+
+def t_persistence_past_links_session_older_than_1h_discarded():
+    """v0.11.17 B2: a persisted session in state past `links` (voting,
+    veto, finale, complete) older than 1h is discarded on AppCore boot.
+    Sessions in early stages (idle/roster/teams/links) keep the original
+    12h window."""
+    # Use a temp APPDATA so we don't pollute the real one
+    import json as _json
+    from cs2servergui.config import VETO_ACTIVE_FILE
+    # Build a snapshot in state=voting that's 2h old.
+    stale_snap = {
+        "state": "voting", "team_a_name": "A", "team_b_name": "B",
+        "roster": [], "team_a": [], "team_b": [],
+        "votes_a": {}, "votes_b": {},
+        "captain_a_idx": None, "captain_b_idx": None,
+        "revote_count": 0, "tokens": {},
+        "mode": "BO3", "map_pool": ["de_mirage"]*7,
+        "sequence": [], "current_step": 0, "decider": "",
+        "final_maps": [], "matchzy_config": None,
+        "ready_a": False, "ready_b": False,
+        "live_embed_msg_id": "", "spectator_token": "",
+        "created_at": time.time() - 7200,    # 2 hours ago
+        "updated_at": time.time() - 7200,
+    }
+    os.makedirs(os.path.dirname(VETO_ACTIVE_FILE), exist_ok=True)
+    with open(VETO_ACTIVE_FILE, "w", encoding="utf-8") as f:
+        _json.dump(stale_snap, f)
+    # Now construct AppCore — should discard the stale past-links snapshot
+    ac = AppCore()
+    return (ac._veto_session is None
+            and not os.path.exists(VETO_ACTIVE_FILE)), \
+           f'session={ac._veto_session!r} file_exists={os.path.exists(VETO_ACTIVE_FILE)}'
+t('persistence: past-links session > 1h discarded on boot (v0.11.17 B2)',
+  t_persistence_past_links_session_older_than_1h_discarded)
+
+
+def t_persistence_past_links_session_fresh_still_resumes():
+    """v0.11.17 B2: a past-links session that's FRESH (under 1h) still
+    resumes — the tighter cutoff only fires on STALE past-links sessions."""
+    import json as _json
+    from cs2servergui.config import VETO_ACTIVE_FILE
+    fresh_snap = {
+        "state": "voting", "team_a_name": "A", "team_b_name": "B",
+        "roster": [{"name": f"p{i}", "steam_id": f"S{i}", "discord_id": ""}
+                   for i in range(10)],
+        "team_a": [{"name": f"p{i}", "steam_id": f"S{i}", "discord_id": ""}
+                   for i in range(5)],
+        "team_b": [{"name": f"p{i+5}", "steam_id": f"S{i+5}", "discord_id": ""}
+                   for i in range(5)],
+        "votes_a": {}, "votes_b": {},
+        "captain_a_idx": None, "captain_b_idx": None,
+        "revote_count": 0, "tokens": {},
+        "mode": "BO3",
+        "map_pool": ["de_mirage", "de_inferno", "de_ancient",
+                     "de_anubis", "de_nuke", "de_overpass", "de_vertigo"],
+        "sequence": [], "current_step": 0, "decider": "",
+        "final_maps": [], "matchzy_config": None,
+        "ready_a": False, "ready_b": False,
+        "live_embed_msg_id": "", "spectator_token": "",
+        "created_at": time.time() - 30,     # 30 seconds ago
+        "updated_at": time.time() - 30,
+    }
+    os.makedirs(os.path.dirname(VETO_ACTIVE_FILE), exist_ok=True)
+    with open(VETO_ACTIVE_FILE, "w", encoding="utf-8") as f:
+        _json.dump(fresh_snap, f)
+    ac = AppCore()
+    return (ac._veto_session is not None
+            and ac._veto_session.state == "voting"), \
+           f'session={ac._veto_session!r}'
+t('persistence: fresh past-links session still resumes (v0.11.17 B2)',
+  t_persistence_past_links_session_fresh_still_resumes)
+
+
+def t_persistence_early_stage_session_older_than_1h_still_resumes():
+    """v0.11.17 B2: a session in early stages (idle/roster/teams/links)
+    keeps the original 12h window — only past-links uses the 1h cutoff."""
+    import json as _json
+    from cs2servergui.config import VETO_ACTIVE_FILE
+    roster_snap = {
+        "state": "roster", "team_a_name": "A", "team_b_name": "B",
+        "roster": [], "team_a": [], "team_b": [],
+        "votes_a": {}, "votes_b": {},
+        "captain_a_idx": None, "captain_b_idx": None,
+        "revote_count": 0, "tokens": {},
+        "mode": "BO3", "map_pool": [],
+        "sequence": [], "current_step": 0, "decider": "",
+        "final_maps": [], "matchzy_config": None,
+        "ready_a": False, "ready_b": False,
+        "live_embed_msg_id": "", "spectator_token": "",
+        "created_at": time.time() - 7200,    # 2 hours ago
+        "updated_at": time.time() - 7200,
+    }
+    os.makedirs(os.path.dirname(VETO_ACTIVE_FILE), exist_ok=True)
+    with open(VETO_ACTIVE_FILE, "w", encoding="utf-8") as f:
+        _json.dump(roster_snap, f)
+    ac = AppCore()
+    return (ac._veto_session is not None
+            and ac._veto_session.state == "roster"), \
+           f'session={ac._veto_session!r}'
+t('persistence: 2h-old roster-stage session still resumes (v0.11.17 B2)',
+  t_persistence_early_stage_session_older_than_1h_still_resumes)
+
+
 def t_finale_mode_precheck_rejects_non_matchzy_mode():
     """v0.10.2: /api/veto/finale with load_match=True refuses if the server
     is on a non-MatchZy mode (1v1 Arena / Warcraft / Zombie Escape / etc.)

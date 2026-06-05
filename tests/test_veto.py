@@ -184,6 +184,61 @@ def t_roster_wrong_state():
 t('set_roster: not in roster state rejected', t_roster_wrong_state)
 
 
+def t_roster_duplicate_steamid_rejected():
+    """v0.11.17 A1 — set_roster refuses two players with the same non-empty
+    SteamID.  Pre-A1, the duplicate would silently overwrite the first
+    player in MatchZy's team config (dict keyed by steam_id), producing a
+    9-and-5 team split that MatchZy refuses to load."""
+    s = _make_to('roster')
+    players = _ten_players()
+    # _ten_players gives each a unique STEAM_<i>; force two duplicates.
+    players[3] = RosterPlayer(name='p3', steam_id='76561198000000005')
+    players[7] = RosterPlayer(name='p7', steam_id='76561198000000005')
+    try:
+        V.set_roster(s, 'A', 'B', players)
+        return False, 'should have raised'
+    except VetoStageError as e:
+        # Error message should name the duplicated ID so the operator can fix it
+        msg = str(e)
+        return ('76561198000000005' in msg and 'Duplicate' in msg), \
+               f'msg={msg!r}'
+t('set_roster: duplicate non-empty SteamID rejected (v0.11.17 A1)',
+  t_roster_duplicate_steamid_rejected)
+
+
+def t_roster_multiple_empty_steamids_ok():
+    """v0.11.17 A1 — multiple EMPTY steam_ids are NOT considered duplicates.
+    Operator may onboard a roster with some players' IDs filled in and
+    others to-be-confirmed; the duplicate check only fires on non-empty
+    IDs that collide."""
+    s = _make_to('roster')
+    players = _ten_players()
+    # Blank out two players' steam_ids — should still validate.
+    players[1] = RosterPlayer(name='p1', steam_id='')
+    players[4] = RosterPlayer(name='p4', steam_id='')
+    try:
+        V.set_roster(s, 'A', 'B', players)
+        return s.team_a_name == 'A' and len(s.roster) == 10, ''
+    except Exception as e:
+        return False, f'unexpectedly raised: {e}'
+t('set_roster: multiple empty SteamIDs are allowed (v0.11.17 A1)',
+  t_roster_multiple_empty_steamids_ok)
+
+
+def t_rematch_clears_live_embed_msg_id():
+    """v0.11.17 A2 — rematch() must clear live_embed_msg_id so the bot posts
+    a FRESH embed for the new series.  Pre-A2 the bot would edit the prior
+    series's "MATCH LOCKED IN" embed, showing yesterday's result in
+    today's veto channel."""
+    s = _make_to('complete')
+    s.live_embed_msg_id = '12345678901234567890'   # simulate prior embed
+    V.rematch(s)
+    return s.live_embed_msg_id == '', \
+           f'live_embed_msg_id should be cleared, got {s.live_embed_msg_id!r}'
+t('rematch: clears live_embed_msg_id so new series gets fresh embed (v0.11.17 A2)',
+  t_rematch_clears_live_embed_msg_id)
+
+
 # ═══ distribute_teams ═════════════════════════════════════════════════════
 def t_distribute_5_5():
     s = _make_to('roster')
