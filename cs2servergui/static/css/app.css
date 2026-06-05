@@ -2422,8 +2422,13 @@ body.compact #content        { padding: 14px 16px; }
   color: var(--text-1); margin: 0;
 }
 .veto-stage-head .sub { color: var(--text-3); font-family: var(--font-mono); font-size: 11px; }
-.veto-stage-actions { display: flex; gap: 10px; align-items: center; margin-top: 18px; }
+.veto-stage-actions { display: flex; gap: 10px; align-items: center; margin-top: 18px; flex-wrap: wrap; }
 .veto-stage-actions .spacer { flex: 1; }
+/* v0.11.17 A4 — keep the row from overflowing on iPhone SE 320 px.  The
+   row got an extra button in v0.11.16 (🔀 Pick channel) and the existing
+   `display:flex` with no wrap was already cramped at 6 buttons.  Wrap is
+   safe on desktop because flex-wrap defaults to a single line when the
+   container is wide enough. */
 
 .veto-create-card { max-width: 520px; }
 .veto-create-card .field { margin-bottom: 14px; }
@@ -2614,6 +2619,25 @@ body.compact #content        { padding: 14px 16px; }
   box-shadow: 0 0 0 2px var(--ok); }
 .veto-map-card.illegal { opacity: 0.4; cursor: not-allowed; }
 .veto-map-card.illegal:hover { transform: none; }
+/* v0.11.17 B4 — visual feedback while a captain's tap is in flight.
+   `.pending` highlights the tapped card with a pulsing accent border so
+   they can see "yes, your tap landed."  `.locked-during-pending` dims
+   the other cards + blocks pointer events so a frustrated double-tap
+   can't land on a different map while the API call is processing. */
+.veto-map-card.pending {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent), 0 0 18px var(--accent);
+  cursor: progress;
+  animation: vetoMapPendingPulse 1.2s ease-in-out infinite;
+}
+.veto-map-card.locked-during-pending {
+  opacity: 0.45; pointer-events: none; cursor: wait;
+}
+@keyframes vetoMapPendingPulse {
+  0%   { box-shadow: 0 0 0 2px var(--accent), 0 0 12px var(--accent); }
+  50%  { box-shadow: 0 0 0 2px var(--accent), 0 0 24px var(--accent); }
+  100% { box-shadow: 0 0 0 2px var(--accent), 0 0 12px var(--accent); }
+}
 .veto-map-thumb { width: 100%; height: 100%; object-fit: cover; display: block;
   background: var(--bg-1); }
 .veto-map-name {

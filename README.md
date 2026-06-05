@@ -3,10 +3,22 @@
 A desktop application for managing a **Counter-Strike 2 dedicated server** on Windows.  
 Built with Python + Flask + pywebview (Edge WebView2). Ships as a single `.exe` with an optional installer.
 
-> **Status: v0.11.15 (released 2026-06-04).**  Fifteen releases shipped
-> pushing the v0.11.x line to maturity.
+> **Status: v0.11.17 (released 2026-06-05).**  Seventeen releases shipped
+> pushing the v0.11.x line to maturity.  Friday-eve adversarial sweep
+> across veto, Discord, server/RCON, and SPA surfaced 12 real findings;
+> all fixed.  **197/197 backend tests green.**
 >
 > **What's new since v0.11.0**:
+> - **Friday-eve thorough sweep** *(v0.11.17)* — Tier A (duplicate
+>   SteamID rejection, rematch embed clear, secure cookie on tunnel,
+>   mobile flex-wrap, drop privileged intent, server-start during dl,
+>   bot recovery via re-save) + Tier B (live-embed coalescing,
+>   tightened resume window, finale double-fire guard, captain board
+>   click race, captain Ready closure fix).  +10 backend tests.
+> - **v0.11.15 adversarial-review hotfixes** *(v0.11.16)* — double-click
+>   guard on the 🎤 button, mobile-safe 🔀 Pick channel button, silent
+>   fallback when default VC is unreachable, snapshot triage timeout
+>   3s→1.5s.  Self-review caught three ship-risks; all fixed.
 > - **Default voice channel for one-click roster pull** *(v0.11.15)* —
 >   configure your tournament's regular VC once → Veto roster's "🎤 Pull
 >   from voice channel" becomes one click instead of pick-from-modal.
@@ -37,7 +49,7 @@ Built with Python + Flask + pywebview (Edge WebView2). Ships as a single `.exe` 
 >   switch)` hint for MetaMod modes.
 > - **Map dropdown category tinting** *(v0.11.7)* — Official / Workshop
 >   Recommended / Workshop Other split with accent tint per category.
-> - **Status-bar version pill** *(v0.11.6)* — `v0.11.15` always visible
+> - **Status-bar version pill** *(v0.11.6)* — `v0.11.17` always visible
 >   bottom-right; no more "what version am I running?"
 > - **Version on /api/ping** *(v0.11.5)* — unauthenticated `curl
 >   localhost:5050/api/ping` returns `{version, build}` for fast remote

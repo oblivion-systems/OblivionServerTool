@@ -2259,6 +2259,13 @@ let _vetoState = null;
 let _vetoEs = null;
 let _vetoLocalRoster = [];   // unsaved roster edits before Distribute commits
 
+// v0.11.17 B4 — set true while a veto-board click is mid-flight to suppress
+// _renderVeto() rebuilds of the board.  Without this guard, an SSE event
+// arriving during the await (other captain's vote, operator config change,
+// etc.) can rebuild the board DOM, replacing the card the captain just
+// tapped with a detached node.  Cleared in the click handler's `finally`.
+let _vetoBoardClickInFlight = false;
+
 // ── Animation bookkeeping (Day 5) ────────────────────────────────────────
 // All three are reset when the session goes back to `idle` (operator hit
 // Reset, or a fresh tab open) so a new session gets a fresh round of
@@ -2357,6 +2364,19 @@ function _renderVeto() {
   const ae = document.activeElement;
   if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')
       && root.contains(ae)) {
+    return;
+  }
+
+  // v0.11.17 B4 — same defence for the veto-board stage: if a captain (or
+  // admin) just tapped a map card and the API call is in flight, skip the
+  // re-render so the tap doesn't get lost to a fresh DOM mid-await.  The
+  // SSE event(s) arriving during the request are coalesced into the next
+  // re-render that fires AFTER the in-flight click completes (success or
+  // error path clears the flag).  Tournament impact: captains on 3G
+  // phones tapping a card sometimes saw the board rebuild before their
+  // request completed, leading to a confusing "did my pick land?" toast
+  // even though it had.
+  if (state === 'veto' && _vetoBoardClickInFlight) {
     return;
   }
 
@@ -2510,8 +2530,15 @@ function _renderVetoRoster(root, sess) {
           <option value="">— Load preset —</option>
         </select>
         <button class="btn btn-ghost" id="veto-roster-discord"
-                title="Pull connected members from your default voice channel (configure in Config → Discord).  Shift+click to pick a different channel.">
+                title="Pull connected members.  Uses your default voice channel if configured (Config → Discord); otherwise opens the picker.  Shift+click forces the picker.">
           🎤 Pull from voice channel
+        </button>
+        <!-- v0.11.16 — mobile-safe path to the picker (no shift+click).
+             Always opens the picker modal so tablet / phone operators can
+             override the configured default VC without keyboard shortcuts. -->
+        <button class="btn btn-ghost" id="veto-roster-discord-pick"
+                title="Pick a voice channel from a list (skips the configured default)">
+          🔀 Pick channel…
         </button>
         <div class="spacer"></div>
         <div class="veto-roster-progress">
@@ -2678,10 +2705,37 @@ function _renderVetoRoster(root, sess) {
   // from that VC.  The picker only opens as a fallback (no default set,
   // or the configured channel is unreachable).  Shift-click forces the
   // picker regardless ("I want to use a different VC tonight").
-  el('veto-roster-discord').addEventListener('click', async (ev) => {
-    const forcePicker = ev.shiftKey === true;
-    if (forcePicker) { await _vetoOpenDiscordPullModal(); return; }
-    await _vetoPullFromConfiguredVoiceOrPicker();
+  //
+  // v0.11.16: Double-click guard so two rapid clicks don't run two
+  // concurrent voiceChannelInfo + voiceMembers round-trips (which
+  // would overwrite _vetoLocalRoster twice and could open the picker
+  // modal underneath an in-flight pull).
+  const rosterDiscordBtn = el('veto-roster-discord');
+  if (rosterDiscordBtn) rosterDiscordBtn.addEventListener('click', async (ev) => {
+    if (rosterDiscordBtn.disabled) return;       // belt-and-braces
+    rosterDiscordBtn.disabled = true;
+    try {
+      const forcePicker = ev.shiftKey === true;
+      if (forcePicker) { await _vetoOpenDiscordPullModal(); return; }
+      await _vetoPullFromConfiguredVoiceOrPicker();
+    } finally {
+      rosterDiscordBtn.disabled = false;
+    }
+  });
+  // v0.11.16 — mobile-safe path: an always-picker button that does NOT
+  // touch the configured default.  Same disabled guard so it can't race
+  // with itself or the primary 🎤 button.
+  const rosterDiscordPickBtn = el('veto-roster-discord-pick');
+  if (rosterDiscordPickBtn) rosterDiscordPickBtn.addEventListener('click', async () => {
+    if (rosterDiscordPickBtn.disabled) return;
+    rosterDiscordPickBtn.disabled = true;
+    if (rosterDiscordBtn) rosterDiscordBtn.disabled = true;  // serialise with 🎤
+    try {
+      await _vetoOpenDiscordPullModal();
+    } finally {
+      rosterDiscordPickBtn.disabled = false;
+      if (rosterDiscordBtn) rosterDiscordBtn.disabled = false;
+    }
   });
   const saveBtn = el('veto-roster-save');
   if (saveBtn) saveBtn.addEventListener('click', async () => {
@@ -2718,10 +2772,17 @@ async function _vetoPullFromConfiguredVoiceOrPicker() {
     const r = await api.discord.voiceChannelInfo();   // no arg → server uses configured ID
     info = r.channel;
   } catch (e) {
-    // 400 "No channel ID" → no default set, fall back to picker silently
-    // anything else → fall back to picker with a toast hint
+    // v0.11.16: widen the silent-fallback regex.  The picker will fail
+    // for the same reason anyway, so a toast PLUS a modal that also
+    // errors is just noise.  Cases that fall through silently:
+    //   "No channel ID — pass channel_id or configure …"  (no default set)
+    //   "Discord guild ID not configured — set it in Config → Discord."
+    //   "Discord bot is not connected"
+    //   "bot module unavailable: …"
+    // Anything else → still toast (genuinely unexpected error, worth surfacing).
     const msg = e.message || '';
-    if (!/No channel ID/i.test(msg)) {
+    const expected = /No channel ID|guild ID not configured|bot is not connected|bot module unavailable/i;
+    if (!expected.test(msg)) {
       toast(`Default VC unreachable — opening picker (${msg})`, 'var(--accent)');
     }
     await _vetoOpenDiscordPullModal();
@@ -3472,11 +3533,35 @@ function _renderVetoBoard(root, sess) {
     if (c.classList.contains('banned') || c.classList.contains('picked')
         || c.classList.contains('illegal')) return;
     c.addEventListener('click', async () => {
+      // v0.11.17 B4 — guard against the SSE-rebuild-mid-click race:
+      //   1. Set the global flag so _renderVeto() skips the board.
+      //   2. Mark the tapped card as "pending" + visually disable all
+      //      other cards so a frustrated double-tap can't land on a
+      //      different map.
+      //   3. Clear the flag in `finally` so any state arriving via SSE
+      //      during the request gets rendered on the next trigger.
+      if (_vetoBoardClickInFlight) return;     // belt-and-braces
+      _vetoBoardClickInFlight = true;
+      // Visual: dim siblings, mark this card as pending.
+      document.querySelectorAll('.veto-map-card').forEach(other => {
+        if (other === c) other.classList.add('pending');
+        else              other.classList.add('locked-during-pending');
+      });
       const mapId = c.dataset.map;
       const team  = step?.team;
-      if (!team) return;
-      try { await api.veto.step(team, mapId); }
-      catch (e) { toast(e.message, 'var(--bad)'); }
+      if (!team) { _vetoBoardClickInFlight = false; return; }
+      try {
+        await api.veto.step(team, mapId);
+      } catch (e) {
+        toast(e.message, 'var(--bad)');
+      } finally {
+        _vetoBoardClickInFlight = false;
+        // SSE event for the successful step has likely already arrived
+        // and been queued behind the suppression — kick a render now so
+        // the new state lands immediately rather than waiting for the
+        // next SSE ping.
+        _renderVeto();
+      }
     });
   });
 }
@@ -3709,9 +3794,18 @@ function _renderVetoFinaleCaptain(root, sess) {
     </div>
   `;
   el('veto-cap-ready-btn').addEventListener('click', async () => {
+    // v0.11.17 B5 — re-derive `myReady` from the LIVE state at click time,
+    // not from the closure captured at render.  The render closure can go
+    // stale when the SPA suppresses a render (focused input) or when SSE
+    // arrives between renders.  Captain saw the ✓ READY badge from a fresh
+    // SSE state, tapped to un-ready, but the closure had `myReady=false`
+    // from the old render → sent `ready(true)` (no-op).  Looks dead to
+    // the captain.  Re-derive ensures the toggle always inverts the truth.
+    const sNow      = _vetoState && _vetoState.session ? _vetoState.session : sess;
+    const myReadyNow = myTeam === 'A' ? !!sNow.ready_a : !!sNow.ready_b;
     try {
-      const r = await api.veto.ready(!myReady);
-      toast(myReady ? 'Un-readied' : 'Ready! Waiting for opponent / operator.');
+      await api.veto.ready(!myReadyNow);
+      toast(myReadyNow ? 'Un-readied' : 'Ready! Waiting for opponent / operator.');
     } catch (err) { toast(err.message, 'var(--bad)'); }
   });
   if (conn) {

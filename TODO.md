@@ -21,12 +21,16 @@
 | 4 | Test & release engineering | 🟢 mostly done (smoke battery 161/161; build pipeline + signing still open) |
 | 5 | Polish & 1.0 launch | 🟡 in flight (mobile + role pill + capabilities done; final docs + 1.0 ship pending) |
 
-**Current release:** v0.11.15 (2026-06-04) — **187/187 tests green**.
-Fifteen releases; v0.11.x is Friday-ready with recurring-tournament UX
-nailed.  Diagnostic snapshot mechanism validated end-to-end via real
-Way-3 paste cycle.  Host + Play perf scripts solve the alt-tab lag
-spike.  v0.11.15 adds the default-VC field so the "Pull from voice
-channel" roster button becomes one click instead of pick-from-modal.
+**Current release:** v0.11.17 (2026-06-05) — **197/197 tests green**.
+Seventeen releases; v0.11.x is Friday-ready with recurring-tournament
+UX nailed, self-review hotfixes locked in, and Friday-eve adversarial
+sweep findings landed.  v0.11.17 added 12 fixes across veto / Discord
+bot / server-control / SPA — duplicate SteamID rejection, rematch embed
+clear, secure cookies on tunnel, mobile flex-wrap, drop privileged
+intent, server-start during download, bot recovery via re-save, live-
+embed coalescing, tightened resume window for past-links sessions,
+finale double-fire guard, captain board click race, captain Ready
+closure fix.  +10 backend tests.
 
 The path to v1.0 is now:
 1. Run Friday's session, collect real-user feedback

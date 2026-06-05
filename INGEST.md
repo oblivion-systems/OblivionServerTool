@@ -150,7 +150,7 @@ on missing dep / no token).
 |--------|---------|
 | `CS2_APP_ID` | Steam App ID for CS2 (`"730"`). |
 | `DEPOTDL_RELEASE_URL` | GitHub API URL for the latest DepotDownloader release. |
-| `APP_VERSION` | Current application version string (currently `"0.11.15"`). |
+| `APP_VERSION` | Current application version string (currently `"0.11.17"`). |
 | `MATCH_HISTORY_FILE` / `MATCH_HISTORY_KEEP` *(v0.10.2)* | Path + cap for `oblivion_matches.json` — last 10 completed sessions persisted by `_save_to_match_history`. |
 | `APP_REPO` | GitHub repository slug for the app (`"jacquesvniekerk-eng/OblivionServerTool"`). |
 | `APP_RELEASES_URL` / `APP_API_URL` | Human and API GitHub release URLs derived from `APP_REPO`. |

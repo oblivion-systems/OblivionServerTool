@@ -7,11 +7,12 @@
 
 ---
 
-## Where We Are — v0.11.15 (released 2026-06-04)
+## Where We Are — v0.11.17 (released 2026-06-05)
 
-**Fifteen releases** pushed the v0.11.x line from "polish sweep" to
-"Friday-ready triage + perf tooling complete + recurring-tournament
-UX nailed."  Highlights since v0.11.0:
+**Seventeen releases** with the v0.11.x line at "Friday-ready triage +
+perf tooling complete + recurring-tournament UX nailed + self-review
+hotfixes locked in + adversarial sweep findings landed."  Highlights
+since v0.11.0:
 
 | Release | Theme |
 |---|---|
@@ -30,8 +31,10 @@ UX nailed."  Highlights since v0.11.0:
 | v0.11.13 | CS2 console.log freshness in TL;DR + frame-drop flagging |
 | v0.11.14 | Host + Play perf scripts (alt-tab anti-lag toolkit) |
 | v0.11.15 | Default voice channel — one-click roster pull for recurring tournaments |
+| v0.11.16 | v0.11.15 adversarial-review hotfixes (double-click guard, mobile picker button, silent fallback) |
+| v0.11.17 | Friday-eve thorough sweep — Tier A + B fixes (12 findings across veto/Discord/server/SPA) |
 
-**187/187 backend tests green** across all releases.
+**197/197 backend tests green** across all releases.
 
 Full prose in [CHANGELOG.md](CHANGELOG.md).
 
