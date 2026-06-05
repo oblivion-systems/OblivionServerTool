@@ -970,6 +970,73 @@ def t_discord_endpoints_503_when_bot_not_connected():
 t('/api/discord/voice_* + text_channels: 503 when bot not connected', t_discord_endpoints_503_when_bot_not_connected)
 
 
+def t_diag_snapshot_plugin_logs_section_present():
+    """v0.11.19: diagnostic snapshot includes the Plugin logs section
+    (with the new TL;DR plugin_log indicator too).  When no CSS log
+    exists, the section shows a "no plugin logs found" status so the
+    operator knows the section is intentional, not missing."""
+    ac, app, c = _new_app()
+    _login(c)
+    from cs2servergui import web as _web
+    for tok in list(_web._sessions.keys()):
+        _web._sessions[tok]['is_local'] = True
+    r = c.get('/api/diag/snapshot')
+    body = r.get_data(as_text=True)
+    return (r.status_code == 200
+            and 'Plugin logs (CSS + MatchZy' in body
+            and 'plugin_log' in body          # TL;DR indicator
+            and ('no plugin logs found' in body
+                 or 'no CSS log' in body
+                 or 'css_source' in body)
+           ), \
+           f'status={r.status_code} plugin_logs_in_body={"Plugin logs" in body}'
+t('diag (v0.11.19): plugin logs section + TL;DR indicator present',
+  t_diag_snapshot_plugin_logs_section_present)
+
+
+def t_diag_snapshot_plugin_logs_tails_css_file():
+    """v0.11.19: when a CSS log file exists at the conventional path,
+    the snapshot tails it AND anomaly-prefixes ERROR/Exception lines."""
+    import os as _os
+    ac, app, c = _new_app()
+    _login(c)
+    from cs2servergui import web as _web
+    for tok in list(_web._sessions.keys()):
+        _web._sessions[tok]['is_local'] = True
+    # Create a fake CSS log inside the temp _csgo_dir
+    css_log_dir = _os.path.join(ac._csgo_dir(), "addons",
+                                 "counterstrikesharp", "logs")
+    _os.makedirs(css_log_dir, exist_ok=True)
+    log_path = _os.path.join(css_log_dir, "log-20260605.txt")
+    with open(log_path, "w", encoding="utf-8") as f:
+        f.write("[2026-06-05 09:30:00 INFO] CSS host started\n")
+        f.write("[2026-06-05 09:30:01 INFO] Loaded plugin: MatchZy v0.7.5\n")
+        f.write("[2026-06-05 09:30:02 ERROR] Failed to load resource: foo\n")
+        f.write("System.NullReferenceException: Object reference not set\n")
+        f.write("   at MatchZy.MatchZy.OnMapStart() in MatchZy.cs:123\n")
+        f.write("[2026-06-05 09:30:03 INFO] Recovered, continuing\n")
+    r = c.get('/api/diag/snapshot')
+    body = r.get_data(as_text=True)
+    # File should be referenced as the css source + anomaly-prefixed errors
+    has_source       = 'log-20260605.txt' in body
+    has_err_marker   = '> [2026-06-05 09:30:02 ERROR]' in body
+    has_exc_marker   = '> System.NullReferenceException' in body
+    has_at_line      = '>    at MatchZy.MatchZy.OnMapStart' in body
+    has_info_no_mark = '  [2026-06-05 09:30:00 INFO]' in body
+    has_anomaly_count = 'css_anomalies' in body
+    return (r.status_code == 200
+            and has_source
+            and has_err_marker
+            and has_exc_marker
+            and has_at_line
+            and has_info_no_mark
+            and has_anomaly_count), \
+           (f'source={has_source} err={has_err_marker} exc={has_exc_marker} '
+            f'at={has_at_line} info={has_info_no_mark} count={has_anomaly_count}')
+t('diag (v0.11.19): plugin logs section tails CSS file + anomaly-prefixes errors',
+  t_diag_snapshot_plugin_logs_tails_css_file)
+
+
 def t_discord_text_channels_400_without_guild():
     """v0.11.18: /api/discord/text_channels returns 400 when guild_id is
     not configured (mirrors voice_channels)."""

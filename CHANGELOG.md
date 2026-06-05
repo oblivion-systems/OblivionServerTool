@@ -2,6 +2,47 @@
 
 ---
 
+## v0.11.19 — 2026-06-05 (snapshot — plugin log diagnostics)
+
+Fills the visibility gap surfaced during pre-tournament verification:
+MatchZy + CounterStrikeSharp plugins suppress/redirect CS2's default
+console.log writes, leaving the diagnostic snapshot's CS2 log section
+blank exactly when the operator is running the real tournament workflow
+(MatchZy 5v5).  The new plugin-logs section picks up the slack.
+
+### New
+* **Plugin logs section** in the snapshot, after the CS2 console.log
+  block.  Tails the most-recently-modified file in each known plugin
+  log location, anomaly-prefixes `[ERROR]` / `[FATAL]` / `Exception` /
+  `System.*Exception` / stack-trace `at Foo.Bar(` lines with `>`.
+* Tailed locations:
+  - `csgo/addons/counterstrikesharp/logs/log-*.txt` (CSS host log —
+    captures plugin load errors + C# exceptions across all plugins)
+  - `csgo/logs/MatchZy/*.log|*.txt` (MatchZy per-match events)
+  - `csgo/addons/counterstrikesharp/plugins/MatchZy/logs/*.log|*.txt`
+    (alternative MatchZy location for older versions)
+* **TL;DR `plugin_log` indicator** — ✓ if a CSS log was written in the
+  last hour (plugin layer is alive), ⚠ if stale, · if no CSS log
+  (vanilla mode or plugins haven't loaded yet).
+* Per-file metadata in the section: source path, size, age, anomaly
+  count.
+
+### Why
+MatchZy redirects CS2's stock `con_logfile` writes to keep the channel
+output clean.  Pre-v0.11.19 snapshots running a MatchZy match showed
+zero CS2-side data — invisible to triage.  Now CSS log + MatchZy
+match log fill that gap.
+
+### Tests
++2 new (section present + CSS file tailing with anomaly prefixing).
+**200/200 green.**
+
+### Migration
+None.  Section appears automatically when CSS / MatchZy logs exist;
+shows a clear "no plugin logs found" status otherwise.
+
+---
+
 ## v0.11.18 — 2026-06-05 (🔍 Browse for Veto Embed Channel ID)
 
 Tiny consistency add: the Veto Embed Channel ID field now has a 🔍

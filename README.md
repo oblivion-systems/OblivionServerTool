@@ -3,12 +3,16 @@
 A desktop application for managing a **Counter-Strike 2 dedicated server** on Windows.  
 Built with Python + Flask + pywebview (Edge WebView2). Ships as a single `.exe` with an optional installer.
 
-> **Status: v0.11.18 (released 2026-06-05).**  Eighteen releases shipped
+> **Status: v0.11.19 (released 2026-06-05).**  Nineteen releases shipped
 > pushing the v0.11.x line to maturity.  Friday-eve adversarial sweep
 > across veto, Discord, server/RCON, and SPA surfaced 12 real findings;
-> all fixed.  **198/198 backend tests green.**
+> all fixed.  **200/200 backend tests green.**
 >
 > **What's new since v0.11.0**:
+> - **Snapshot plugin log diagnostics** *(v0.11.19)* — CSS + MatchZy
+>   log tail with anomaly prefixing fills the visibility gap
+>   left when MatchZy redirects CS2's console.log writes.  Plus a
+>   TL;DR `plugin_log` health indicator.
 > - **🔍 Browse for Veto Embed Channel ID** *(v0.11.18)* — text-channel
 >   picker in the Discord Config card, mirroring the v0.11.15
 >   default-VC Browse.  No more Developer-Mode-right-click-Copy-ID.
@@ -52,7 +56,7 @@ Built with Python + Flask + pywebview (Edge WebView2). Ships as a single `.exe` 
 >   switch)` hint for MetaMod modes.
 > - **Map dropdown category tinting** *(v0.11.7)* — Official / Workshop
 >   Recommended / Workshop Other split with accent tint per category.
-> - **Status-bar version pill** *(v0.11.6)* — `v0.11.18` always visible
+> - **Status-bar version pill** *(v0.11.6)* — `v0.11.19` always visible
 >   bottom-right; no more "what version am I running?"
 > - **Version on /api/ping** *(v0.11.5)* — unauthenticated `curl
 >   localhost:5050/api/ping` returns `{version, build}` for fast remote

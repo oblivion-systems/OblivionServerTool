@@ -3227,6 +3227,42 @@ def create_flask(core: AppCore) -> Flask:
         else:
             tldr.append(("·", "recent", "no error markers in recent app log"))
 
+        # v0.11.19 — Plugin log health.  Surfaces when CSS/MatchZy logs
+        # exist (plugin layer is active) vs when they don't (vanilla
+        # mode).  Useful tournament-night signal because MatchZy
+        # redirects CS2's console.log, so a healthy CSS log is the
+        # replacement for "is the plugin layer happy?"
+        try:
+            _css_dir = os.path.join(core._csgo_dir(), "addons",
+                                     "counterstrikesharp", "logs")
+            _has_css_log = False
+            _css_age_s   = None
+            if os.path.isdir(_css_dir):
+                import glob as _g
+                _matches = (_g.glob(os.path.join(_css_dir, "log-*.txt"))
+                            + _g.glob(os.path.join(_css_dir, "*.log")))
+                if _matches:
+                    _has_css_log = True
+                    _css_age_s = time.time() - max(
+                        os.path.getmtime(p) for p in _matches
+                    )
+            if _has_css_log and _css_age_s is not None:
+                if   _css_age_s < 90:    _css_age = f"{int(_css_age_s)}s ago"
+                elif _css_age_s < 3600:  _css_age = f"{int(_css_age_s/60)}m ago"
+                elif _css_age_s < 86400: _css_age = f"{_css_age_s/3600:.1f}h ago"
+                else:                    _css_age = f"{_css_age_s/86400:.1f} days ago"
+                _fresh = _css_age_s < 3600
+                tldr.append(("✓" if _fresh else "⚠", "plugin_log",
+                             f"CSS log {_css_age}"
+                             + (" — stale (no plugin activity since)"
+                                if not _fresh else "")))
+            else:
+                # No CSS log → either vanilla, or plugins haven't loaded
+                tldr.append(("·", "plugin_log",
+                             "no CSS log (vanilla mode or plugins not yet loaded)"))
+        except Exception:
+            tldr.append(("·", "plugin_log", "(could not check)"))
+
         # Render TL;DR
         hr("TL;DR (auto-scan)")
         for icon, label, detail in tldr:
@@ -3601,6 +3637,123 @@ def create_flask(core: AppCore) -> Flask:
                             "-condebug isn't applying — check launch args")
         except Exception as exc:
             kv("console_log_tail", f"(failed: {exc})")
+
+        # ─── v0.11.19 — Plugin logs (CSS + MatchZy) ─────────────────────────
+        # MatchZy + CounterStrikeSharp plugins suppress / redirect CS2's
+        # default console.log writes, so the section above goes blank when
+        # the actual tournament workflow (MatchZy 5v5) is running.  That's
+        # exactly when we need server-side visibility most.  This block
+        # picks up the slack by tailing the plugin layer's own log files:
+        #
+        #   csgo/addons/counterstrikesharp/logs/log-YYYYMMDD.txt
+        #     — CSS host log; captures plugin LOAD ERRORS + C# exceptions
+        #       across all plugins.  Most useful for "MatchZy crashed".
+        #
+        #   csgo/logs/MatchZy/<latest>.log  (or .txt)
+        #     — MatchZy's per-match events: roster join, ready, knife,
+        #       round end, demo upload, etc.  Useful for "match started
+        #       weird" triage.
+        #
+        # Anomaly regex matches CSS/C# error patterns: [ERROR], [FATAL],
+        # `Exception`, `System.`, `at SomeClass.Method(` stack-trace lines.
+        hr("Plugin logs (CSS + MatchZy — anomalies prefixed `>`)")
+        try:
+            import glob as _glob
+            _plugin_err_re = re.compile(
+                r"\[(?:ERROR|FATAL|CRIT|WARN(?:ING)?)\]|"
+                r"\bException(?:\s|:)|"
+                r"\bSystem\.[A-Z]\w*Exception\b|"
+                r"^\s*at\s+[A-Z]\w*(?:\.[A-Z]\w*)+\(|"
+                r"Stack trace:|"
+                r"Failed to (?:load|start|connect|initialize)",
+                re.IGNORECASE | re.MULTILINE
+            )
+            _found_any = False
+            _csgo_dir = core._csgo_dir()
+
+            def _tail_plugin_log(label: str, directory: str,
+                                 patterns: list[str], n_lines: int = 80) -> bool:
+                """Tail the most-recently-modified file matching any pattern in
+                directory.  Returns True if a file was tailed (so the caller
+                can flip the _found_any flag).  Adds its own header line into
+                `lines` plus a kv() with the source path + size + age."""
+                nonlocal lines
+                if not os.path.isdir(directory):
+                    return False
+                matches: list[str] = []
+                for pat in patterns:
+                    matches.extend(_glob.glob(os.path.join(directory, pat)))
+                if not matches:
+                    return False
+                matches.sort(key=os.path.getmtime, reverse=True)
+                latest = matches[0]
+                try:
+                    sz   = os.path.getsize(latest)
+                    mtss = os.path.getmtime(latest)
+                    mt   = datetime.datetime.fromtimestamp(mtss)
+                    age_s = max(0, time.time() - mtss)
+                    if   age_s < 90:     age_str = f"{int(age_s)}s ago"
+                    elif age_s < 3600:   age_str = f"{int(age_s/60)}m ago"
+                    elif age_s < 86400:  age_str = f"{age_s/3600:.1f}h ago"
+                    else:                age_str = f"{age_s/86400:.1f} days ago"
+                    staleness = "  ⚠ pre-tournament file" if age_s > 3600 else ""
+                    kv(f"{label}_source",
+                       f"{latest} ({sz/1024:.1f} KB, {age_str}{staleness})")
+                    # Cap at 32 KB read for a section that may contain
+                    # many files — keep snapshot size reasonable.
+                    with open(latest, "rb") as f:
+                        if sz > 32 * 1024:
+                            f.seek(-32 * 1024, 2)
+                            f.readline()      # discard partial first line
+                        tail = f.read().decode("utf-8", errors="replace")
+                    tail_lines = tail.splitlines()[-n_lines:]
+                    if not tail_lines:
+                        lines.append(f"  ({label}: file present but empty)")
+                        return True
+                    _err_n = sum(1 for ln in tail_lines if _plugin_err_re.search(ln))
+                    if _err_n > 0:
+                        kv(f"{label}_anomalies",
+                           f"{_err_n} error/exception line(s) in last {n_lines}")
+                    lines.append("")
+                    lines.append(f"  -- {label}: {os.path.basename(latest)} "
+                                 f"(last {len(tail_lines)} lines) --")
+                    for ln in tail_lines:
+                        prefix = "> " if _plugin_err_re.search(ln) else "  "
+                        lines.append(f"{prefix}{ln}")
+                    return True
+                except Exception as inner_exc:
+                    kv(f"{label}_tail", f"(failed: {inner_exc})")
+                    return True
+
+            # 1. CounterStrikeSharp host log — plugin load errors,
+            #    C# exceptions, anything any CSS plugin reports.
+            css_log_dir = os.path.join(_csgo_dir, "addons",
+                                        "counterstrikesharp", "logs")
+            if _tail_plugin_log("css", css_log_dir,
+                                ["log-*.txt", "*.log", "*.txt"]):
+                _found_any = True
+
+            # 2. MatchZy match log — per-match events written by the
+            #    plugin itself.  Path varies between MatchZy versions
+            #    (some write to logs/MatchZy/, some to
+            #    addons/counterstrikesharp/plugins/MatchZy/logs/).
+            matchzy_dirs = [
+                os.path.join(_csgo_dir, "logs", "MatchZy"),
+                os.path.join(_csgo_dir, "addons", "counterstrikesharp",
+                             "plugins", "MatchZy", "logs"),
+            ]
+            for mzd in matchzy_dirs:
+                if _tail_plugin_log("matchzy", mzd,
+                                    ["*.log", "*.txt"]):
+                    _found_any = True
+                    break       # only tail one MatchZy log location
+
+            if not _found_any:
+                kv("status",
+                   "no plugin logs found — vanilla CS2 mode, or plugins "
+                   "haven't been loaded yet (start the server first)")
+        except Exception as exc:
+            kv("plugin_logs", f"(failed: {exc})")
 
         lines.append("")
         lines.append("═══ END SNAPSHOT ═══")
