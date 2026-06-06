@@ -3627,11 +3627,16 @@ function _renderVetoBoard(root, sess) {
       if (!team) { _vetoBoardClickInFlight = false; return; }
       try {
         _vetoApply(await api.veto.step(team, mapId));
+        // success path: _vetoApply already re-rendered with the fresh snap
       } catch (e) {
         toast(e.message, 'var(--bad)');
+        // error path: state didn't change, but we must re-render to clear
+        // the .pending pulse + .locked-during-pending dim on siblings.
+        // v0.11.26 — was previously in `finally`, causing a double-render
+        // on the success path (audit finding #4).
+        _renderVeto();
       } finally {
         _vetoBoardClickInFlight = false;
-        _renderVeto();  // belt-and-braces — _vetoApply already rendered, but ensures we render even on the error path
       }
     });
   });
@@ -4022,8 +4027,16 @@ function _renderVetoCaptain(root, state, sess) {
 }
 
 /* Tear down SSE when leaving the tab */
+// v0.11.26 — drop the `currentPage === 'veto'` gate.  navigate() runs FIRST
+// on hashchange (listener registration order at app load), and updates
+// currentPage synchronously before this listener fires.  By the time we
+// read currentPage here it's already the new page, so the old guard never
+// matched on leave — _vetoCleanup never ran — and v0.11.25's poll timer
+// leaked forever.  _vetoCleanup is idempotent (no-ops if timer/ES are
+// already null), so firing it on every non-veto hash is safe.
+// Audit finding #3.
 window.addEventListener('hashchange', () => {
-  if (currentPage === 'veto' && location.hash.replace('#','') !== 'veto') {
+  if (location.hash.replace('#','') !== 'veto') {
     _vetoCleanup();
   }
 });
