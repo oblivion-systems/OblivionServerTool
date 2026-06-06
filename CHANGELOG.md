@@ -2,6 +2,115 @@
 
 ---
 
+## v0.12.0 — 2026-06-06 (Discord-driven team voice splits)
+
+First v0.12 minor — picks up where v0.11.26 audit cleanup left off and
+adds the `/move-teams` infrastructure that paired with the existing
+🎤 roster-pull from v0.11.15.  Lobby in → teams out, no operator dragging
+members around in voice.
+
+### New
+* **`/api/discord/move_teams`** — POST endpoint, admin-only.  Reads the
+  active veto session's `team_a` + `team_b` discord_ids, calls
+  `bot_move_to_team_channels()`, returns
+  `{moved_a, moved_b, skipped, errors, team_a_name, team_b_name}`.
+* **`/api/discord/auto_move_toggle`** — POST endpoint, admin-only.
+  Persists `discord_auto_move_on_distribute_enabled`.  Refuses to enable
+  if either team VC is unconfigured — surfaces the precondition error
+  instead of silently no-op'ing on tournament night.
+* **Auto-fire on `/api/veto/distribute`** — when toggle ON + both VCs
+  set + bot connected, fires a background `bot_move_to_team_channels`
+  call ~2s after distribute (grace for late lobby joiners).  Wrapped
+  in try/except so a move failure NEVER blocks the distribute
+  response.  Default toggle OFF — opt-in.
+* **`bot_move_to_team_channels(guild_id, a_vc, b_vc, a_ids, b_ids)`** —
+  new helper in `discord_bot.py`.  Concurrent moves via
+  `asyncio.gather` + `Semaphore(5)` for rate-limit safety.  Skips
+  members not in voice (Discord API limitation).  Per-player
+  `Forbidden` / `HTTPException` captured into errors list with the
+  player's display name.
+* **SPA Discord config card** — two new VC inputs with 🔍 Browse
+  pickers (reuses the v0.11.15 voice-channel picker modal) + an
+  Auto-move checkbox that goes through the toggle endpoint.
+* **SPA Veto Teams stage** — new 🔀 **Move teams to VCs** button.
+  Backend refuses cleanly if VCs unset / bot offline; toast surfaces
+  the specific error.
+
+### Config (new fields)
+- `discord_team_a_voice_channel_id` (str, "")
+- `discord_team_b_voice_channel_id` (str, "")
+- `discord_auto_move_on_distribute_enabled` (bool, False)
+
+All three persist through `load_config()` / `save_config()`.  Read-only
+in the `/api/config` snapshot; the toggle is mutated via
+`/api/discord/auto_move_toggle` so the precondition check lives in one
+place.
+
+### Discord permissions
+Bot needs **Move Members** in the guild for any of these flows to work.
+Documented inline in the SPA config card's hint text.
+
+### Tests
++8 new in `tests/test_veto_api.py`:
+- 400 when guild_id unset / VCs unset / no session / state=roster
+  (teams not split) / no discord_ids on either team
+- toggle refuses enable with VC missing, always allows disable,
+  persists when both VCs set
+**208/208 green.**
+
+### Deferred to v0.12.1
+- `/move-teams` Discord slash command (task #145) — the bot helper is
+  ready; just needs `app_commands.Group` wiring.  Pairs with #134
+  (`/round-summaries`) since both want the slash tree.
+
+---
+
+## v0.11.27 — 2026-06-06 (audit consolidation: findings #5/#7/#8/#9)
+
+Single coherent change: `_vetoApply` becomes the SINGLE POINT OF TRUTH
+for ALL snapshot ingestion.  Two guards live in one helper, applied
+uniformly to mutation responses, SSE messages, the initial fetch, and
+the 3s polling fallback.
+
+### Fixed
+* **Monotonicity guard** (findings #5 + #7).  If both incoming and
+  current have a session AND same state AND incoming `updated_at`
+  is OLDER than current, refuse the apply.  Defeats:
+  - Initial veto-page fetch slow on cellular → SSE delivers snap_v2
+    first → stale fetch overwrites it on resolve.
+  - Poll fetch in flight → SSE delivers snap_v2 → stale poll response
+    overwrites on resolve.
+  State transitions (idle ↔ active, voting → links, etc.) always
+  apply.
+* **Idle short-circuit** (finding #9).  When both incoming and current
+  are `state: idle`, skip apply.  Without this the 3s poll rebuilt
+  `_renderVetoIdle` every tick → online-banner flashed "Checking…"
+  every 3s → button focus lost.
+* **Click-flag stuck-state** (finding #8).  Wrapped ENTIRE click body
+  (sync visual setup + async API call) in one `try / finally` so a
+  synchronous throw during DOM marking can no longer leave
+  `_vetoBoardClickInFlight` stuck `True` forever.  Polling fallback
+  was dead-locking on stuck-flag because it skips while flag is True.
+
+### Refactor wins
+* SSE handler: 3 lines → 1 (just `_vetoApply`).
+* Initial fetch: `.then(snap => { _vetoState = snap; _renderVeto(); })`
+  → `.then(_vetoApply)`.
+* Polling tick: 11 lines of inline dedup → 1 line.  Logic that was
+  half here, half in renderer's `_vetoLastRenderedState` guard, now
+  lives entirely in `_vetoApply`.
+
+### Audit progress
+8 of 10 findings now closed (v0.11.26 + v0.11.27).  Remaining: #6
+(content-hashed static URLs, task #139) and #10 (`_veto_broadcast`
+queue-overflow investigation, task #143).  Both genuinely belong
+with v0.12 driver-abstraction work.
+
+### Tests
+**200/200 green.**
+
+---
+
 ## v0.11.26 — 2026-06-06 (audit cleanup: 4 fixes from v0.11.20-25 review)
 
 Post-tournament code-review sweep of the v0.11.20-25 hotfix chain found

@@ -7,17 +7,16 @@
 
 ---
 
-## Where We Are — v0.11.26 (released 2026-06-06)
+## Where We Are — v0.12.0 (released 2026-06-06)
 
-**Twenty-six releases** with the v0.11.x line proven in production:
-**first tournament shipped on 2026-06-05** (10-player CS2 5v5, remote
-captains over Discord, completed cleanly on de_vertigo).  Seven hotfix
-releases (v0.11.20-25) shipped during a ~75-minute window between first
-failure (Discord webview cookie drop) and clean match start; v0.11.26
-the next morning cleaned up the top 4 findings from a high-effort
-code-review audit.  See `RETROSPECTIVE_2026_06_05.md` for the full
-post-mortem.  Six more audit findings tracked for v0.12 (tasks
-#138-143).
+**Twenty-eight releases**, with v0.11.x proven in production and the
+v0.12 line opened with Discord-driven team voice splits.  Day-after of
+the **first tournament (2026-06-05)** delivered v0.11.26 + v0.11.27 +
+v0.12.0 — closing 8 of 10 audit findings AND landing the first new v0.12
+feature.  Two audit findings remain (#139 content-hashed static URLs,
+#143 broadcast queue-overflow investigation) — both genuinely belong
+with the v0.12 driver-abstraction work.  See
+`RETROSPECTIVE_2026_06_05.md` for the tournament post-mortem.
 
 Highlights since v0.11.0:
 
@@ -49,8 +48,10 @@ Highlights since v0.11.0:
 | v0.11.24 | No-cache headers on /static/* — bust WebView2 stale-JS cache |
 | v0.11.25 | 3s polling fallback alongside SSE — belt-and-braces; the version the tournament completed on |
 | v0.11.26 | Post-tournament audit cleanup — zombie captain race, interstitial cache, poll timer leak, board click double-render |
+| v0.11.27 | `_vetoApply` consolidation — single point of truth for snapshot ingestion; closes audit findings #5/#7/#8/#9 |
+| v0.12.0  | `/move-teams` + auto-move on Distribute — bot drags rostered players from lobby VC into their team's VC; persistent toggle, default OFF |
 
-**200/200 backend tests green** across all releases.
+**208/208 backend tests green** through v0.12.0.
 
 Full prose in [CHANGELOG.md](CHANGELOG.md).
 
