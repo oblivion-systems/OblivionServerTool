@@ -133,6 +133,25 @@ class CaptainToken:
     used:       bool = False
 
 
+@dataclass
+class VoterToken:
+    """v0.12.3 / task #135 — scoped, single-use credential for a remote
+    player's voting link.  Parallel to CaptainToken but adds `voter_idx`
+    so a vote cast via this token is bound to the right roster slot.
+
+    Why a separate token per player (rather than reusing the captain
+    pattern): voting happens BEFORE captains are elected — there's
+    nothing per-team to hand out at vote time.  Each player gets their
+    own one-shot URL, votes once, done.  The session enforces 1 vote
+    per voter_idx (can't double-vote even with two browsers)."""
+    team:       str                              # "A" or "B"
+    voter_idx:  int                              # 0-4, index into team_a / team_b
+    value:      str                              # the actual token string
+    issued_at:  float
+    claimed_by: str = ""
+    used:       bool = False
+
+
 # Allowed state transitions, declared up-front for cheap legal-move checks.
 # Maps current state -> set of legal next states.
 _LEGAL_TRANSITIONS: dict[str, frozenset[str]] = {
@@ -172,6 +191,13 @@ class VetoSession:
 
     # Stage 3 — Links
     tokens: dict[str, CaptainToken] = field(default_factory=dict)   # "A" / "B" → CaptainToken
+
+    # v0.12.3 / task #135 — Stage 2 voter tokens.  Keyed by "A:0" .. "A:4",
+    # "B:0" .. "B:4".  Minted in `voting` state via issue_voter_tokens();
+    # consumed once each via claim_voter().  Cleared on reset (and rotated
+    # on a fresh teams→voting transition since the team rosters may
+    # differ after a re-shuffle).
+    voter_tokens: dict[str, VoterToken] = field(default_factory=dict)
 
     # Stage 4 — Veto
     mode:          str           = "BO3"     # "BO1" | "BO3" | "BO5"
@@ -342,6 +368,11 @@ def distribute_teams(session: VetoSession, rng: secrets.SystemRandom | None = No
     session.captain_a_idx = None
     session.captain_b_idx = None
     session.revote_count = 0
+    # v0.12.3 / task #135 — voter tokens are bound to specific roster slots
+    # (team_a[2] etc.).  A reshuffle reorders both teams, so any tokens
+    # previously DM'd point at the wrong person.  Drop them; the operator
+    # re-mints via issue_voter_tokens() after voting starts.
+    session.voter_tokens.clear()
 
 
 def start_voting(session: VetoSession) -> None:
@@ -353,6 +384,80 @@ def start_voting(session: VetoSession) -> None:
     session.votes_a.clear()
     session.votes_b.clear()
     session._transition("voting")
+
+
+def issue_voter_tokens(session: VetoSession) -> dict[str, str]:
+    """v0.12.3 / task #135 — Mint per-player single-use tokens so the
+    operator can DM each of the 10 rostered players a personal voting
+    URL.  Each token binds to one (team, voter_idx) slot.
+
+    Returns the raw values keyed by "A:0" .. "A:4", "B:0" .. "B:4".
+    Caller (web.py) builds URLs + delivers them via the bot's existing
+    Layer 1A captain-DM pattern (extended to all 10 players).
+
+    Idempotent (mirrors `issue_tokens`): a second call returns the
+    SAME values if any token has been claimed (rotating a claimed
+    token would log that player out mid-vote with no warning to the
+    operator).
+
+    Must be in `voting` state — voter_tokens are useless before
+    `start_voting` (no team to vote for) and after `resolve_captains`
+    (votes already counted).
+    """
+    if session.state != "voting":
+        raise InvalidVetoTransition(
+            f"issue_voter_tokens legal only in voting (now {session.state})")
+    # Idempotent return when any token has been claimed.  Without this,
+    # an accidental re-tap of the operator's "DM voting links" button
+    # rotates everyone's tokens — players who already opened their link
+    # have a bound session, but their NEW URL doesn't work.  Match the
+    # `issue_tokens` (captain) protection.
+    if session.voter_tokens and any(t.used for t in session.voter_tokens.values()):
+        return {key: t.value for key, t in session.voter_tokens.items()}
+    now = time.time()
+    session.voter_tokens = {}
+    for team_letter, team_roster in (("A", session.team_a), ("B", session.team_b)):
+        for i in range(len(team_roster)):
+            key = f"{team_letter}:{i}"
+            session.voter_tokens[key] = VoterToken(
+                team=team_letter,
+                voter_idx=i,
+                value=secrets.token_urlsafe(32),
+                issued_at=now,
+            )
+    session.updated_at = now
+    return {key: t.value for key, t in session.voter_tokens.items()}
+
+
+def claim_voter(session: VetoSession, token_value: str,
+                caller_id: str = "") -> tuple[str, int]:
+    """v0.12.3 / task #135 — Validate a voter token; bind it to the
+    caller; return (team, voter_idx).  Single-use per token, but a
+    player may cast / change their vote multiple times once claimed
+    (the session enforces 1 vote per voter_idx in `cast_vote`).
+
+    Raises VetoStageError on: unknown token, already-used token,
+    or wrong state.
+    """
+    if session.state != "voting":
+        raise InvalidVetoTransition(
+            f"claim_voter legal only in voting (now {session.state})")
+    match: VoterToken | None = None
+    for key, tok in session.voter_tokens.items():
+        if secrets.compare_digest(tok.value, token_value):
+            match = tok
+            break
+    if match is None:
+        raise VetoStageError("unknown voter token")
+    if match.used:
+        # Idempotent if same caller (e.g. browser refresh / SPA reload)
+        if caller_id and match.claimed_by == caller_id:
+            return match.team, match.voter_idx
+        raise VetoStageError("voter token already claimed by another caller")
+    match.used = True
+    match.claimed_by = caller_id
+    session.updated_at = time.time()
+    return match.team, match.voter_idx
 
 
 def cast_vote(session: VetoSession, team: str, voter_idx: int, votee_idx: int) -> None:
@@ -923,6 +1028,7 @@ def reset(session: VetoSession) -> None:
     session.captain_b_idx = None
     session.revote_count = 0
     session.tokens.clear()
+    session.voter_tokens.clear()   # v0.12.3 / task #135
     session.map_pool.clear()
     session.sequence.clear()
     session.current_step = 0
@@ -974,6 +1080,18 @@ def _token_from_dict(team: str, d: dict) -> CaptainToken:
     )
 
 
+def _voter_token_from_dict(d: dict) -> VoterToken:
+    """v0.12.3 / task #135 — defensive constructor for VoterToken."""
+    return VoterToken(
+        team       = str(d.get("team", "")),
+        voter_idx  = int(d.get("voter_idx", 0)),
+        value      = str(d.get("value", "")),
+        issued_at  = float(d.get("issued_at", 0.0)),
+        claimed_by = str(d.get("claimed_by", "")),
+        used       = bool(d.get("used", False)),
+    )
+
+
 def _step_from_dict(d: dict) -> VetoStep:
     return VetoStep(
         kind    = str(d.get("kind", "")),
@@ -1003,6 +1121,10 @@ def deserialize_session(d: dict) -> VetoSession:
     s.tokens         = {
         str(t): _token_from_dict(str(t), td)
         for t, td in d.get("tokens", {}).items()
+    }
+    s.voter_tokens   = {
+        str(k): _voter_token_from_dict(td)
+        for k, td in d.get("voter_tokens", {}).items()
     }
     s.mode           = str(d.get("mode", "BO3"))
     s.map_pool       = [str(m) for m in d.get("map_pool", [])]

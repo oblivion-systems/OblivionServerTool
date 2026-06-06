@@ -238,6 +238,11 @@ const api = (() => {
       tokens:     ()                 => post('/api/veto/tokens'),
       revokeToken:(team)             => post('/api/veto/revoke_token', { team }),
       claim:      (token)            => post('/api/veto/claim', { token }),
+      // v0.12.3 / task #135 — per-player voting tokens.  voterTokens()
+      // mints + auto-DMs all 10 (admin-only); voterClaim() consumes a
+      // single token to mint a voter session cookie.
+      voterTokens: ()                => post('/api/veto/voter_tokens', {}),
+      voterClaim:  (token)           => post('/api/veto/voter_claim', { token }),
       step:       (team, mapId)      => post('/api/veto/step', { team, map_id: mapId }),
       finale:     (loadMatch=true)   => post('/api/veto/finale', { load_match: loadMatch }),
       reset:      ()                 => post('/api/veto/reset'),

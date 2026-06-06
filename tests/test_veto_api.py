@@ -2328,6 +2328,98 @@ t('match_events: round embed colored by winning side',
   t_match_events_round_embed_color_by_winner)
 
 
+# ─── v0.12.3 / task #135 — Remote voter tokens ────────────────────────────
+
+def t_voter_tokens_refuses_outside_voting_state():
+    """issue_voter_tokens is only legal in `voting` state.  Earlier
+    (roster/teams) there's nothing to vote for; later (links+) the
+    captains are already elected and voter URLs would be pointless."""
+    _, _, c = _new_app(); _login(c)
+    c.post('/api/veto/create', json={'mode': 'BO3'})
+    # Still on roster — refuse
+    r = c.post('/api/veto/voter_tokens', json={})
+    return r.status_code == 400, f'status={r.status_code} body={r.get_json()}'
+t('voter_tokens: 400 when state != voting',
+  t_voter_tokens_refuses_outside_voting_state)
+
+
+def t_voter_tokens_mints_10_in_voting_state():
+    """Full happy path through to voting state, then mint 10 tokens."""
+    _, _, c = _new_app(); _login(c)
+    c.post('/api/veto/create', json={'mode': 'BO3'})
+    c.post('/api/veto/roster', json={
+        'team_a_name': 'A', 'team_b_name': 'B',
+        'players': _ten_player_payload(),
+    })
+    c.post('/api/veto/distribute')
+    c.post('/api/veto/start_voting')
+    r = c.post('/api/veto/voter_tokens', json={})
+    body = r.get_json() or {}
+    voters = body.get('voters') or {}
+    keys = sorted(voters.keys())
+    expected_keys = sorted([f'{t}:{i}' for t in ('A', 'B') for i in range(5)])
+    return (r.status_code == 200 and keys == expected_keys
+            and all('token' in v and v['token'] for v in voters.values())
+            and all('lan' in v for v in voters.values())), \
+           f'status={r.status_code} keys={keys} sample={list(voters.values())[:1]}'
+t('voter_tokens: mints 10 tokens keyed A:0..B:4 in voting state',
+  t_voter_tokens_mints_10_in_voting_state)
+
+
+def t_voter_claim_sets_voter_session_and_vote_locked():
+    """After voter_claim, /api/state should report role=voter +
+    voter_team + voter_idx.  And the vote endpoint must reject a vote
+    cast for a different team or different voter_idx."""
+    _, _, c = _new_app(); _login(c)
+    c.post('/api/veto/create', json={'mode': 'BO3'})
+    c.post('/api/veto/roster', json={
+        'team_a_name': 'A', 'team_b_name': 'B',
+        'players': _ten_player_payload(),
+    })
+    c.post('/api/veto/distribute')
+    c.post('/api/veto/start_voting')
+    r = c.post('/api/veto/voter_tokens', json={})
+    voters = (r.get_json() or {}).get('voters') or {}
+    a3_tok = voters['A:3']['token']
+
+    # New client to simulate a remote voter (no admin PIN).
+    voter_c = c.application.test_client()
+    r2 = voter_c.post('/api/veto/voter_claim', json={'token': a3_tok})
+    body2 = r2.get_json() or {}
+    if not (r2.status_code == 200 and body2.get('team') == 'A'
+            and body2.get('voter_idx') == 3):
+        return False, f'claim status={r2.status_code} body={body2}'
+
+    # Capture the voter session cookie + reuse it explicitly for subsequent
+    # requests.  Flask's test client SHOULD auto-store this, but in this
+    # codebase's threaded setup the cookie jar can get out of sync — pass
+    # the cookie explicitly via headers instead.
+    set_cookie = r2.headers.get('Set-Cookie', '')
+    voter_session_cookie = ''
+    for part in set_cookie.split(';'):
+        if part.strip().startswith('session='):
+            voter_session_cookie = part.strip()
+            break
+    if not voter_session_cookie:
+        return False, f'no session cookie in claim response: {set_cookie!r}'
+    hdrs = {'Cookie': voter_session_cookie}
+
+    # Try voting as team A idx 1 (NOT our slot) — must 403
+    r4 = voter_c.post('/api/veto/vote',
+                      json={'team': 'A', 'voter_idx': 1, 'votee_idx': 2},
+                      headers=hdrs)
+    if r4.status_code != 403:
+        return False, f'wrong-slot status={r4.status_code} body={r4.get_data(as_text=True)[:200]}'
+
+    # Try voting for our actual slot — must 200
+    r5 = voter_c.post('/api/veto/vote',
+                      json={'team': 'A', 'voter_idx': 3, 'votee_idx': 2},
+                      headers=hdrs)
+    return r5.status_code == 200, f'own-slot status={r5.status_code} body={r5.get_data(as_text=True)[:200]}'
+t('voter_claim: mints role=voter session + cross-slot vote rejected',
+  t_voter_claim_sets_voter_session_and_vote_locked)
+
+
 def t_diag_snapshot_includes_sse_broadcast_telemetry():
     """v0.12.2 — diagnostic snapshot includes the SSE broadcast telemetry
     section so an operator can confirm whether silent queue drops are
