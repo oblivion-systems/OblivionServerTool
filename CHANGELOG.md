@@ -2,6 +2,84 @@
 
 ---
 
+## v0.12.1 — 2026-06-06 (round summaries + first slash commands)
+
+Big v0.12 release.  Closes tasks #134 (`/round-summaries`) AND #145
+(`/move-teams` slash command) in one shot — the slash-command tree
+wiring was the blocker for both, so doing them together saved a release.
+
+### New module — `cs2servergui/match_events.py`
+Background RCON-poll daemon thread that detects `mp_t_score` /
+`mp_ct_score` deltas every 3 s and posts a small embed to
+`discord_veto_channel_id` after every round.  Final 🏆 embed when
+either side reaches 13 (covers MR12 directly; MR15 trips when leader
+hits 13 too — operator can pin/delete if false-positive).
+
+Lifecycle:
+- `match_events.start(core)` — called from `/api/veto/finale` once
+  MatchZy is handed the config.
+- `match_events.stop()` — called from `/api/veto/reset` and is
+  idempotent (safe no-op when not running).
+- Poller re-reads the toggle every tick → operator can flip
+  `discord_round_summaries_enabled` mid-match without restarting
+  anything.
+
+Fail-soft: RCON / Discord errors are logged and skipped; the poller
+never crashes the bot or blocks Flask.
+
+### New slash-command tree (first time the bot has one)
+- `discord.app_commands.CommandTree(client)` attached to `_BotRunner`.
+- `on_ready` syncs **per-guild** when `discord_guild_id` is set
+  (immediate propagation) or globally otherwise (~1 hr to land).
+- `_register_app_commands()` is the extension point for future
+  commands.
+
+### Slash commands shipped
+- `/round-summaries on | off | status`
+- `/move-teams now`  (manual fire)
+- `/move-teams auto on | off`  (persistent toggle)
+- `/move-teams status`  (current config + active session)
+
+Default permissions: `manage_guild + move_members` on both groups.
+
+### Refactor — `_do_move_to_team_channels()` extracted
+The move-to-team-channels logic is now a free async function so the
+slash command can `await` it directly.  Calling the existing threaded
+wrapper (`bot_move_to_team_channels`) from inside the bot's loop
+would deadlock — submitting back to the loop you're running on, then
+blocking on `.result()`.  Wrapper is now a thin shim around the free
+function.
+
+### New endpoint
+- `POST /api/discord/round_summaries_toggle` — admin-only.  No
+  precondition check (embed target reuses `discord_veto_channel_id`;
+  blank channel = silent no-op same as live veto embed).
+
+### Config (new field)
+- `discord_round_summaries_enabled` (bool, False).  Mutated via the
+  toggle endpoint OR the slash command — same field, two faces.
+
+### SPA
+- New "Post round summaries to the veto channel" checkbox in the
+  Discord config card.  Hint mentions the slash command alternative.
+
+### Tests
++5 new in `tests/test_veto_api.py`:
+- `/api/discord/round_summaries_toggle`: both enable + disable persist
+- `match_events._parse_scores`: happy path + None on missing cvars
+- `match_events`: round embed colored by winning side (T → blue,
+  CT → orange)
+- `match_events.start/stop`: idempotent
+**213/213 green.**
+
+### Deferred to v0.12.2+
+- MVP / clutch / ace detection (needs CSS log tail or MatchZy
+  webhook).
+- End-of-series summary embed for BO3/BO5 (currently per-map only).
+- Demo upload link in final embed (needs MatchZy demo-uploader hook).
+
+---
+
 ## v0.12.0 — 2026-06-06 (Discord-driven team voice splits)
 
 First v0.12 minor — picks up where v0.11.26 audit cleanup left off and

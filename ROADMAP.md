@@ -7,15 +7,17 @@
 
 ---
 
-## Where We Are — v0.12.0 (released 2026-06-06)
+## Where We Are — v0.12.1 (released 2026-06-06)
 
-**Twenty-eight releases**, with v0.11.x proven in production and the
-v0.12 line opened with Discord-driven team voice splits.  Day-after of
-the **first tournament (2026-06-05)** delivered v0.11.26 + v0.11.27 +
-v0.12.0 — closing 8 of 10 audit findings AND landing the first new v0.12
-feature.  Two audit findings remain (#139 content-hashed static URLs,
-#143 broadcast queue-overflow investigation) — both genuinely belong
-with the v0.12 driver-abstraction work.  See
+**Twenty-nine releases**, with v0.11.x proven in production and the
+v0.12 line at "Discord-driven team voice splits + round summaries +
+first slash command tree."  Day-after of the **first tournament
+(2026-06-05)** delivered v0.11.26 + v0.11.27 + v0.12.0 + v0.12.1 —
+closing 8 of 10 audit findings AND landing 2 of 3 v0.12 Discord
+features (#134 round summaries, #136 /move-teams, #145 slash command
+wiring).  Two audit findings remain (#139 content-hashed static URLs,
+#143 broadcast queue-overflow investigation) and one major v0.12
+feature (#135 remote player voting via per-player tokens).  See
 `RETROSPECTIVE_2026_06_05.md` for the tournament post-mortem.
 
 Highlights since v0.11.0:
@@ -50,8 +52,9 @@ Highlights since v0.11.0:
 | v0.11.26 | Post-tournament audit cleanup — zombie captain race, interstitial cache, poll timer leak, board click double-render |
 | v0.11.27 | `_vetoApply` consolidation — single point of truth for snapshot ingestion; closes audit findings #5/#7/#8/#9 |
 | v0.12.0  | `/move-teams` + auto-move on Distribute — bot drags rostered players from lobby VC into their team's VC; persistent toggle, default OFF |
+| v0.12.1  | Round summaries + slash-command tree — RCON-poll daemon posts per-round embeds during live MatchZy match; `/round-summaries` + `/move-teams` slash commands (closes #134 + #145) |
 
-**208/208 backend tests green** through v0.12.0.
+**213/213 backend tests green** through v0.12.1.
 
 Full prose in [CHANGELOG.md](CHANGELOG.md).
 
