@@ -2272,11 +2272,43 @@ let _vetoBoardClickInFlight = false;
 // AFTER the API response — making click-driven UI feel laggy or
 // "stuck until tab refresh"). Other connected clients still rely on
 // SSE; this helper only ensures the LOCAL clicker is always in sync.
+//
+// v0.11.27 — single point of truth for ALL snapshot ingestion.  Routes:
+//   - mutation API responses (step / vote / ready / etc.)
+//   - SSE onMessage payloads
+//   - initial /api/veto/state fetch on tab open
+//   - 3s polling fallback tick
+// Two guards live here, applied uniformly to every source:
+//   - Idle short-circuit (audit finding #9): if both incoming and
+//     current are state=idle, do nothing.  Without this the 3s poll
+//     re-renders the Create form every tick → online-banner flickers,
+//     `<button>` focus lost.
+//   - Monotonicity guard (audit findings #5 + #7): if both have a
+//     session AND same state AND incoming.updated_at is OLDER than
+//     current, refuse the apply.  Defeats two races:
+//       1. Initial fetch slow (cellular) → SSE delivers snap_v2 first
+//          → stale fetch overwrites it on resolve.
+//       2. Poll fetch in flight → SSE delivers snap_v2 → stale poll
+//          response overwrites on resolve.
+//     State transitions (idle ↔ active, voting → links, etc.) always
+//     apply — different state strings imply the snapshot is the
+//     intended new state, not a stale fetch.
 function _vetoApply(snap) {
-  if (snap && typeof snap === 'object' && snap.state) {
-    _vetoState = snap;
-    if (currentPage === 'veto') _renderVeto();
+  if (!snap || typeof snap !== 'object' || !snap.state) return snap;
+  // Idle short-circuit — finding #9.
+  if (_vetoState && _vetoState.state === 'idle' && snap.state === 'idle') {
+    return snap;
   }
+  // Monotonicity guard — findings #5 + #7.
+  if (_vetoState && _vetoState.session && snap.session
+      && _vetoState.state === snap.state
+      && typeof _vetoState.session.updated_at === 'number'
+      && typeof snap.session.updated_at === 'number'
+      && snap.session.updated_at < _vetoState.session.updated_at) {
+    return snap;
+  }
+  _vetoState = snap;
+  if (currentPage === 'veto') _renderVeto();
   return snap;
 }
 
@@ -2309,15 +2341,11 @@ function _vetoStartPolling() {
     if (currentPage !== 'veto') return;
     if (document.hidden) return;        // tab background — don't waste cycles
     if (_vetoBoardClickInFlight) return; // skip during in-flight click
-    try {
-      const snap = await api.veto.state();
-      if (snap && snap.session && _vetoState && _vetoState.session
-          && snap.session.updated_at === _vetoState.session.updated_at
-          && snap.state === _vetoState.state) {
-        return;   // no change — skip render
-      }
-      _vetoApply(snap);
-    } catch (_) { /* network blip — try again next tick */ }
+    // v0.11.27 — _vetoApply owns dedup (idle short-circuit + monotonicity).
+    // No inline check needed; was previously duplicating logic that lived
+    // half here and half in the renderer's _vetoLastRenderedState guard.
+    try { _vetoApply(await api.veto.state()); }
+    catch (_) { /* network blip — try again next tick */ }
   }, 3000);
 }
 function _vetoStopPolling() {
@@ -2369,7 +2397,10 @@ pages['veto'] = function() {
   // Initial state fetch + SSE subscribe (SSE delivers initial snapshot on
   // connect, so we could skip the explicit fetch — but the fetch gives us a
   // synchronous render, which feels snappier on tab open).
-  api.veto.state().then(snap => { _vetoState = snap; _renderVeto(); })
+  // v0.11.27 — route initial fetch through _vetoApply so the monotonicity
+  // guard catches a slow fetch that resolves AFTER SSE delivered a newer
+  // snap (finding #5).
+  api.veto.state().then(_vetoApply)
                  .catch(e => toast(e.message, 'var(--bad)'));
   _vetoSubscribe();
 };
@@ -2382,10 +2413,9 @@ function _vetoSubscribe() {
   _vetoEs = _oblivionSSE.connect('/api/veto/stream', {
     label: 'veto',
     onMessage: (e) => {
-      try {
-        _vetoState = JSON.parse(e.data);
-        if (currentPage === 'veto') _renderVeto();
-      } catch (_) {}
+      // v0.11.27 — route SSE through _vetoApply so monotonicity guard
+      // catches a re-delivered older snap after EventSource reconnect.
+      try { _vetoApply(JSON.parse(e.data)); } catch (_) {}
     },
   });
   _vetoStartPolling();   // v0.11.25 — 3s fallback poll alongside SSE
@@ -3617,24 +3647,32 @@ function _renderVetoBoard(root, sess) {
       //      during the request gets rendered on the next trigger.
       if (_vetoBoardClickInFlight) return;     // belt-and-braces
       _vetoBoardClickInFlight = true;
-      // Visual: dim siblings, mark this card as pending.
-      document.querySelectorAll('.veto-map-card').forEach(other => {
-        if (other === c) other.classList.add('pending');
-        else              other.classList.add('locked-during-pending');
-      });
-      const mapId = c.dataset.map;
-      const team  = step?.team;
-      if (!team) { _vetoBoardClickInFlight = false; return; }
+      // v0.11.27 — wrap EVERYTHING (sync visual setup + async API call)
+      // in one try/finally so a synchronous throw during DOM marking
+      // (e.g. forEach raising in an extension-instrumented webview) can
+      // no longer leave _vetoBoardClickInFlight stuck True forever.
+      // Audit finding #8.  Without this, the polling fallback dead-locks
+      // (it skips while flag is True) and every subsequent click no-ops.
       try {
-        _vetoApply(await api.veto.step(team, mapId));
-        // success path: _vetoApply already re-rendered with the fresh snap
-      } catch (e) {
-        toast(e.message, 'var(--bad)');
-        // error path: state didn't change, but we must re-render to clear
-        // the .pending pulse + .locked-during-pending dim on siblings.
-        // v0.11.26 — was previously in `finally`, causing a double-render
-        // on the success path (audit finding #4).
-        _renderVeto();
+        // Visual: dim siblings, mark this card as pending.
+        document.querySelectorAll('.veto-map-card').forEach(other => {
+          if (other === c) other.classList.add('pending');
+          else              other.classList.add('locked-during-pending');
+        });
+        const mapId = c.dataset.map;
+        const team  = step?.team;
+        if (!team) return;
+        try {
+          _vetoApply(await api.veto.step(team, mapId));
+          // success path: _vetoApply already re-rendered with the fresh snap
+        } catch (e) {
+          toast(e.message, 'var(--bad)');
+          // error path: state didn't change, but we must re-render to clear
+          // the .pending pulse + .locked-during-pending dim on siblings.
+          // v0.11.26 — was previously in `finally`, causing a double-render
+          // on the success path (audit finding #4).
+          _renderVeto();
+        }
       } finally {
         _vetoBoardClickInFlight = false;
       }
