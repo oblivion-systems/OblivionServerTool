@@ -929,6 +929,8 @@ def create_flask(core: AppCore) -> Flask:
             "discord_team_a_voice_channel_id":          core.discord_team_a_voice_channel_id,
             "discord_team_b_voice_channel_id":          core.discord_team_b_voice_channel_id,
             "discord_auto_move_on_distribute_enabled":  core.discord_auto_move_on_distribute_enabled,
+            # v0.12.1 — round summaries (mutated via /api/discord/round_summaries_toggle)
+            "discord_round_summaries_enabled":          core.discord_round_summaries_enabled,
             "admin_pin":             core.admin_pin     if is_local else "***",
             "guest_pin":             core.guest_pin     if is_local else "***",
             "rcon_password":         core.rcon_password  if is_local else "***",
@@ -2214,6 +2216,23 @@ def create_flask(core: AppCore) -> Flask:
                  f"skipped {result['skipped']}, errors {len(result['errors'])}")
         return jsonify(result)
 
+    @app.route("/api/discord/round_summaries_toggle", methods=["POST"])
+    @require_auth
+    def discord_round_summaries_toggle():
+        """v0.12.1 — flip discord_round_summaries_enabled.
+        Mirrors auto_move_toggle's shape.  No preconditions to enforce
+        on enable — the embed target is `discord_veto_channel_id` which
+        is already in use for the live veto embed, so if that's set the
+        round summaries have a target too; if it's blank the embed-post
+        helper silently no-ops (same fallback as the live veto embed).
+        """
+        d = request.get_json() or {}
+        want_enabled = bool(d.get("enabled", False))
+        core.discord_round_summaries_enabled = want_enabled
+        core.save_config()
+        core.log(f"[discord] round_summaries_enabled = {want_enabled}")
+        return jsonify({"enabled": want_enabled})
+
     @app.route("/api/discord/auto_move_toggle", methods=["POST"])
     @require_auth
     def discord_auto_move_toggle():
@@ -3030,6 +3049,16 @@ def create_flask(core: AppCore) -> Flask:
             # bail cleanly — and clearing here lets a Reset+new session
             # fire a new finale eventually.
             core._finale_firing = False
+        # v0.12.1 — start the match-events poller now that the match is
+        # live.  The poller's internal precondition check re-reads the
+        # toggle every tick so the operator can flip it mid-match without
+        # restart.  Fail-soft: start() catches its own errors so a poller
+        # init failure NEVER blocks the finale response.
+        try:
+            from . import match_events
+            match_events.start(core)
+        except Exception as exc:
+            core.log(f"[match_events] start failed: {exc}")
         if snapshot is not None:
             _save_to_match_history(snapshot)
             # v0.10.2 — Discord webhook (operator-configured).  Fire-and-
@@ -3180,6 +3209,13 @@ def create_flask(core: AppCore) -> Flask:
                     _sessions.pop(tok, None)
         if dropped:
             core.log(f"[veto] invalidated {len(dropped)} captain session(s)")
+        # v0.12.1 — stop the match-events poller (idempotent no-op if not
+        # running).  Resetting mid-match must stop the round-summary spam.
+        try:
+            from . import match_events
+            match_events.stop()
+        except Exception as exc:
+            core.log(f"[match_events] stop failed: {exc}")
         _veto_broadcast()
         core.log("[veto] session reset")
         return jsonify({"ok": True, "state": "idle"})

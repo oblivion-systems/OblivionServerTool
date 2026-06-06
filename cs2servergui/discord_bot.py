@@ -124,12 +124,38 @@ class _BotRunner:
         asyncio.set_event_loop(asyncio.new_event_loop())
         self.loop = asyncio.get_event_loop()
         self.bot = discord.Client(intents=self.intents)
+        # v0.12.1 — slash command tree.  Commands are registered ONCE per
+        # bot start (in _register_app_commands below) and sync'd to the
+        # operator's guild in on_ready.  We sync per-guild (not globally)
+        # so changes show up immediately — global sync can take up to an
+        # hour for Discord to propagate.
+        self.tree = discord.app_commands.CommandTree(self.bot)
+        self._register_app_commands()
 
         @self.bot.event
         async def on_ready():
             self.ready.set()
             user = self.bot.user
             self.core.log(f"[discord] Bot connected as {user} (id={user.id})")
+            # Sync slash commands to the configured guild if any.  A blank
+            # guild_id falls back to global sync (slower propagation but
+            # the operator gets the commands eventually).
+            try:
+                gid_str = (self.core.discord_guild_id or "").strip()
+                if gid_str:
+                    guild = discord.Object(id=int(gid_str))
+                    cmds = await self.tree.sync(guild=guild)
+                    self.core.log(
+                        f"[discord] Synced {len(cmds)} slash command(s) "
+                        f"to guild {gid_str}")
+                else:
+                    cmds = await self.tree.sync()
+                    self.core.log(
+                        f"[discord] Synced {len(cmds)} slash command(s) "
+                        "globally (no guild configured)")
+            except Exception as exc:
+                self.core.log(
+                    f"[discord] slash-command sync failed: {exc}")
 
         @self.bot.event
         async def on_disconnect():
@@ -149,6 +175,167 @@ class _BotRunner:
                 pass
             self.loop.close()
             self.ready.clear()
+
+    def _register_app_commands(self) -> None:
+        """v0.12.1 — register slash commands on the tree.  Called once per
+        bot start, before connection.  Commands are sync'd in on_ready.
+
+        Registered:
+          /round-summaries  on | off | status
+          /move-teams       now | auto on | auto off | status
+        """
+        import discord as _d
+        from discord import app_commands as _ac
+        core = self.core
+
+        # Permissions: manage_guild for any toggle/fire — anyone with
+        # that perm in Discord can already run the operator's life
+        # remotely via the existing live veto embed setup.
+        admin_perms = _d.Permissions(manage_guild=True, move_members=True)
+
+        # ── /round-summaries ───────────────────────────────────────────
+        round_group = _ac.Group(
+            name="round-summaries",
+            description="Toggle per-round match summary embeds.",
+            default_permissions=admin_perms,
+        )
+
+        @round_group.command(name="on", description="Enable round summaries.")
+        async def _round_on(itx: _d.Interaction):
+            if not (core.discord_veto_channel_id or "").strip():
+                await itx.response.send_message(
+                    "❌ Set the veto channel in the Oblivion config first — "
+                    "round summaries post there.",
+                    ephemeral=True)
+                return
+            core.discord_round_summaries_enabled = True
+            core.save_config()
+            await itx.response.send_message(
+                "✓ Round summaries: **ON**", ephemeral=True)
+
+        @round_group.command(name="off", description="Disable round summaries.")
+        async def _round_off(itx: _d.Interaction):
+            core.discord_round_summaries_enabled = False
+            core.save_config()
+            await itx.response.send_message(
+                "✓ Round summaries: **OFF**", ephemeral=True)
+
+        @round_group.command(name="status", description="Show round-summaries state.")
+        async def _round_status(itx: _d.Interaction):
+            on = bool(core.discord_round_summaries_enabled)
+            ch = (core.discord_veto_channel_id or "").strip() or "(none)"
+            await itx.response.send_message(
+                f"Round summaries: **{'ON' if on else 'OFF'}**\n"
+                f"Target channel: `{ch}`", ephemeral=True)
+
+        self.tree.add_command(round_group)
+
+        # ── /move-teams ────────────────────────────────────────────────
+        # Closes task #145 in the same release as the helper itself.
+        move_group = _ac.Group(
+            name="move-teams",
+            description="Bot-driven team voice channel splits.",
+            default_permissions=admin_perms,
+        )
+
+        @move_group.command(name="now", description="Move rostered players into their team VCs.")
+        async def _move_now(itx: _d.Interaction):
+            await itx.response.defer(ephemeral=True, thinking=True)
+            # Run the move on the bot's loop directly — same as the
+            # bot_move_to_team_channels wrapper, but inline so we can
+            # await it without the threading bridge.
+            a_vc = (core.discord_team_a_voice_channel_id or "").strip()
+            b_vc = (core.discord_team_b_voice_channel_id or "").strip()
+            gid  = (core.discord_guild_id or "").strip()
+            if not gid:
+                await itx.followup.send("❌ No Discord guild ID configured.", ephemeral=True)
+                return
+            if not a_vc or not b_vc:
+                await itx.followup.send(
+                    "❌ Configure both Team A and Team B voice channels in Oblivion.",
+                    ephemeral=True)
+                return
+            sess = getattr(core, "_veto_session", None)
+            if sess is None or sess.state in ("idle", "roster"):
+                await itx.followup.send(
+                    "❌ No team-split session — distribute teams first.",
+                    ephemeral=True)
+                return
+            a_ids = [p.discord_id for p in sess.team_a if (p.discord_id or "").strip()]
+            b_ids = [p.discord_id for p in sess.team_b if (p.discord_id or "").strip()]
+            if not a_ids and not b_ids:
+                await itx.followup.send(
+                    "❌ No `discord_id`s on either team — fill them in on the Roster stage.",
+                    ephemeral=True)
+                return
+            # Call the async core directly — calling the threaded wrapper
+            # from inside the bot loop would deadlock.
+            try:
+                result = await _do_move_to_team_channels(
+                    self.bot, int(gid), int(a_vc), int(b_vc), a_ids, b_ids,
+                )
+            except (TypeError, ValueError):
+                result = None
+            if result is None:
+                await itx.followup.send(
+                    "❌ Move failed — check the bot has Move Members "
+                    "permission in your server.",
+                    ephemeral=True)
+                return
+            skipped = result["skipped"]
+            errs    = len(result["errors"])
+            msg = (f"✓ Moved A **{result['moved_a']}/{len(a_ids)}**, "
+                   f"B **{result['moved_b']}/{len(b_ids)}**"
+                   + (f", {skipped} not in VC" if skipped else "")
+                   + (f", {errs} error(s)" if errs else ""))
+            await itx.followup.send(msg, ephemeral=True)
+
+        # /move-teams auto on|off subgroup
+        auto_sub = _ac.Group(
+            name="auto",
+            description="Auto-move toggle (fires after Distribute).",
+            parent=move_group,
+        )
+
+        @auto_sub.command(name="on", description="Enable auto-move after Distribute.")
+        async def _auto_on(itx: _d.Interaction):
+            if (not (core.discord_team_a_voice_channel_id or "").strip()
+                    or not (core.discord_team_b_voice_channel_id or "").strip()):
+                await itx.response.send_message(
+                    "❌ Configure both team VCs in Oblivion before enabling auto-move.",
+                    ephemeral=True)
+                return
+            core.discord_auto_move_on_distribute_enabled = True
+            core.save_config()
+            await itx.response.send_message(
+                "✓ Auto-move after Distribute: **ON**", ephemeral=True)
+
+        @auto_sub.command(name="off", description="Disable auto-move after Distribute.")
+        async def _auto_off(itx: _d.Interaction):
+            core.discord_auto_move_on_distribute_enabled = False
+            core.save_config()
+            await itx.response.send_message(
+                "✓ Auto-move after Distribute: **OFF**", ephemeral=True)
+
+        @move_group.command(name="status", description="Show move-teams state.")
+        async def _move_status(itx: _d.Interaction):
+            a_vc = (core.discord_team_a_voice_channel_id or "").strip() or "(none)"
+            b_vc = (core.discord_team_b_voice_channel_id or "").strip() or "(none)"
+            auto = bool(core.discord_auto_move_on_distribute_enabled)
+            sess = getattr(core, "_veto_session", None)
+            sess_line = "(no active session)"
+            if sess is not None:
+                a_ids = sum(1 for p in sess.team_a if (p.discord_id or "").strip())
+                b_ids = sum(1 for p in sess.team_b if (p.discord_id or "").strip())
+                sess_line = (f"state=**{sess.state}**, "
+                             f"A has {a_ids} `discord_id`s, B has {b_ids}")
+            await itx.response.send_message(
+                f"Auto-move after Distribute: **{'ON' if auto else 'OFF'}**\n"
+                f"Team A VC: `{a_vc}`\nTeam B VC: `{b_vc}`\n"
+                f"Active session: {sess_line}",
+                ephemeral=True)
+
+        self.tree.add_command(move_group)
 
     async def _run_with_retry(self) -> None:
         """Login + connect with reconnect-on-LoginFailure retry.  If the
@@ -367,6 +554,83 @@ def bot_voice_channels(guild_id: str, *, timeout: float = 8.0) -> list[dict] | N
         return None
 
 
+async def _do_move_to_team_channels(
+    bot,
+    gid: int, a_vcid: int, b_vcid: int,
+    a_ids: list[str], b_ids: list[str],
+) -> dict | None:
+    """v0.12.1 — async core of the move-to-team-channels flow.  Exposed
+    as a free function so it can be `await`-ed directly from inside the
+    bot loop (slash command handler) without going through the threaded
+    wrapper (which would deadlock — submitting back to the loop you're
+    running on, then blocking on the result).
+
+    Used by:
+      - bot_move_to_team_channels (threaded wrapper, Flask handlers)
+      - the /move-teams now slash command handler
+    """
+    guild = bot.get_guild(gid)
+    if guild is None:
+        try:
+            guild = await bot.fetch_guild(gid)
+        except Exception:
+            return None
+    a_ch = guild.get_channel(a_vcid)
+    b_ch = guild.get_channel(b_vcid)
+    if a_ch is None or not isinstance(a_ch, discord.VoiceChannel):
+        return None
+    if b_ch is None or not isinstance(b_ch, discord.VoiceChannel):
+        return None
+
+    sem = asyncio.Semaphore(5)
+    moved_a = 0
+    moved_b = 0
+    skipped = 0
+    errors: list[str] = []
+
+    async def _move_one(member_id_str: str, target_ch, target_label: str):
+        nonlocal moved_a, moved_b, skipped
+        async with sem:
+            try:
+                mid = int(member_id_str)
+            except ValueError:
+                skipped += 1
+                return
+            member = guild.get_member(mid)
+            if member is None:
+                try:
+                    member = await guild.fetch_member(mid)
+                except Exception:
+                    skipped += 1
+                    return
+            if member.voice is None or member.voice.channel is None:
+                skipped += 1
+                return
+            if member.voice.channel.id == target_ch.id:
+                if target_label == "A": moved_a += 1
+                else:                   moved_b += 1
+                return
+            try:
+                await member.move_to(target_ch, reason=f"Oblivion team-split → team {target_label}")
+                if target_label == "A": moved_a += 1
+                else:                   moved_b += 1
+            except discord.Forbidden:
+                errors.append(f"{member.display_name}: bot lacks Move Members permission")
+            except discord.HTTPException as exc:
+                errors.append(f"{member.display_name}: {exc}")
+
+    tasks = (
+        [_move_one(mid, a_ch, "A") for mid in a_ids] +
+        [_move_one(mid, b_ch, "B") for mid in b_ids]
+    )
+    await asyncio.gather(*tasks)
+    return {
+        "moved_a": moved_a, "moved_b": moved_b,
+        "skipped": skipped, "errors": errors,
+        "team_a_name": a_ch.name, "team_b_name": b_ch.name,
+    }
+
+
 def bot_move_to_team_channels(
     guild_id: str,
     team_a_vc_id: str,
@@ -409,73 +673,10 @@ def bot_move_to_team_channels(
     a_ids = [s for s in (str(x).strip() for x in team_a_discord_ids) if s]
     b_ids = [s for s in (str(x).strip() for x in team_b_discord_ids) if s]
 
-    async def _do():
-        guild = _runner.bot.get_guild(gid)
-        if guild is None:
-            guild = await _runner.bot.fetch_guild(gid)
-        a_ch = guild.get_channel(a_vcid)
-        b_ch = guild.get_channel(b_vcid)
-        if a_ch is None or not isinstance(a_ch, discord.VoiceChannel):
-            return None
-        if b_ch is None or not isinstance(b_ch, discord.VoiceChannel):
-            return None
-
-        sem = asyncio.Semaphore(5)
-        moved_a = 0
-        moved_b = 0
-        skipped = 0
-        errors: list[str] = []
-
-        async def _move_one(member_id_str: str, target_ch, target_label: str):
-            nonlocal moved_a, moved_b, skipped
-            async with sem:
-                try:
-                    mid = int(member_id_str)
-                except ValueError:
-                    skipped += 1
-                    return
-                # `get_member` is the in-cache lookup — for any guild with
-                # member chunking enabled (default for small guilds) this
-                # is O(1).  For larger guilds where chunking is disabled
-                # it'd return None; we fall back to a fetch.
-                member = guild.get_member(mid)
-                if member is None:
-                    try:
-                        member = await guild.fetch_member(mid)
-                    except Exception:
-                        skipped += 1
-                        return
-                # Must currently be in voice for move_to to do anything.
-                if member.voice is None or member.voice.channel is None:
-                    skipped += 1
-                    return
-                # Already in their team's VC — count as moved (idempotent)
-                if member.voice.channel.id == target_ch.id:
-                    if target_label == "A": moved_a += 1
-                    else:                   moved_b += 1
-                    return
-                try:
-                    await member.move_to(target_ch, reason=f"Oblivion team-split → team {target_label}")
-                    if target_label == "A": moved_a += 1
-                    else:                   moved_b += 1
-                except discord.Forbidden:
-                    errors.append(f"{member.display_name}: bot lacks Move Members permission")
-                except discord.HTTPException as exc:
-                    errors.append(f"{member.display_name}: {exc}")
-
-        tasks = (
-            [_move_one(mid, a_ch, "A") for mid in a_ids] +
-            [_move_one(mid, b_ch, "B") for mid in b_ids]
-        )
-        await asyncio.gather(*tasks)
-        return {
-            "moved_a": moved_a, "moved_b": moved_b,
-            "skipped": skipped, "errors": errors,
-            "team_a_name": a_ch.name, "team_b_name": b_ch.name,
-        }
-
     try:
-        fut = _runner.submit(_do())
+        fut = _runner.submit(_do_move_to_team_channels(
+            _runner.bot, gid, a_vcid, b_vcid, a_ids, b_ids,
+        ))
         return fut.result(timeout=timeout)
     except Exception as exc:
         _log.info("bot_move_to_team_channels(%s) failed: %s", guild_id, exc)

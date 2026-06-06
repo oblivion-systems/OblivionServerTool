@@ -131,6 +131,9 @@ const api = (() => {
       // thread after every team split.
       moveTeams:        ()        => post('/api/discord/move_teams', {}),
       autoMoveToggle:   (enabled) => post('/api/discord/auto_move_toggle', { enabled: !!enabled }),
+      // v0.12.1 — round summaries (per-round embed in the veto channel
+      // during a live MatchZy match)
+      roundSummariesToggle: (enabled) => post('/api/discord/round_summaries_toggle', { enabled: !!enabled }),
       // v0.11.0 polish — connection-check helpers
       testEmbed:     (channelId)  => post('/api/discord/test_embed',
                                           channelId ? { channel_id: channelId } : {}),
