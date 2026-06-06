@@ -3,19 +3,32 @@
 A desktop application for managing a **Counter-Strike 2 dedicated server** on Windows.  
 Built with Python + Flask + pywebview (Edge WebView2). Ships as a single `.exe` with an optional installer.
 
-> **Status: v0.11.26 (released 2026-06-06).**  First real tournament
-> shipped on 2026-06-05 — 10-player CS2 5v5 with remote captains over
-> Discord, completed cleanly on de_vertigo.  Seven hotfix releases
-> (v0.11.20-25) shipped during the ~75-minute window between first
-> failure and clean match start; v0.11.26 (next morning) cleaned up the
-> top 4 audit findings.  See `RETROSPECTIVE_2026_06_05.md` for the full
-> timeline + lessons.  **200/200 backend tests green.**
+> **Status: v0.12.0 (released 2026-06-06).**  First v0.12 minor —
+> Discord-driven team voice splits.  Previous day shipped the first
+> real tournament (10-player CS2 5v5 with remote captains over Discord,
+> completed cleanly on de_vertigo) via seven hotfix releases
+> (v0.11.20-25) over ~75 minutes from first failure to clean match
+> start; the next morning landed v0.11.26 + v0.11.27 (audit cleanup,
+> 8 of 10 findings closed), then v0.12.0 (this release).
+> See `RETROSPECTIVE_2026_06_05.md` for the post-mortem.
+> **208/208 backend tests green.**
 >
 > **What's new since v0.11.0**:
+> - **`/move-teams` + auto-move on Distribute** *(v0.12.0)* — bot
+>   moves rostered players with `discord_id` from the lobby VC into
+>   their team's configured VC.  Three triggers: SPA button on the
+>   Teams stage, persistent toggle in Discord config, or auto-fire
+>   after `/api/veto/distribute` when toggle ON.  Default OFF.
+>   Bot needs **Move Members** perm.
+> - **`_vetoApply` consolidation** *(v0.11.27)* — single helper now
+>   owns ALL snapshot ingestion (mutation responses, SSE, initial
+>   fetch, polling).  Adds monotonicity guard + idle short-circuit.
+>   Closes audit findings #5/#7/#8/#9.
 > - **Audit cleanup** *(v0.11.26)* — zombie captain race fix, captain
 >   interstitial Cache-Control, poll timer leak fix, board click
 >   double-render fix.  Code-review skill ran high-effort against the
->   v0.11.20-25 diff; 4 of 10 findings shipped, 6 deferred to v0.12.
+>   v0.11.20-25 diff; 4 of 10 findings shipped here, 4 more in
+>   v0.11.27, 2 remain for the v0.12 driver-abstraction work.
 > - **Tournament-night hotfix chain** *(v0.11.20-25)* — captain link
 >   in Discord webview (SameSite=Lax + HTML interstitial), captain
 >   session sweep on reset, mutation response stuffed into local state
