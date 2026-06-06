@@ -7,12 +7,18 @@
 
 ---
 
-## Where We Are — v0.11.19 (released 2026-06-05)
+## Where We Are — v0.11.26 (released 2026-06-06)
 
-**Nineteen releases** with the v0.11.x line at "Friday-ready triage +
-perf tooling complete + recurring-tournament UX nailed + self-review
-hotfixes locked in + adversarial sweep findings landed + Discord
-Config card fully browse-able + plugin-layer log visibility."
+**Twenty-six releases** with the v0.11.x line proven in production:
+**first tournament shipped on 2026-06-05** (10-player CS2 5v5, remote
+captains over Discord, completed cleanly on de_vertigo).  Seven hotfix
+releases (v0.11.20-25) shipped during a ~75-minute window between first
+failure (Discord webview cookie drop) and clean match start; v0.11.26
+the next morning cleaned up the top 4 findings from a high-effort
+code-review audit.  See `RETROSPECTIVE_2026_06_05.md` for the full
+post-mortem.  Six more audit findings tracked for v0.12 (tasks
+#138-143).
+
 Highlights since v0.11.0:
 
 | Release | Theme |
@@ -36,6 +42,13 @@ Highlights since v0.11.0:
 | v0.11.17 | Friday-eve thorough sweep — Tier A + B fixes (12 findings across veto/Discord/server/SPA) |
 | v0.11.18 | 🔍 Browse for Veto Embed Channel ID (text-channel picker) |
 | v0.11.19 | Snapshot plugin log diagnostics — CSS + MatchZy log tail + TL;DR plugin_log indicator |
+| v0.11.20 | SameSite=Lax + HTML interstitial — captain link works in Discord iOS in-app browser |
+| v0.11.21 | Invalidate captain HTTP sessions on /api/veto/reset |
+| v0.11.22 | Stuff /api/veto/step response into _vetoState — defeat SSE-vs-API race |
+| v0.11.23 | `_vetoApply` helper through every mutation handler — instant local feedback |
+| v0.11.24 | No-cache headers on /static/* — bust WebView2 stale-JS cache |
+| v0.11.25 | 3s polling fallback alongside SSE — belt-and-braces; the version the tournament completed on |
+| v0.11.26 | Post-tournament audit cleanup — zombie captain race, interstitial cache, poll timer leak, board click double-render |
 
 **200/200 backend tests green** across all releases.
 

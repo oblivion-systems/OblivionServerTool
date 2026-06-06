@@ -2,6 +2,118 @@
 
 ---
 
+## v0.11.26 — 2026-06-06 (audit cleanup: 4 fixes from v0.11.20-25 review)
+
+Post-tournament code-review sweep of the v0.11.20-25 hotfix chain found
+10 issues; the 4 with tournament-night failure modes ship now.  Remaining
+6 deferred to v0.12 (see ROADMAP — audit findings #5-10).
+
+### Fixed
+* **Zombie captain race on /api/veto/reset** (web.py).  The reset path
+  released `_veto_lock` before acquiring `_sessions_lock`.  A concurrent
+  `/veto?join=<token>` captain claim that won `_veto_lock` first ran
+  `_create_session` AFTER the sweep snapshot — producing a captain
+  cookie that referenced `core._veto_session = None`.  Fixed by nesting
+  `_sessions_lock` inside `_veto_lock` in `veto_reset` AND moving
+  `_create_session` inside the same `_veto_lock` block on both
+  `/api/veto/claim` and `/veto?join` handlers.  Lock order remains
+  consistent across all paths (always `_veto_lock` outermost), so no
+  deadlock risk.
+* **Captain interstitial missing Cache-Control** (web.py).  v0.11.20's
+  200 HTML interstitial had no `Cache-Control` header.  A proxy that
+  cached it would deliver the body without `Set-Cookie` on the second
+  request to the same one-shot-token URL — captain unauthenticated AND
+  token consumed.  Added `Cache-Control: no-store, private` +
+  `Pragma: no-cache`.
+* **v0.11.25 poll timer leak on tab leave** (app.js).  The hashchange
+  cleanup listener gated on `currentPage === 'veto'`, but `navigate()`
+  had already updated `currentPage` by the time the listener ran
+  (listener registration order).  `_vetoCleanup` never fired; the 3s
+  polling timer kept running for the rest of the app's lifetime.
+  Fixed by dropping the `currentPage` gate (`_vetoCleanup` is
+  idempotent).
+* **Veto board click double-render on success** (app.js).  `_vetoApply`
+  rendered on success, then `finally` rendered again — two full board
+  rebuilds per click, listeners re-attached, visible flicker, and
+  rapid taps could land on detached DOM nodes.  Moved the error-path
+  render into `catch` so success path runs exactly one render.
+
+### Refuted (kept as-is)
+* **SameSite=Lax weakening admin CSRF**.  Verifier found every mutating
+  endpoint requires `application/json` — `request.get_json()` returns
+  `None` for form-encoded bodies and cross-origin XHR triggers CORS
+  preflight that Lax still blocks.  The relaxation is safe given the
+  JSON-only API contract.
+
+### Tests
+**200/200 green.**
+
+---
+
+## v0.11.20 → v0.11.25 — 2026-06-05 (tournament-night hotfix chain)
+
+> Shipped in ~75 minutes from first failure (17:35) to clean match start
+> (18:48) during a live 10-player CS2 tournament.  See
+> `RETROSPECTIVE_2026_06_05.md` for the full timeline and lessons.
+
+### v0.11.20 — SameSite=Lax + HTML interstitial
+* Captain link cookie was being dropped in Discord's iOS in-app browser
+  (WKWebView ITP bounce-tracking + SameSite=Strict on a 302 redirect).
+* Dropped all 4 session cookies to `SameSite=Lax`.
+* Replaced the `/veto?join` 302 redirect with a 200 HTML interstitial
+  that sets the cookie inline then JS-redirects to `/#veto`.  Defeats
+  the bounce-tracking guard.
+
+### v0.11.21 — Invalidate captain HTTP sessions on /api/veto/reset
+* When operator hit Reset, the `VetoSession` struct was nuked but
+  captain HTTP session cookies (with `role=captain` + `captain_team=A/B`)
+  stayed in `_sessions`.  Captains reconnecting after reset appeared
+  authenticated against tokens that no longer existed.
+* On reset, sweep `_sessions` and drop every entry with `role=='captain'`.
+* (v0.11.26 later fixed the race window in this sweep.)
+
+### v0.11.22 — Stuff /api/veto/step response into _vetoState locally
+* SPA click handler awaited the API response then discarded it and
+  relied on SSE to update `_vetoState`.  On LAN the API response wins
+  the race against SSE delivery — so the `finally` render redrew the
+  board from the **stale pre-ban** snapshot.  Clicked card reverted
+  from `.pending` pulse to "no ban shown".
+* Capture the response, validate it looks like a snapshot, assign to
+  `_vetoState` before render.
+
+### v0.11.23 — `_vetoApply` helper through every mutation handler
+* Generalised v0.11.22.  Every veto-mutation endpoint already returns
+  the fresh snapshot; the SPA threw them away and relied on SSE.
+* Added `_vetoApply(snap)` helper that stuffs valid snapshots into
+  `_vetoState` and triggers a render.  Wired through:
+  `step`, `vote`, `resolve`, `ready` (admin + captain), `distribute`,
+  `rematch`, `startVoting`, `reset`, `create`, `roster`.
+* Local clicker sees instant updates on every click.
+
+### v0.11.24 — no-cache headers on /static/*
+* WebView2's HTTP cache persisted `app.js` across .exe rebuilds.
+  Server was v0.11.23 but JS in browser was v0.11.20 — fixes shipped
+  but not loaded.
+* `after_request` hook adds `Cache-Control: no-store, no-cache,
+  must-revalidate, max-age=0` + `Pragma: no-cache` + `Expires: 0` to
+  every `/static/*` response.
+* (v0.12 task #139 will replace this with content-hashed asset URLs —
+  no-store defeats ETag revalidation, so every page load re-downloads
+  the full bundle.)
+
+### v0.11.25 — 3s polling fallback alongside SSE
+* Belt-and-braces against any cache / SSE delivery issue.  Every 3s
+  while on the Veto tab + tab visible + no click in flight, refetch
+  `/api/veto/state` and apply via `_vetoApply` if `updated_at` changed.
+* This is the version the tournament completed on.
+* (v0.12 task #143 will investigate the underlying `_veto_broadcast`
+  queue overflow that the polling masked.)
+
+### Tests
+**200/200 green** across every release in the chain.
+
+---
+
 ## v0.11.19 — 2026-06-05 (snapshot — plugin log diagnostics)
 
 Fills the visibility gap surfaced during pre-tournament verification:

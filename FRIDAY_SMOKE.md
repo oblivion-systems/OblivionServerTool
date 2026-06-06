@@ -22,10 +22,19 @@
 - [ ] **Replace the .exe.**  Move/install the fresh `dist\OblivionServerTool.exe`
   to your usual location, OR run the new installer.
 - [ ] **Launch the new build.**  Confirm the version pill in the bottom-right
-  status bar reads exactly **v0.11.17**.
+  status bar reads exactly **v0.11.26** (or whatever the current
+  release is per `cs2servergui/config.py` `APP_VERSION`).
   - ❌ Reads anything else → you didn't replace the .exe.  Close + retry.
 - [ ] **`/api/ping` sanity check** (optional belt-and-braces).  Open browser to
-  `http://localhost:5050/api/ping` → expect `{"ok":true,"version":"0.11.17","build":"frozen"}`.
+  `http://localhost:5050/api/ping` → expect `{"ok":true,"version":"0.11.26","build":"frozen"}`.
+- [ ] **Hard-refresh the SPA.**  Ctrl+Shift+R inside the Oblivion window.
+  *Why:* WebView2's HTTP cache CAN persist `app.js` across .exe upgrades
+  on some Windows builds.  v0.11.24's `no-store` headers on `/static/*`
+  prevent this for fresh installs but a pre-existing cache entry from a
+  prior run still wins.  Hard-refresh forces a clean fetch.
+  - 🔎 Confirm version pill STILL reads v0.11.26 after the refresh.
+    If the pill changed (e.g. "0.11.23" → "0.11.26") the cache WAS stale.
+    Tournament-night 2026-06-05 lost ~10 min on this exact symptom.
 
 ---
 
@@ -34,7 +43,7 @@
 - [ ] **Take a fresh snapshot.**  Config tab → Troubleshooting → 🔧 Copy
   diagnostic snapshot.  Paste somewhere readable.
 - [ ] **TL;DR all ✓ (5 ticks)**:
-  - `✓ app       running v0.11.17, frozen`
+  - `✓ app       running v0.11.26, frozen`
   - `✓ server    running on … (Mode), Nh Nm, … players`  *(or stop signal if you haven't started yet — that's fine, see Phase 4)*
   - `✓ veto      state=idle` *(or whatever you've staged)*
   - `✓ discord   connected as oblivion#8731`
@@ -151,14 +160,47 @@
 
 ---
 
-## Phase 7 — Mobile captain (2 min, OPTIONAL but recommended)
+## Phase 7 — Mobile captain end-to-end (5 min, REQUIRED)
 
-- [ ] Bring up the SPA on your phone via the public_share_url tunnel.
-- [ ] Confirm the roster modal action row **wraps** (doesn't overflow).
-  v0.11.17 A4.
-- [ ] If you have a default VC configured, confirm 🔀 Pick channel
-  button is visible and tappable.
-- [ ] Captain finale Ready button is large + tappable.
+> Tournament-night 2026-06-05 learned this lesson the hard way: the FIRST
+> time any captain tried the link from inside Discord mobile was at
+> kickoff with 10 people waiting.  Run this now, with yourself in both
+> roles, on a real phone via the real tunnel.
+
+- [ ] **Public URL is set.**  Veto tab → "Public URL override" field is
+  populated with the current tunnel URL (`https://<sub>.trycloudflare.com`
+  or your reverse proxy).  Snapshot's `public_share_url` should match.
+- [ ] **Create a throwaway session.**  Veto → New Session (BO1) → name
+  "smoke test" → fake roster → distribute → resolve captains (vote
+  anyone) → Generate captain links.
+- [ ] **DM yourself the captain A link** via the bot.  Use 📨 Send test DM
+  with your own Discord ID, OR just paste the URL into a DM to yourself
+  from a teammate's account.
+- [ ] **CRITICAL: open the link from INSIDE Discord mobile.**  NOT in your
+  phone's Safari/Chrome — Discord's in-app browser (WKWebView on iOS,
+  WebView on Android) is the failure mode v0.11.20-26 fixed.
+  - ✅ Expected: lands at `/#veto`, shows captain view, no PIN prompt,
+    veto board visible if both captains claimed.
+  - ❌ Lands at PIN screen → cookie was dropped.  Re-check on the
+    operator: snapshot's `public_share_url` is HTTPS (not HTTP), and the
+    .exe is v0.11.26.  Without HTTPS the `Secure` cookie flag prevents
+    the cookie from setting on mobile webviews.
+- [ ] **Confirm token is consumed.**  Take a snapshot; veto block shows
+  `tokens_a_used: True`.
+- [ ] **Click a map ban.**  ✅ The card pulses (`.pending`), then turns
+  RED with `BAN` stamp within ~500 ms.  No tab refresh needed.
+  - ❌ Card pulses but no BAN stamp → you're on a build before v0.11.23.
+    Re-check version pill.  This is the "stuck UI" symptom.
+- [ ] **Watch the Discord embed.**  Live veto embed in the configured text
+  channel edits in-place with each ban.  No duplicate embeds posted.
+- [ ] **Reset the test session.**  Veto → Reset.
+  - ✅ Captain's phone reload (within 3s due to polling fallback) bounces
+    to PIN screen — proves v0.11.21's captain-session-sweep + v0.11.26's
+    race fix are doing their job.
+- [ ] **Mobile UX polish (cosmetic check).**
+  - Roster modal action row **wraps** (doesn't overflow).  v0.11.17 A4.
+  - 🔀 Pick channel button is visible and tappable (if default VC set).
+  - Captain finale Ready button is large + tappable.
 
 ---
 
@@ -184,7 +226,9 @@ and look at:
 | Embed not updating | Discord `bot.connected` — if False, save Discord Settings to retry (v0.11.17 A7) |
 | `matchzy_loadmatch` failed | `current_mode` matches MatchZy modes?  `running: True`?  RCON `last 200 lines` for actual error |
 | Server stutter / lag spikes | Gaming Mode status — if Off, run `scripts\gaming-mode-on.bat` mid-session, no restart needed |
-| Captain re-clicks link, "no session" | Cookie blocked → tell them to open the link in Chrome (not Discord webview).  v0.11.17 A3 covers most cases but not all in-app webviews |
+| Captain re-clicks link, "no session" | Token was already consumed.  Re-issue from operator: Veto → Tokens & Links → 🔄 Re-issue captain token.  v0.11.20-26 covers cookie set in Discord webview, but tokens are still ONE-SHOT — a second click of the same URL fails by design |
+| Captain sees stale UI (clicked but no change) | Polling fallback should self-heal within 3s (v0.11.25).  If still stuck → operator hits Reset, captain re-claims with fresh token |
+| Operator: "I rebuilt but version pill is old" | WebView2 served cached `app.js`.  Hard-refresh Ctrl+Shift+R inside Oblivion window.  If pill stays old → delete `%LOCALAPPDATA%\Oblivion Server Tool\EBWebView` and relaunch.  v0.11.24 prevents this for fresh installs |
 | Duplicate live embed in channel | v0.11.17 B1 should prevent — if it happens, delete the older + paste a fresh snapshot for post-mortem |
 
 ---
