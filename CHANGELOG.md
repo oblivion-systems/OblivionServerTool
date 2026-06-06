@@ -2,6 +2,95 @@
 
 ---
 
+## v0.12.3 — 2026-06-06 (remote player voting via per-player tokens)
+
+Closes task #135 — the last major v0.12 feature.  Extends the Layer 1A
+captain-DM pattern to all 10 players: after Distribute, the operator
+clicks "📨 DM voting links to all 10" on the Teams stage; the bot DMs
+each rostered player a one-shot voting URL.  Player taps → HTML
+interstitial sets a `role=voter` cookie → minimal voting page shows
+their team's 5 names → tap one → vote cast.  No more
+operator-walks-around-the-room voice-chat-driven vote collection.
+
+### Data model (`veto.py`)
+* `VoterToken` dataclass — single-use credential per (team, voter_idx).
+* `VetoSession.voter_tokens` — `dict[str, VoterToken]` keyed by
+  `"A:0" .. "A:4" / "B:0" .. "B:4"`.
+* `issue_voter_tokens(session)` — legal only in `voting` state.
+  Idempotent (matches captain `issue_tokens`'s rotate-protection: a
+  second call returns the same values if any token has been claimed).
+* `claim_voter(session, token, caller_id)` — validates + binds.
+* `distribute_teams()` now clears `voter_tokens` (a reshuffle reorders
+  the team rosters so any DM'd tokens point at the wrong person).
+* `reset()` clears `voter_tokens`.
+* `serialize_session` / `deserialize_session` round-trip them.
+
+### Role gate + endpoints (`web.py`)
+* New `_VOTER_PATHS` frozenset — strictly tighter than captain.  Voter
+  reaches `/api/state`, `/api/capabilities`, `/api/veto/state`,
+  `/api/veto/stream`, `/api/veto/vote`.  Nothing else.
+* `/api/veto/voter_claim` is `_PUBLIC_PATHS` — token IS the credential.
+* `POST /api/veto/voter_tokens` — admin only.  Mints 10 + auto-DMs.
+* `POST /api/veto/voter_claim` — mints `role=voter` cookie scoped to
+  `(voter_team, voter_idx)`.
+* `GET /voter?join=<token>` — landing.  HTML interstitial (no 302) for
+  Discord iOS WebView compat.  `Cache-Control: no-store, private`.
+* `/api/veto/vote` rejects cross-slot writes from voter sessions (403).
+* `/api/veto/reset`'s `_sessions` sweep now drops voter sessions too.
+
+### Snapshot extensions
+* `/api/state` exposes `voter_team` + `voter_idx` for voter sessions.
+* `/api/veto/state` includes `voter_tokens_claimed` keyed by slot →
+  bool so the SPA can show ✓ next to each player who has claimed.
+
+### SPA (`app.js` + `api.js`)
+* New `_renderVetoVoter()` — minimal "tap one of 5 names" page.
+  Pre-voting stages show a "waiting on operator" message.
+* New **📨 DM voting links to all 10** button on the Teams stage —
+  auto-advances `teams → voting`, mints + DMs, toasts the result.
+* `api.veto.voterTokens()` + `api.veto.voterClaim()` wrappers.
+
+### Tests
++3 new in `tests/test_veto_api.py`.  **217/217 green.**
+
+---
+
+## v0.12.2 — 2026-06-06 (SSE broadcast observability)
+
+Closes task #143 (audit finding #10).  Investigation, not a redesign.
+
+The audit hypothesised that `_veto_broadcast()`'s `q.put_nowait` with
+a silent `except` could be dropping events under burst load — and
+that this might be the real reason v0.11.25's polling fallback was
+needed.  We had no way to confirm or deny.
+
+### Observability
+* New module-level counter `_veto_broadcast_stats`:
+  - `events_total` — broadcast() calls since process start
+  - `drops_total` — `put_nowait` Full exceptions (silent drops)
+  - `last_drop_at` — epoch timestamp of most recent drop
+* First drop per process logs once.
+* Diagnostic snapshot: new **SSE broadcast telemetry** section showing
+  the counters + `active_subscribers` count.
+* TL;DR auto-scan: `⚠ sse N broadcast event(s) dropped` when > 0
+  (silent when zero — no clutter).
+
+### Headroom
+* Bumped per-subscriber queue maxsize from 32 → 256.  No real workflow
+  bursts 32 broadcasts back-to-back, but the larger ceiling closes the
+  speculative gap and gives a stalled WebView2 plenty of room to
+  drain on resume.
+
+### Next step
+Once a production snapshot shows `drops_total > 0`, we have a smoking
+gun to redesign around (event-seq + gap-driven catch-up).  Until then
+the polling fallback stays.
+
+### Tests
++1 new (snapshot contains the new section).  **214/214 green.**
+
+---
+
 ## v0.12.1 — 2026-06-06 (round summaries + first slash commands)
 
 Big v0.12 release.  Closes tasks #134 (`/round-summaries`) AND #145

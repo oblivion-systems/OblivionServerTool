@@ -22,11 +22,11 @@
 - [ ] **Replace the .exe.**  Move/install the fresh `dist\OblivionServerTool.exe`
   to your usual location, OR run the new installer.
 - [ ] **Launch the new build.**  Confirm the version pill in the bottom-right
-  status bar reads exactly **v0.12.1** (or whatever the current
+  status bar reads exactly **v0.12.3** (or whatever the current
   release is per `cs2servergui/config.py` `APP_VERSION`).
   - ❌ Reads anything else → you didn't replace the .exe.  Close + retry.
 - [ ] **`/api/ping` sanity check** (optional belt-and-braces).  Open browser to
-  `http://localhost:5050/api/ping` → expect `{"ok":true,"version":"0.12.1","build":"frozen"}`.
+  `http://localhost:5050/api/ping` → expect `{"ok":true,"version":"0.12.3","build":"frozen"}`.
 - [ ] **Hard-refresh the SPA.**  Ctrl+Shift+R inside the Oblivion window.
   *Why:* WebView2's HTTP cache CAN persist `app.js` across .exe upgrades
   on some Windows builds.  v0.11.24's `no-store` headers on `/static/*`
