@@ -923,6 +923,12 @@ def create_flask(core: AppCore) -> Flask:
             "discord_veto_channel_id":      core.discord_veto_channel_id,
             # v0.11.15 — default VC for one-click roster pull
             "discord_voice_channel_id":     core.discord_voice_channel_id,
+            # v0.12.0 — per-team VCs + auto-move toggle (read-only here;
+            # the toggle is mutated via /api/discord/auto_move_toggle so
+            # the precondition check fires server-side)
+            "discord_team_a_voice_channel_id":          core.discord_team_a_voice_channel_id,
+            "discord_team_b_voice_channel_id":          core.discord_team_b_voice_channel_id,
+            "discord_auto_move_on_distribute_enabled":  core.discord_auto_move_on_distribute_enabled,
             "admin_pin":             core.admin_pin     if is_local else "***",
             "guest_pin":             core.guest_pin     if is_local else "***",
             "rcon_password":         core.rcon_password  if is_local else "***",
@@ -1024,6 +1030,15 @@ def create_flask(core: AppCore) -> Flask:
         # Bot looks it up per-call so no restart needed on change.
         if is_local and "discord_voice_channel_id" in d:
             core.discord_voice_channel_id = str(d["discord_voice_channel_id"]).strip()
+        # v0.12.0 — per-team voice channels for /move-teams.
+        if is_local and "discord_team_a_voice_channel_id" in d:
+            core.discord_team_a_voice_channel_id = str(d["discord_team_a_voice_channel_id"]).strip()
+        if is_local and "discord_team_b_voice_channel_id" in d:
+            core.discord_team_b_voice_channel_id = str(d["discord_team_b_voice_channel_id"]).strip()
+        # NOTE: discord_auto_move_on_distribute_enabled is NOT writable here;
+        # it's mutated via POST /api/discord/auto_move_toggle so the
+        # precondition check (both VCs configured before enable) lives in
+        # one place.
         # v0.10.2 — Discord webhook URL: local-only write (it's a secret-ish
         # URL).  Mask-aware so a remote admin's accidental round-trip of
         # "***" doesn't blank the real value.
@@ -2138,6 +2153,86 @@ def create_flask(core: AppCore) -> Flask:
             }), 502
         return jsonify({"channel": info})
 
+    # ── v0.12.0 — Bot-driven team voice splits ──────────────────────────────
+    # Operator config:
+    #   discord_team_a_voice_channel_id
+    #   discord_team_b_voice_channel_id
+    #   discord_auto_move_on_distribute_enabled  (default False — opt-in)
+    #
+    # Triggers:
+    #   1. POST /api/discord/move_teams       — manual fire (button or
+    #                                            slash command's `now`)
+    #   2. POST /api/discord/auto_move_toggle — set the persistent toggle
+    #   3. veto_distribute() — auto-fire when toggle=True + both VCs set
+    #                          + bot connected (fire-and-forget thread,
+    #                          must not block /api/veto/distribute)
+    #
+    # Bot needs Move Members + View Channels + Connect on the target VCs.
+
+    @app.route("/api/discord/move_teams", methods=["POST"])
+    @require_auth
+    def discord_move_teams():
+        a_vc = (core.discord_team_a_voice_channel_id or "").strip()
+        b_vc = (core.discord_team_b_voice_channel_id or "").strip()
+        if not core.discord_guild_id:
+            return jsonify({"error": "Discord guild ID not configured."}), 400
+        if not a_vc or not b_vc:
+            return jsonify({
+                "error": "Both Team A and Team B voice channels must be "
+                         "configured in Config → Discord."
+            }), 400
+        with core._veto_lock:
+            sess = core._veto_session
+            if sess is None or sess.state in ("idle", "roster"):
+                return jsonify({
+                    "error": "No team-split veto session — distribute teams "
+                             "first (or the session is still on the roster stage)."
+                }), 400
+            a_ids = [p.discord_id for p in sess.team_a if (p.discord_id or "").strip()]
+            b_ids = [p.discord_id for p in sess.team_b if (p.discord_id or "").strip()]
+        if not a_ids and not b_ids:
+            return jsonify({
+                "error": "No discord_ids on either team — fill them in the "
+                         "Roster stage before moving."
+            }), 400
+        try:
+            from . import discord_bot
+        except Exception as exc:
+            return jsonify({"error": f"bot module unavailable: {exc}"}), 503
+        if not discord_bot.bot_status().get("connected"):
+            return jsonify({"error": "Discord bot is not connected"}), 503
+        result = discord_bot.bot_move_to_team_channels(
+            core.discord_guild_id, a_vc, b_vc, a_ids, b_ids,
+        )
+        if result is None:
+            return jsonify({
+                "error": "Move failed — verify guild + both VCs exist, bot has "
+                         "Move Members permission, and bot is connected."
+            }), 502
+        core.log(f"[discord] move_teams — moved A={result['moved_a']}/"
+                 f"{len(a_ids)}, B={result['moved_b']}/{len(b_ids)}, "
+                 f"skipped {result['skipped']}, errors {len(result['errors'])}")
+        return jsonify(result)
+
+    @app.route("/api/discord/auto_move_toggle", methods=["POST"])
+    @require_auth
+    def discord_auto_move_toggle():
+        d = request.get_json() or {}
+        want_enabled = bool(d.get("enabled", False))
+        if want_enabled:
+            # Refuse to enable if either VC is missing — saves the operator
+            # from a silent-no-op tournament-night surprise.
+            if (not (core.discord_team_a_voice_channel_id or "").strip() or
+                    not (core.discord_team_b_voice_channel_id or "").strip()):
+                return jsonify({
+                    "error": "Configure both Team A and Team B voice channels "
+                             "before enabling auto-move."
+                }), 400
+        core.discord_auto_move_on_distribute_enabled = want_enabled
+        core.save_config()
+        core.log(f"[discord] auto_move_on_distribute = {want_enabled}")
+        return jsonify({"enabled": want_enabled})
+
     @app.route("/api/discord/test_embed", methods=["POST"])
     @require_auth
     def discord_test_embed():
@@ -2302,9 +2397,59 @@ def create_flask(core: AppCore) -> Flask:
             try:
                 _veto.distribute_teams(core._veto_session)
                 snap = _veto_snapshot()
+                # v0.12.0 — capture discord_ids for the optional auto-move
+                # below; do it inside the lock to avoid TOCTOU vs reset.
+                team_a_ids = [p.discord_id for p in core._veto_session.team_a
+                              if (p.discord_id or "").strip()]
+                team_b_ids = [p.discord_id for p in core._veto_session.team_b
+                              if (p.discord_id or "").strip()]
             except Exception as e:
                 return _veto_error_response(e)
         _veto_broadcast()
+        # v0.12.0 — auto-move players to their team VCs.  Three preconditions
+        # must all be true (no implicit triggers — operator opted in):
+        #   - discord_auto_move_on_distribute_enabled (persistent toggle)
+        #   - both team VCs configured
+        #   - bot connected
+        # Background thread so the distribute response is not delayed by
+        # Discord API roundtrips.  Failure is logged + non-fatal — teams
+        # are split server-side regardless.
+        if (core.discord_auto_move_on_distribute_enabled
+                and core.discord_guild_id
+                and (core.discord_team_a_voice_channel_id or "").strip()
+                and (core.discord_team_b_voice_channel_id or "").strip()):
+            def _auto_move():
+                # ~2s grace so a player who joined the lobby late isn't
+                # missed by the move.  Cheap; the operator's already
+                # looking at the teams panel.
+                time.sleep(2.0)
+                try:
+                    from . import discord_bot
+                except Exception:
+                    return
+                if not discord_bot.bot_status().get("connected"):
+                    return
+                try:
+                    result = discord_bot.bot_move_to_team_channels(
+                        core.discord_guild_id,
+                        core.discord_team_a_voice_channel_id,
+                        core.discord_team_b_voice_channel_id,
+                        team_a_ids, team_b_ids,
+                    )
+                except Exception as exc:
+                    core.log(f"[discord] auto-move after distribute failed: {exc}")
+                    return
+                if result is None:
+                    core.log("[discord] auto-move after distribute: no result "
+                             "(guild/VCs/perms?)")
+                    return
+                core.log(f"[discord] auto-moved teams after distribute: "
+                         f"A={result['moved_a']}/{len(team_a_ids)}, "
+                         f"B={result['moved_b']}/{len(team_b_ids)}, "
+                         f"skipped {result['skipped']}, "
+                         f"errors {len(result['errors'])}")
+            threading.Thread(target=_auto_move, daemon=True,
+                             name="oblivion-auto-move").start()
         return jsonify(snap)
 
     @app.route("/api/veto/start_voting", methods=["POST"])

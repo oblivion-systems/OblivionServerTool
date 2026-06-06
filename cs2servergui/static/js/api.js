@@ -122,6 +122,15 @@ const api = (() => {
         '/api/discord/voice_channel_info' +
         (channelId ? `?channel_id=${encodeURIComponent(channelId)}` : '')
       ),
+      // v0.12.0 — bot-driven team voice splits.  moveTeams() reads the
+      // active veto session's team_a/team_b discord_ids and drags every
+      // rostered player into their team's configured VC.  Requires both
+      // discord_team_a_voice_channel_id AND discord_team_b_voice_channel_id
+      // configured.  autoMoveToggle({enabled}) persists the auto-fire
+      // toggle so `/api/veto/distribute` fires moveTeams in a background
+      // thread after every team split.
+      moveTeams:        ()        => post('/api/discord/move_teams', {}),
+      autoMoveToggle:   (enabled) => post('/api/discord/auto_move_toggle', { enabled: !!enabled }),
       // v0.11.0 polish — connection-check helpers
       testEmbed:     (channelId)  => post('/api/discord/test_embed',
                                           channelId ? { channel_id: channelId } : {}),

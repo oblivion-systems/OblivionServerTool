@@ -3362,6 +3362,15 @@ function _renderVetoTeams(root, sess) {
       </div>
       <div class="veto-stage-actions">
         <button class="btn btn-ghost" id="veto-reshuffle-btn">Re-shuffle</button>
+        <!-- v0.12.0 — Move teams to Discord VCs.  Button always visible
+             on the Teams stage; backend refuses cleanly if VCs aren't
+             configured or bot isn't connected, surfaced via the catch's
+             toast.  Saves the operator from having to leave the Veto tab
+             to verify Discord config. -->
+        <button class="btn btn-ghost" id="veto-move-teams-btn"
+                title="Move every rostered player with a discord_id into their team's voice channel">
+          🔀 Move teams to VCs
+        </button>
         <div class="spacer"></div>
         <button class="btn btn-accent" id="veto-to-vote-btn">Vote for captains →</button>
       </div>
@@ -3374,6 +3383,29 @@ function _renderVetoTeams(root, sess) {
   el('veto-to-vote-btn').addEventListener('click', async () => {
     try { _vetoApply(await api.veto.startVoting()); }
     catch (e) { toast(e.message, 'var(--bad)'); }
+  });
+  // v0.12.0 — Move teams to Discord VCs.
+  el('veto-move-teams-btn').addEventListener('click', async (ev) => {
+    const btn = ev.currentTarget;
+    btn.disabled = true; const orig = btn.textContent;
+    btn.textContent = 'Moving…';
+    try {
+      const r = await api.discord.moveTeams();
+      const skippedMsg = r.skipped ? `, ${r.skipped} not in VC` : '';
+      const errMsg     = r.errors && r.errors.length
+                          ? ` — ${r.errors.length} error(s)` : '';
+      toast(`Moved A ${r.moved_a}, B ${r.moved_b}${skippedMsg}${errMsg}`,
+            r.errors && r.errors.length ? 'var(--accent)' : 'var(--ok)');
+      if (r.errors && r.errors.length) {
+        // Surface individual error messages in the log so the operator
+        // can chase up specific players ("X: missing Move Members perm")
+        r.errors.forEach(e => console.warn('[move_teams]', e));
+      }
+    } catch (e) {
+      toast(e.message, 'var(--bad)');
+    } finally {
+      btn.disabled = false; btn.textContent = orig;
+    }
   });
 }
 
@@ -4266,6 +4298,50 @@ pages['config'] = async function() {
               <!-- Populated by _refreshVoiceChannelPreview() on save + on load -->
             </div>
           </div>
+          <!-- v0.12.0 — per-team VCs + auto-move toggle.  When both are set
+               AND the toggle is on, /api/veto/distribute fires a background
+               move that drags every rostered player with a discord_id into
+               their team's VC.  Bot needs Move Members permission. -->
+          <div class="field" style="margin-top:10px">
+            <label>Team A Voice Channel ID
+              <span style="color:var(--text-4)">(optional — needed for /move-teams)</span>
+            </label>
+            <div class="flex gap-8">
+              <input class="input flex-1" id="cfg-discord-team-a-vc-id" type="text" inputmode="numeric"
+                     value="${esc(cfg.discord_team_a_voice_channel_id||'')}"
+                     placeholder="456789012345678901">
+              <button class="btn btn-ghost" id="cfg-discord-team-a-vc-browse"
+                      title="Browse the bot's voice channels and pick one">
+                🔍 Browse
+              </button>
+            </div>
+          </div>
+          <div class="field" style="margin-top:10px">
+            <label>Team B Voice Channel ID
+              <span style="color:var(--text-4)">(optional — needed for /move-teams)</span>
+            </label>
+            <div class="flex gap-8">
+              <input class="input flex-1" id="cfg-discord-team-b-vc-id" type="text" inputmode="numeric"
+                     value="${esc(cfg.discord_team_b_voice_channel_id||'')}"
+                     placeholder="567890123456789012">
+              <button class="btn btn-ghost" id="cfg-discord-team-b-vc-browse"
+                      title="Browse the bot's voice channels and pick one">
+                🔍 Browse
+              </button>
+            </div>
+          </div>
+          <div class="field" style="margin-top:10px">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" id="cfg-discord-auto-move"
+                     ${cfg.discord_auto_move_on_distribute_enabled ? 'checked' : ''}>
+              <span>Auto-move teams to their VCs after Distribute</span>
+            </label>
+            <div class="field-hint" style="color:var(--text-4)">
+              Requires both team VCs above to be set. Bot needs the
+              <strong>Move Members</strong> permission in your Discord server.
+              Default OFF — opt in.
+            </div>
+          </div>
           <div id="cfg-discord-status" class="text-sm" style="margin-top:12px;color:var(--text-3)">
             <!-- Populated by pollState from /api/state.discord_bot -->
           </div>
@@ -4508,10 +4584,15 @@ pages['config'] = async function() {
     const channel  = el('cfg-discord-channel-id').value.trim();
     // v0.11.15 — default voice channel for one-click roster pull
     const voiceCh  = (el('cfg-discord-voice-channel-id')?.value || '').trim();
+    // v0.12.0 — per-team VCs for /move-teams
+    const teamAVc  = (el('cfg-discord-team-a-vc-id')?.value || '').trim();
+    const teamBVc  = (el('cfg-discord-team-b-vc-id')?.value || '').trim();
     const data = {
-      discord_guild_id:          guild,
-      discord_veto_channel_id:   channel,
-      discord_voice_channel_id:  voiceCh,
+      discord_guild_id:                         guild,
+      discord_veto_channel_id:                  channel,
+      discord_voice_channel_id:                 voiceCh,
+      discord_team_a_voice_channel_id:          teamAVc,
+      discord_team_b_voice_channel_id:          teamBVc,
     };
     if (tokenVal === 'CLEAR') data.discord_bot_token = '';
     else if (tokenVal) data.discord_bot_token = tokenVal;
@@ -4560,6 +4641,42 @@ pages['config'] = async function() {
         }
       }
     });
+  });
+
+  // v0.12.0 — Team A/B VC browse buttons (same picker as the default-VC).
+  ['a', 'b'].forEach(side => {
+    const btn = el(`cfg-discord-team-${side}-vc-browse`);
+    if (!btn) return;
+    btn.addEventListener('click', async () => {
+      await _vetoOpenDiscordPullModal({ pickOnly: true, kind: 'voice',
+        onPick: (ch) => {
+          const inp = el(`cfg-discord-team-${side}-vc-id`);
+          if (inp) {
+            inp.value = ch.id;
+            toast(`Team ${side.toUpperCase()} VC set to #${ch.name} (unsaved — click Save Discord Settings)`,
+                  'var(--accent)');
+          }
+        }
+      });
+    });
+  });
+
+  // v0.12.0 — Auto-move toggle.  Goes through its own endpoint so the
+  // server-side precondition check (both VCs configured) runs every time.
+  const autoMoveCb = el('cfg-discord-auto-move');
+  if (autoMoveCb) autoMoveCb.addEventListener('change', async () => {
+    const want = autoMoveCb.checked;
+    try {
+      const r = await api.discord.autoMoveToggle(want);
+      toast(r.enabled
+              ? 'Auto-move teams after Distribute: ON'
+              : 'Auto-move teams after Distribute: OFF',
+            'var(--accent)');
+    } catch (e) {
+      // Revert checkbox on rejection (typical: VCs not configured yet).
+      autoMoveCb.checked = !want;
+      toast(e.message, 'var(--bad)');
+    }
   });
 
   // Populate the VC preview on Config tab render
