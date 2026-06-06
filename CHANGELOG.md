@@ -2,6 +2,74 @@
 
 ---
 
+## v0.12.5 — 2026-06-06 (Gaming Mode toggle + scripts bundling)
+
+Closes tasks #95 + #97 — the last two pending v0.12 polish items.
+All v0.12 backlog is now drained.
+
+### Gaming Mode toggle in Config card (task #95)
+* New SPA section: **Gaming Mode (host + play perf)** with three
+  buttons (⚡ ON / 💤 OFF / 📊 Status).  Wraps `scripts/gaming-mode.ps1`.
+* `POST /api/system/gaming_mode` endpoint — `mode` in {on, off, status}.
+  Local-only via `@require_local` (the script flips Windows Power
+  Plan + cs2.exe core affinity; only meaningful on the operator's
+  own machine).
+* `api.gamingMode(mode)` wrapper.
+* Output dumped into a collapsible `<pre>` so the operator sees
+  exactly what the script reported.
+* Pairs with `TROUBLESHOOTING.md`'s "Performance: hosting + playing
+  on the same PC" section — same scripts, now reachable without
+  opening a terminal.
+
+### Installer bundles scripts/ (task #97)
+* `installer.iss` now copies `scripts/*` to `<install_dir>/scripts/`
+  with `recursesubdirs createallsubdirs`.
+* Web layer's `_scripts_dir()` resolves `scripts/` correctly for
+  both dev (`<repo>/scripts/`) and frozen (`<install_dir>/scripts/`
+  via `sys.executable`).
+* `PROCESS_LASSO_SETUP.md` + `README.md` ship alongside the .bat /
+  .ps1 helpers.
+
+### Tests
++2 new in `tests/test_veto_api.py`:
+- gaming_mode 400 on invalid mode
+- gaming_mode 403 for non-local admin (require_local enforcement)
+**222/222 green.**
+
+### v0.12 backlog status
+**Drained.**  All tasks tagged for v0.12 closed.  Remaining open
+tasks (#84, #85, #86, #87, #88, #89, #90, #91, #92, #93, #94) are
+all driver-abstraction work or the v1.0 launch arc.
+
+---
+
+## v0.12.4 — 2026-06-06 (content-hashed static URLs)
+
+Closes audit finding #6 / task #139.  All 10 audit findings now resolved.
+
+### Fixed
+* Replace v0.11.24's blanket `Cache-Control: no-store` on `/static/*`
+  with the standard "cache-bust via URL change" pattern.
+* Template injects `?v={{ app_version }}` into every `/static/*` URL
+  (favicons, CSS, JS, emblem images, login emblem).
+* Versioned URLs get `Cache-Control: public, max-age=31536000, immutable`.
+* Each release ships new URLs → browser treats them as fresh resources
+  → cache-bust on rebuild AND aggressive caching between rebuilds.
+* Unversioned URLs (e.g. a stray request from a stale bookmark) fall
+  back to Flask's default ETag-based behaviour — backwards compatible.
+
+### Why
+v0.11.24 was correct (it busted the WebView2 stale-JS cache that
+caused half the tournament-night frustration) but a perf regression
+— every page load re-downloaded the full ~600KB app.js even when
+the .exe hadn't changed.  This release keeps the correctness AND
+restores between-rebuild caching.
+
+### Tests
++3 new.  **220/220 green.**
+
+---
+
 ## v0.12.3 — 2026-06-06 (remote player voting via per-player tokens)
 
 Closes task #135 — the last major v0.12 feature.  Extends the Layer 1A

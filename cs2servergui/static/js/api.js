@@ -198,6 +198,9 @@ const api = (() => {
 
     // ── System ────────────────────────────────────────────────────────────
     pickDirectory: ()   => get('/api/system/pick_directory'),
+    // v0.12.5 / task #95 — Gaming Mode toggle.  Wraps scripts/gaming-mode.ps1
+    // (Power Plan / Game Mode / Game DVR / cs2.exe core affinity).  Local-only.
+    gamingMode:    (mode) => post('/api/system/gaming_mode', { mode }),
 
     // ── Game data ─────────────────────────────────────────────────────────
     modes:            ()  => get('/api/data/modes'),

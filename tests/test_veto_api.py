@@ -2328,6 +2328,35 @@ t('match_events: round embed colored by winning side',
   t_match_events_round_embed_color_by_winner)
 
 
+# ─── v0.12.5 / task #95 — Gaming Mode endpoint ────────────────────────────
+
+def t_gaming_mode_refuses_invalid_mode():
+    """Body must specify mode in {'on','off','status'} — anything else
+    is a 400 before we shell out to PowerShell."""
+    _, _, c = _new_app(); _login(c)
+    # Force is_local so @require_local passes
+    from cs2servergui import web as _web
+    for tok in list(_web._sessions.keys()):
+        _web._sessions[tok]['is_local'] = True
+    r = c.post('/api/system/gaming_mode', json={'mode': 'sideways'})
+    body = r.get_json() or {}
+    return (r.status_code == 400 and 'mode must be' in (body.get('error') or '')), \
+           f'status={r.status_code} body={body}'
+t('gaming_mode: 400 on invalid mode',
+  t_gaming_mode_refuses_invalid_mode)
+
+
+def t_gaming_mode_refuses_remote_admin():
+    """@require_local means a non-local admin (e.g. remote via tunnel)
+    gets 403.  Test client is naturally non-local."""
+    _, _, c = _new_app(); _login(c)
+    # Do NOT force is_local — leave the default (False) so require_local fails
+    r = c.post('/api/system/gaming_mode', json={'mode': 'status'})
+    return r.status_code == 403, f'status={r.status_code}'
+t('gaming_mode: 403 for non-local admin (remote session)',
+  t_gaming_mode_refuses_remote_admin)
+
+
 # ─── v0.12.4 / task #139 — Content-hashed static URLs ─────────────────────
 
 def t_static_with_version_param_caches_aggressively():

@@ -10,7 +10,7 @@
 ; ─────────────────────────────────────────────────────────────────────────────
 
 #define MyAppName      "Oblivion Server Tool"
-#define MyAppVersion   "0.12.4"
+#define MyAppVersion   "0.12.5"
 #define MyAppPublisher "Oblivion"
 #define MyAppURL       "https://github.com/jacquesvniekerk-eng/OblivionServerTool"
 #define MyAppExeName   "OblivionServerTool.exe"
@@ -61,6 +61,14 @@ Name: "startupitem"; Description: "Launch {#MyAppName} when &Windows starts"; Gr
 [Files]
 ; Main executable produced by build.bat → PyInstaller
 Source: "dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+
+; v0.12.5 / task #97 — Bundle the scripts/ folder so the Gaming Mode +
+; Process Lasso setup helpers ship with the installer.  Operators
+; running TROUBLESHOOTING.md's "hosting + playing on the same PC"
+; flow find them at <install>\scripts\ without needing to clone the
+; repo separately.  recursesubdirs keeps README.md + PROCESS_LASSO_SETUP.md
+; alongside the .bat / .ps1 files.
+Source: "scripts\*"; DestDir: "{app}\scripts"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 ; WebView2 bootstrapper — installs the Edge WebView2 runtime if missing.
 ; Edge WebView2 ships with Windows 11 by default but is NOT preinstalled on
