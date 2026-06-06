@@ -385,9 +385,22 @@ def create_flask(core: AppCore) -> Flask:
         "/api/veto/step",
         "/api/veto/ready",        # v0.10.1: captains toggle their ready flag
     })
+    # v0.12.3 / task #135 — Voter role: a rostered player who claimed
+    # their voter token.  Strictly tighter than captain — can only see
+    # the live mirror + cast their own vote.  Created by /api/veto/voter_claim
+    # with a valid single-use voter token (no PIN).
+    _VOTER_PATHS = frozenset({
+        "/api/state",
+        "/api/capabilities",
+        "/api/veto/state",
+        "/api/veto/stream",
+        "/api/veto/vote",         # voters only act on this; per-team/idx
+                                  # enforcement lives inside the handler
+    })
     _PUBLIC_PATHS = frozenset({
         "/api/ping", "/api/auth/login", "/api/auth/logout",
         "/api/veto/claim",        # token IS the credential; PIN-free entry
+        "/api/veto/voter_claim",  # v0.12.3 / task #135 — same pattern for voters
     })
 
     @app.before_request
@@ -408,6 +421,8 @@ def create_flask(core: AppCore) -> Flask:
         if role == "guest" and p in _GUEST_PATHS:
             return None
         if role == "captain" and p in _CAPTAIN_PATHS:
+            return None
+        if role == "voter" and p in _VOTER_PATHS:        # v0.12.3 / task #135
             return None
         return jsonify({"error": f"{role or 'unknown'} role cannot access {p}"}), 403
 
@@ -529,10 +544,16 @@ def create_flask(core: AppCore) -> Flask:
         # so the SPA's captain-finale view knows which team's ready flag it's
         # toggling.  Empty string for non-captain sessions.
         captain_team = (session or {}).get("captain_team", "") if role == "captain" else ""
+        # v0.12.3 / task #135 — voter session carries team + voter_idx so the
+        # SPA can render the right team's 5 names + lock to the right slot.
+        voter_team    = (session or {}).get("voter_team",    "") if role == "voter" else ""
+        voter_idx     = (session or {}).get("voter_idx",     -1) if role == "voter" else -1
         return jsonify({
             "running":            core.running,
             "role":               role,
             "captain_team":       captain_team,
+            "voter_team":         voter_team,
+            "voter_idx":          voter_idx,
             "guest_pin_set":      bool(core.guest_pin),
             "is_installed":       core.is_installed,
             "boot_state":         core.boot_state,
@@ -1941,6 +1962,12 @@ def create_flask(core: AppCore) -> Flask:
                 "revote_count":  s.revote_count,
                 "tokens_claimed": {team: tok.used
                                    for team, tok in s.tokens.items()},
+                # v0.12.3 / task #135 — voter token claim status.  Map
+                # of "A:0" .. "B:4" → bool.  SPA uses this to render
+                # ✓ next to each player who's claimed (so the operator
+                # can see who's missing without scrolling the snapshot).
+                "voter_tokens_claimed": {key: tok.used
+                                         for key, tok in s.voter_tokens.items()},
                 "sequence":      [{"kind": st.kind, "team": st.team, "map_id": st.map_id}
                                   for st in s.sequence],
                 "current_step":  s.current_step,
@@ -2534,6 +2561,20 @@ def create_flask(core: AppCore) -> Flask:
             votee_idx = int(d.get("votee_idx", -1))
         except (TypeError, ValueError):
             return jsonify({"error": "voter_idx/votee_idx must be integers"}), 400
+        # v0.12.3 / task #135 — voter role can only vote for their own
+        # team + their own voter_idx.  Admin / local can vote for anyone
+        # (operator override / dev testing).  Captains never reach this
+        # endpoint (not in _CAPTAIN_PATHS).
+        session = _current_session() or {}
+        is_admin = session.get("is_local") or session.get("role") == "admin"
+        if not is_admin and session.get("role") == "voter":
+            v_team = session.get("voter_team", "")
+            v_idx  = session.get("voter_idx", -1)
+            if team != v_team or voter_idx != v_idx:
+                return jsonify({
+                    "error": "voters can only cast their own vote — "
+                             f"session is bound to team {v_team} idx {v_idx}"
+                }), 403
         with core._veto_lock:
             if core._veto_session is None:
                 return jsonify({"error": "no active veto session"}), 400
@@ -2732,6 +2773,169 @@ def create_flask(core: AppCore) -> Flask:
                 resp.headers["Pragma"] = "no-cache"
                 return resp
         # Fall through — render the SPA shell; the frontend handles the rest.
+        return redirect("/#veto")
+
+    # ─── v0.12.3 / task #135 — Remote player voting ──────────────────────
+    # Parallel infrastructure to the captain flow.  After Distribute,
+    # operator clicks "DM voting links" on the SPA Teams stage; the bot
+    # DMs each of the 10 rostered players (with discord_id set) a
+    # personal URL like /voter?join=<token>.  Voter clicks → HTML
+    # interstitial sets cookie → voter sees a minimal voting screen
+    # showing their own team's 5 names → clicks one → vote cast.
+    #
+    # No PIN involved — the token IS the credential.  Single-use per
+    # token, but a voter may cast / change their vote multiple times
+    # while their session lives.  Voter sessions are sweep'd on reset
+    # along with captain sessions.
+
+    @app.route("/api/veto/voter_tokens", methods=["POST"])
+    @require_auth
+    def veto_voter_tokens():
+        """Admin-only.  Mint 10 voter tokens + auto-DM them via the bot
+        (Layer 1A pattern extended to all players).  Idempotent — same
+        protection as /api/veto/tokens (if any voter has claimed, return
+        existing values rather than rotate everyone)."""
+        with core._veto_lock:
+            if core._veto_session is None:
+                return jsonify({"error": "no active veto session"}), 400
+            try:
+                tokens_by_key = _veto.issue_voter_tokens(core._veto_session)
+            except Exception as e:
+                return _veto_error_response(e)
+            # Snapshot roster pointers under lock for DM build
+            team_a_slots = [(p.name, p.discord_id) for p in core._veto_session.team_a]
+            team_b_slots = [(p.name, p.discord_id) for p in core._veto_session.team_b]
+        # Build per-slot URLs.  Same share-base rules as captain tokens.
+        lan_ip       = _config._lan_ip()
+        public_ip    = core.public_ip or ""
+        port         = _config.FLASK_PORT
+        share_base   = (getattr(core, "public_share_url", "") or "").rstrip("/")
+        def _urls(token: str) -> dict:
+            urls = {"lan": f"http://{lan_ip}:{port}/voter?join={token}"}
+            if share_base:
+                urls["public"] = f"{share_base}/voter?join={token}"
+            elif public_ip:
+                urls["public"] = f"http://{public_ip}:{port}/voter?join={token}"
+            return urls
+
+        # Build response per slot + attempt DMs (fail-soft — operator can
+        # always copy-paste from the response).
+        out = {}
+        dm_attempts = []
+        for team_letter, slots in (("A", team_a_slots), ("B", team_b_slots)):
+            for i, (name, discord_id) in enumerate(slots):
+                key = f"{team_letter}:{i}"
+                tok = tokens_by_key.get(key, "")
+                urls = _urls(tok)
+                dm_sent = False
+                if discord_id and tok:
+                    # Try DM via existing helper.  Fire-and-forget would
+                    # race with the response — block briefly so the
+                    # `dm_sent` flag reflects actual delivery.
+                    try:
+                        from . import discord_bot
+                        if discord_bot.bot_status().get("connected"):
+                            # Prefer public URL if available
+                            link = urls.get("public") or urls.get("lan")
+                            text = (f"You're voting in **{core._veto_session.team_a_name if team_letter == 'A' else core._veto_session.team_b_name}**.\n"
+                                    f"Open this one-shot link to cast your captain vote: {link}\n"
+                                    "*This link is personal — don't share it.*")
+                            dm_sent = bool(discord_bot.bot_dm_user(discord_id, text))
+                            dm_attempts.append((team_letter, i, name, dm_sent))
+                    except Exception as exc:
+                        core.log(f"[veto] voter DM to {name} failed: {exc}")
+                out[key] = {
+                    "team":      team_letter,
+                    "voter_idx": i,
+                    "player_name": name,
+                    "discord_id":  discord_id,
+                    "token":       tok,
+                    "dm_sent":     dm_sent,
+                    **urls,
+                }
+        if dm_attempts:
+            sent = sum(1 for *_, ok in dm_attempts if ok)
+            core.log(f"[veto] voter DMs sent: {sent}/{len(dm_attempts)}")
+        _veto_broadcast()
+        return jsonify({"voters": out})
+
+    @app.route("/api/veto/voter_claim", methods=["POST"])
+    def veto_voter_claim():
+        """Public endpoint — token IS the credential.  Mints a voter
+        session cookie scoped to (team, voter_idx).  Mirrors veto_claim
+        for captains."""
+        d = request.get_json() or {}
+        token = str(d.get("token", "")).strip()
+        if not token:
+            return jsonify({"error": "missing token"}), 400
+        caller_ip = request.remote_addr or ""
+        with core._veto_lock:
+            if core._veto_session is None:
+                return jsonify({"error": "no active veto session"}), 400
+            try:
+                team, voter_idx = _veto.claim_voter(
+                    core._veto_session, token, caller_id=caller_ip)
+            except Exception as e:
+                return _veto_error_response(e)
+            session_token = _create_session(caller_ip, is_local=False, role="voter")
+            sess = _get_session(session_token)
+            if sess is not None:
+                sess["voter_team"] = team
+                sess["voter_idx"]  = voter_idx
+        core.log(f"[veto] voter team {team} idx {voter_idx} claimed from {caller_ip}")
+        _veto_broadcast()
+        resp = jsonify({"ok": True, "team": team, "voter_idx": voter_idx})
+        resp.set_cookie("session", session_token, httponly=True, samesite="Lax",
+                        secure=_request_is_https())
+        return resp
+
+    @app.route("/voter")
+    def voter_share_landing():
+        """Voter-link landing page.  /voter?join=<token> claims server-side
+        + sets the cookie + serves the SPA-bouncing HTML interstitial.
+        Mirror of veto_share_landing for captains."""
+        token = request.args.get("join", "").strip()
+        if token:
+            caller_ip = request.remote_addr or ""
+            session_token = None
+            team = None
+            voter_idx = -1
+            with core._veto_lock:
+                try:
+                    if core._veto_session is not None:
+                        team, voter_idx = _veto.claim_voter(
+                            core._veto_session, token, caller_id=caller_ip)
+                except Exception as e:
+                    core.log(f"[veto] voter share-link claim failed: {e}")
+                    team = None
+                if team is not None:
+                    session_token = _create_session(
+                        caller_ip, is_local=False, role="voter")
+                    sess = _get_session(session_token)
+                    if sess is not None:
+                        sess["voter_team"] = team
+                        sess["voter_idx"]  = voter_idx
+            if team is not None and session_token is not None:
+                _veto_broadcast()
+                html = (
+                    "<!doctype html><html><head>"
+                    "<meta charset=utf-8>"
+                    "<meta name=viewport content='width=device-width,initial-scale=1'>"
+                    "<title>Voting…</title>"
+                    "<style>body{margin:0;display:flex;align-items:center;"
+                    "justify-content:center;min-height:100vh;"
+                    "background:#0d0d0f;color:#ccc;font-family:sans-serif;font-size:1.1rem}"
+                    "</style></head>"
+                    "<body><span>Opening voting page…</span>"
+                    "<script>window.location.replace('/#veto');</script>"
+                    "</body></html>"
+                )
+                resp = make_response(html, 200)
+                resp.set_cookie("session", session_token, httponly=True,
+                                samesite="Lax", secure=_request_is_https())
+                resp.headers["Cache-Control"] = "no-store, private"
+                resp.headers["Pragma"] = "no-cache"
+                return resp
         return redirect("/#veto")
 
     @app.route("/api/veto/step", methods=["POST"])
@@ -3242,12 +3446,16 @@ def create_flask(core: AppCore) -> Flask:
             # keep their cookie with captain_team set and appear auth'd
             # as captain of a team whose tokens are already dead.
             with _sessions_lock:
+                # v0.12.3 / task #135 — also sweep voter sessions on reset.
+                # Same staleness reason: a voter cookie bound to the
+                # previous session's roster slot would silently
+                # auto-authenticate into the next session's voting stage.
                 dropped = [tok for tok, s in _sessions.items()
-                           if s.get("role") == "captain"]
+                           if s.get("role") in ("captain", "voter")]
                 for tok in dropped:
                     _sessions.pop(tok, None)
         if dropped:
-            core.log(f"[veto] invalidated {len(dropped)} captain session(s)")
+            core.log(f"[veto] invalidated {len(dropped)} captain/voter session(s)")
         # v0.12.1 — stop the match-events poller (idempotent no-op if not
         # running).  Resetting mid-match must stop the round-summary spam.
         try:

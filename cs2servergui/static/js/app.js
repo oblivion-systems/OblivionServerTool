@@ -2482,6 +2482,12 @@ function _renderVeto() {
   const isCap = (state_.server && state_.server.role === 'captain');
   if (isCap) return _renderVetoCaptain(root, state, sess);
 
+  // v0.12.3 / task #135 — Voter view: minimal voting screen showing this
+  // voter's team's 5 names + a single click to cast.  Strictly smaller
+  // than the captain view (voter can only ever do one thing).
+  const isVoter = (state_.server && state_.server.role === 'voter');
+  if (isVoter) return _renderVetoVoter(root, state, sess);
+
   // Admin / local view: full flow
   switch (state) {
     case 'idle':     _renderVetoIdle(root); break;
@@ -3374,6 +3380,22 @@ function _renderVetoTeams(root, sess) {
         <div class="spacer"></div>
         <button class="btn btn-accent" id="veto-to-vote-btn">Vote for captains →</button>
       </div>
+      <!-- v0.12.3 / task #135 — Remote voting links.  Only meaningful
+           AFTER advancing to the voting stage (issue_voter_tokens checks
+           state).  Button always visible here so operator can stage the
+           tokens + DM all players in one click before clicking "Vote for
+           captains →".  Backend refuses with a clean error if state
+           isn't voting yet. -->
+      <div class="veto-stage-actions" style="margin-top:8px">
+        <span style="color:var(--text-4);font-family:var(--font-mono);font-size:11px">
+          Remote players can vote via DM — click after advancing to the voting stage:
+        </span>
+        <div class="spacer"></div>
+        <button class="btn btn-ghost" id="veto-voter-dm-btn"
+                title="DM each rostered player with a discord_id a personal one-shot voting link">
+          📨 DM voting links to all 10
+        </button>
+      </div>
     </div>
   `;
   el('veto-reshuffle-btn').addEventListener('click', async () => {
@@ -3384,6 +3406,39 @@ function _renderVetoTeams(root, sess) {
     try { _vetoApply(await api.veto.startVoting()); }
     catch (e) { toast(e.message, 'var(--bad)'); }
   });
+  // v0.12.3 / task #135 — DM voter links to all 10 players.  Behind the
+  // scenes: starts voting (if needed) → mints 10 tokens → DMs each
+  // discord_id → SPA refreshes via _vetoApply with the new voter_tokens
+  // map so the operator can see who's claimed.
+  el('veto-voter-dm-btn').addEventListener('click', async (ev) => {
+    const btn = ev.currentTarget;
+    btn.disabled = true; const orig = btn.textContent;
+    btn.textContent = 'DM-ing…';
+    try {
+      // If we're on `teams`, advance to `voting` first — voter_tokens
+      // only mints in `voting` state.  Auto-advance saves the operator
+      // a click; if the operator wanted to delay, they can hit Reset.
+      const curState = (_vetoState && _vetoState.state) || '';
+      if (curState === 'teams') {
+        _vetoApply(await api.veto.startVoting());
+      }
+      const r = await api.veto.voterTokens();
+      const voters = r && r.voters || {};
+      const total = Object.keys(voters).length;
+      const sent  = Object.values(voters).filter(v => v.dm_sent).length;
+      const noid  = Object.values(voters).filter(v => !v.discord_id).length;
+      const msg = `DM'd ${sent}/${total} voters`
+                  + (noid ? ` (${noid} skipped — no discord_id)` : '');
+      toast(msg, sent > 0 ? 'var(--ok)' : 'var(--accent)');
+      // Force a state refresh so the voter_tokens_claimed flags land.
+      _vetoApply(await api.veto.state());
+    } catch (e) {
+      toast(e.message, 'var(--bad)');
+    } finally {
+      btn.disabled = false; btn.textContent = orig;
+    }
+  });
+
   // v0.12.0 — Move teams to Discord VCs.
   el('veto-move-teams-btn').addEventListener('click', async (ev) => {
     const btn = ev.currentTarget;
@@ -4094,6 +4149,90 @@ function _renderVetoCaptain(root, state, sess) {
       </div>
     </div>
   `;
+}
+
+/* ── Voter view (v0.12.3 / task #135) ──────────────────────────────────── */
+// Minimal screen for a rostered player who claimed their voter token.
+// Shows: their team's 5 names + a click target per teammate.  Click =
+// cast vote.  Vote is final-ish — they can change it until the operator
+// hits Resolve, but once Resolve fires the captains are elected and the
+// voter screen flips to a "thanks, captain elected" confirmation.
+function _renderVetoVoter(root, state, sess) {
+  // Hide the operator-side reset + history buttons; voter has no business there.
+  const resetBtn = el('veto-reset-btn');
+  if (resetBtn) resetBtn.style.display = 'none';
+
+  const server   = state_ && state_.server || {};
+  const myTeam   = server.voter_team || '';
+  const myIdx    = (typeof server.voter_idx === 'number') ? server.voter_idx : -1;
+  if (!sess) {
+    root.innerHTML = `<div class="veto-stage" style="text-align:center;padding:40px">
+      <div style="color:var(--text-3)">No active veto session.</div></div>`;
+    return;
+  }
+
+  // Pre-vote stages — show waiting message.
+  if (state !== 'voting') {
+    const headings = {
+      idle: 'No active session yet',
+      roster: 'Operator is finalising the roster',
+      teams: 'Teams have been split — voting starts shortly',
+      links: 'Voting is complete · captains have their links',
+      veto: 'Captains are picking maps now',
+      finale: 'Match is being set up',
+      complete: 'Match complete',
+    };
+    root.innerHTML = `
+      <div class="veto-stage veto-captain-greeting">
+        <h2>${esc(headings[state] || 'Waiting on operator')}</h2>
+        <div class="veto-captain-team">${esc(myTeam === 'A' ? sess.team_a_name : sess.team_b_name)} · voter</div>
+        <div style="margin-top:18px;font-family:var(--font-mono);font-size:10px;letter-spacing:0.12em;color:var(--text-4)">
+          STAGE: ${esc(state).toUpperCase()}
+        </div>
+      </div>
+    `;
+    return;
+  }
+
+  // voting stage — render team list + click targets
+  const teamRoster = (myTeam === 'A') ? sess.team_a : sess.team_b;
+  const teamName   = (myTeam === 'A') ? sess.team_a_name : sess.team_b_name;
+  const votesMap   = (myTeam === 'A') ? sess.votes_a   : sess.votes_b;
+  const myVote     = votesMap ? votesMap[myIdx] : undefined;
+
+  if (!Array.isArray(teamRoster) || teamRoster.length === 0) {
+    root.innerHTML = `<div class="veto-stage" style="text-align:center;padding:40px">
+      <div style="color:var(--text-3)">Loading your team…</div></div>`;
+    return;
+  }
+
+  const buttons = teamRoster.map((votee, ti) => `
+    <div class="veto-vote-btn ${myVote === ti ? 'voted' : ''}"
+         data-ti="${ti}" style="font-size:1.05rem;padding:14px 12px">
+      ${esc(votee.name)}${myVote === ti ? ' ✓' : ''}
+    </div>
+  `).join('');
+
+  root.innerHTML = `
+    <div class="veto-stage veto-captain-greeting">
+      <h2>Vote for your captain</h2>
+      <div class="veto-captain-team">${esc(teamName)} · ${esc(teamRoster[myIdx]?.name || 'voter')}</div>
+      <div style="color:var(--text-3);font-family:var(--font-mono);font-size:12px;line-height:1.5;max-width:480px;margin:6px auto 18px">
+        Tap the player you want as captain.  You can change your pick until the operator resolves the votes.
+      </div>
+      <div class="veto-vote-btns" style="display:flex;flex-direction:column;gap:10px;max-width:360px;margin:0 auto">
+        ${buttons}
+      </div>
+    </div>
+  `;
+  document.querySelectorAll('.veto-vote-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const ti = parseInt(btn.dataset.ti, 10);
+      try {
+        _vetoApply(await api.veto.vote(myTeam, myIdx, ti));
+      } catch (e) { toast(e.message, 'var(--bad)'); }
+    });
+  });
 }
 
 /* Tear down SSE when leaving the tab */
