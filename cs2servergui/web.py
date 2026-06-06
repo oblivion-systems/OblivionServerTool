@@ -1437,6 +1437,21 @@ def create_flask(core: AppCore) -> Flask:
     # broadcasts a JSON snapshot to all of them.
     _veto_subs: list[queue.Queue] = []
     _veto_subs_lock = threading.Lock()
+    # v0.12.2 — broadcast observability (audit finding #10 / task #143).
+    # Track total events dropped due to subscriber-queue overflow + total
+    # broadcast attempts.  Surfaces in the diagnostic snapshot so a real
+    # production overflow gets caught — pre-v0.12.2 a silent drop was the
+    # leading hypothesis for the v0.11.25 polling fallback's existence,
+    # but we had no way to confirm or deny.  With this counter visible
+    # in /api/diag/snapshot the next stuck-UI complaint either has a
+    # smoking gun ("broadcast_drops=47, that's the bug") or rules out
+    # this layer ("broadcast_drops=0, look elsewhere").
+    _veto_broadcast_stats_lock = threading.Lock()
+    _veto_broadcast_stats = {
+        "events_total":   0,   # broadcast() calls since process start
+        "drops_total":    0,   # put_nowait Full exceptions (silent drops)
+        "last_drop_at":   0.0, # epoch time of most recent drop, or 0.0
+    }
 
     # v0.10.2: match history persistence — guards concurrent appends so two
     # operators clicking Hand-to-MatchZy at the same time can't corrupt the
@@ -1961,9 +1976,25 @@ def create_flask(core: AppCore) -> Flask:
         payload = "data: " + __import__("json").dumps(snap) + "\n\n"
         with _veto_subs_lock:
             subs = list(_veto_subs)
+        drops_this_event = 0
         for q in subs:
-            try: q.put_nowait(payload)
-            except Exception: pass
+            try:
+                q.put_nowait(payload)
+            except Exception:
+                drops_this_event += 1
+        # v0.12.2 — record drops for /api/diag/snapshot visibility.
+        with _veto_broadcast_stats_lock:
+            _veto_broadcast_stats["events_total"] += 1
+            if drops_this_event:
+                _veto_broadcast_stats["drops_total"] += drops_this_event
+                _veto_broadcast_stats["last_drop_at"] = time.time()
+                # Log on FIRST drop only per process — don't spam if a
+                # subscriber keeps drifting.  The counter still increments.
+                if _veto_broadcast_stats["drops_total"] == drops_this_event:
+                    core.log(
+                        f"[veto] SSE broadcast queue overflow — {drops_this_event} "
+                        f"event(s) dropped (subscriber not draining fast enough).  "
+                        f"Diagnostic snapshot will show running totals.")
         # v0.11.3 — persist the active session.  Cheap, atomic, fail-soft.
         _persist_active_veto()
 
@@ -2017,7 +2048,15 @@ def create_flask(core: AppCore) -> Flask:
     @app.route("/api/veto/stream")
     @require_auth        # captain-allowed
     def veto_stream():
-        q: queue.Queue = queue.Queue(maxsize=32)
+        # v0.12.2 — bump queue depth 32 → 256.  Each event is ~3-5 KB so
+        # 256 events ≈ 1-1.5 MB per stalled subscriber, well within
+        # tolerance.  Audit finding #10 (task #143) flagged the 32-event
+        # ceiling as the theoretical cause of the polling-fallback need;
+        # in practice no real workflow bursts 32 broadcasts back-to-back,
+        # but the larger ceiling closes the speculative gap and gives a
+        # stalled WebView2 plenty of room to drain on resume.  See
+        # _veto_broadcast_stats for live drop telemetry.
+        q: queue.Queue = queue.Queue(maxsize=256)
         # Push the current state immediately so a fresh subscriber renders
         # without waiting for the next event.
         try: q.put_nowait("data: " + __import__("json").dumps(_veto_snapshot()) + "\n\n")
@@ -3513,6 +3552,19 @@ def create_flask(core: AppCore) -> Flask:
         except Exception:
             tldr.append(("·", "plugin_log", "(could not check)"))
 
+        # v0.12.2 — SSE broadcast drops indicator (audit finding #10).  Only
+        # interesting when > 0; otherwise a single line clutters the TL;DR.
+        try:
+            with _veto_broadcast_stats_lock:
+                drops = _veto_broadcast_stats["drops_total"]
+            if drops > 0:
+                tldr.append(("⚠", "sse",
+                             f"{drops} broadcast event(s) dropped — "
+                             "subscriber too slow to drain.  See "
+                             "'SSE broadcast telemetry' section."))
+        except Exception:
+            pass
+
         # Render TL;DR
         hr("TL;DR (auto-scan)")
         for icon, label, detail in tldr:
@@ -3580,6 +3632,24 @@ def create_flask(core: AppCore) -> Flask:
                 kv("final_maps",    ", ".join(sess.final_maps) if sess.final_maps else "(none)")
                 kv("matchzy_config_built", sess.matchzy_config is not None)
                 kv("spectator_token", "(issued)" if sess.spectator_token else "(none)")
+
+        # ─── SSE broadcast telemetry (v0.12.2 — audit finding #10) ───
+        hr("SSE broadcast telemetry")
+        with _veto_broadcast_stats_lock:
+            ev = _veto_broadcast_stats["events_total"]
+            dr = _veto_broadcast_stats["drops_total"]
+            last_drop = _veto_broadcast_stats["last_drop_at"]
+        kv("events_total", ev)
+        kv("drops_total",  dr)
+        if last_drop > 0:
+            age = max(0, int(time.time() - last_drop))
+            kv("last_drop_at",
+               f"{datetime.datetime.fromtimestamp(last_drop).strftime('%H:%M:%S')}"
+               f" ({age}s ago)")
+        else:
+            kv("last_drop_at", "(no drops since process start)")
+        with _veto_subs_lock:
+            kv("active_subscribers", len(_veto_subs))
 
         # ─── Discord bot ───
         # v0.11.10: collapse to one-liner when not configured.  The full
