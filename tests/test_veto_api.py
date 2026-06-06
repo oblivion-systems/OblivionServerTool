@@ -2113,6 +2113,149 @@ t('diag: /api/diag/snapshot is local-only (403 for non-local admin)',
   t_diag_snapshot_gated_to_local)
 
 
+# ─── v0.12.0 — /move-teams + auto-move toggle ─────────────────────────────
+
+def _reset_discord_team_cfg(ac):
+    """v0.12.0 — explicit reset for tests that need clean discord config.
+    APPDATA tempdir is shared across tests in the same module run, so an
+    earlier test that persisted VC IDs would leak into a later 'unset'
+    test.  Calling this AFTER _new_app() guarantees a clean baseline."""
+    ac.discord_guild_id = ''
+    ac.discord_team_a_voice_channel_id = ''
+    ac.discord_team_b_voice_channel_id = ''
+    ac.discord_auto_move_on_distribute_enabled = False
+
+
+def t_move_teams_refuses_when_guild_unconfigured():
+    ac, _, c = _new_app(); _login(c)
+    _reset_discord_team_cfg(ac)
+    r = c.post('/api/discord/move_teams', json={})
+    body = r.get_json() or {}
+    return (r.status_code == 400 and 'guild ID' in (body.get('error') or '')), \
+           f'status={r.status_code} body={body}'
+t('move_teams: 400 when discord_guild_id unset',
+  t_move_teams_refuses_when_guild_unconfigured)
+
+
+def t_move_teams_refuses_when_team_vcs_unconfigured():
+    ac, _, c = _new_app(); _login(c)
+    _reset_discord_team_cfg(ac)
+    ac.discord_guild_id = '12345'
+    # team VCs left blank by _reset_discord_team_cfg
+    r = c.post('/api/discord/move_teams', json={})
+    body = r.get_json() or {}
+    return (r.status_code == 400 and 'voice channels' in (body.get('error') or '')), \
+           f'status={r.status_code} body={body}'
+t('move_teams: 400 when team_a/team_b voice channels unset',
+  t_move_teams_refuses_when_team_vcs_unconfigured)
+
+
+def t_move_teams_refuses_when_no_session():
+    ac, _, c = _new_app(); _login(c)
+    ac.discord_guild_id = '12345'
+    ac.discord_team_a_voice_channel_id = '111'
+    ac.discord_team_b_voice_channel_id = '222'
+    # no veto session — should refuse before reaching the bot module
+    r = c.post('/api/discord/move_teams', json={})
+    body = r.get_json() or {}
+    return (r.status_code == 400 and 'session' in (body.get('error') or '').lower()), \
+           f'status={r.status_code} body={body}'
+t('move_teams: 400 when no active veto session',
+  t_move_teams_refuses_when_no_session)
+
+
+def t_move_teams_refuses_when_state_is_roster():
+    """Session must be past the roster stage — distribute() must have
+    happened (state in teams/voting/links/veto/finale/complete) so
+    team_a/team_b exist with players."""
+    ac, _, c = _new_app(); _login(c)
+    ac.discord_guild_id = '12345'
+    ac.discord_team_a_voice_channel_id = '111'
+    ac.discord_team_b_voice_channel_id = '222'
+    # Create session and stop at roster (don't distribute)
+    c.post('/api/veto/create', json={'mode': 'BO3'})
+    c.post('/api/veto/roster', json={
+        'team_a_name': 'A', 'team_b_name': 'B',
+        'players': _ten_player_payload(),
+    })
+    r = c.post('/api/discord/move_teams', json={})
+    body = r.get_json() or {}
+    return (r.status_code == 400 and 'session' in (body.get('error') or '').lower()), \
+           f'status={r.status_code} body={body}'
+t('move_teams: 400 when session is on roster stage (teams not split yet)',
+  t_move_teams_refuses_when_state_is_roster)
+
+
+def t_move_teams_refuses_when_no_discord_ids():
+    """Distributed teams but no discord_ids on any player → 400.
+    Without IDs there's nothing to move."""
+    ac, _, c = _new_app(); _login(c)
+    ac.discord_guild_id = '12345'
+    ac.discord_team_a_voice_channel_id = '111'
+    ac.discord_team_b_voice_channel_id = '222'
+    c.post('/api/veto/create', json={'mode': 'BO3'})
+    c.post('/api/veto/roster', json={
+        'team_a_name': 'A', 'team_b_name': 'B',
+        'players': _ten_player_payload(),  # no discord_id fields
+    })
+    c.post('/api/veto/distribute')
+    r = c.post('/api/discord/move_teams', json={})
+    body = r.get_json() or {}
+    return (r.status_code == 400 and 'discord_id' in (body.get('error') or '')), \
+           f'status={r.status_code} body={body}'
+t('move_teams: 400 when no discord_ids on either team',
+  t_move_teams_refuses_when_no_discord_ids)
+
+
+def t_auto_move_toggle_refuses_enable_without_vcs():
+    """Enabling auto-move when either team VC is empty must fail with 400.
+    Defeats the silent-no-op tournament-night surprise where the toggle is
+    True but auto-fire silently skips because preconditions aren't met."""
+    ac, _, c = _new_app(); _login(c)
+    _reset_discord_team_cfg(ac)
+    # Configure only A, leave B blank
+    ac.discord_team_a_voice_channel_id = '111'
+    r = c.post('/api/discord/auto_move_toggle', json={'enabled': True})
+    body = r.get_json() or {}
+    return (r.status_code == 400 and 'voice channels' in (body.get('error') or '')
+            and ac.discord_auto_move_on_distribute_enabled is False), \
+           f'status={r.status_code} body={body} ac.toggle={ac.discord_auto_move_on_distribute_enabled}'
+t('auto_move_toggle: 400 + no persist when enabling with VC missing',
+  t_auto_move_toggle_refuses_enable_without_vcs)
+
+
+def t_auto_move_toggle_disable_always_allowed():
+    """Toggling OFF must always succeed, even with VCs missing.
+    Operator must be able to disable an accidentally-enabled toggle even
+    if they later cleared the VC IDs."""
+    ac, _, c = _new_app(); _login(c)
+    ac.discord_auto_move_on_distribute_enabled = True
+    # Both VCs cleared
+    ac.discord_team_a_voice_channel_id = ''
+    ac.discord_team_b_voice_channel_id = ''
+    r = c.post('/api/discord/auto_move_toggle', json={'enabled': False})
+    body = r.get_json() or {}
+    return (r.status_code == 200 and body.get('enabled') is False
+            and ac.discord_auto_move_on_distribute_enabled is False), \
+           f'status={r.status_code} body={body} ac.toggle={ac.discord_auto_move_on_distribute_enabled}'
+t('auto_move_toggle: disable always succeeds + persists',
+  t_auto_move_toggle_disable_always_allowed)
+
+
+def t_auto_move_toggle_enable_persists_when_vcs_set():
+    """Enabling with both VCs set returns 200 + persists the flag."""
+    ac, _, c = _new_app(); _login(c)
+    ac.discord_team_a_voice_channel_id = '111'
+    ac.discord_team_b_voice_channel_id = '222'
+    r = c.post('/api/discord/auto_move_toggle', json={'enabled': True})
+    body = r.get_json() or {}
+    return (r.status_code == 200 and body.get('enabled') is True
+            and ac.discord_auto_move_on_distribute_enabled is True), \
+           f'status={r.status_code} body={body} ac.toggle={ac.discord_auto_move_on_distribute_enabled}'
+t('auto_move_toggle: enable with both VCs set persists',
+  t_auto_move_toggle_enable_persists_when_vcs_set)
+
+
 # ─── Auto-generated pytest cases ──────────────────────────────────────────
 def _slug(name):
     out = ''.join(c if c.isalnum() else '_' for c in name).strip('_').lower()

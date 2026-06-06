@@ -367,6 +367,121 @@ def bot_voice_channels(guild_id: str, *, timeout: float = 8.0) -> list[dict] | N
         return None
 
 
+def bot_move_to_team_channels(
+    guild_id: str,
+    team_a_vc_id: str,
+    team_b_vc_id: str,
+    team_a_discord_ids: list[str],
+    team_b_discord_ids: list[str],
+    *,
+    timeout: float = 15.0,
+) -> dict | None:
+    """v0.12.0 — Move every rostered player with a discord_id into their
+    team's voice channel.
+
+    Returns: {"moved_a": int, "moved_b": int, "skipped": int,
+              "errors": [str, ...]}
+    - moved_a / moved_b — successful moves per team
+    - skipped — discord_id was empty, OR the user isn't currently in any
+      VC in this guild (Discord's `Member.move_to()` only works on
+      connected members), OR the user isn't a member of this guild
+    - errors — per-player failure strings ("PlayerName: Missing Permissions"
+      etc.)
+
+    Returns None on coarse failure: bot not running, guild not found,
+    either VC not found or not a VoiceChannel.
+
+    Concurrency: moves run via asyncio.gather() with a semaphore of 5,
+    respecting Discord's rate limits without serializing 10 sequential
+    HTTP calls.
+    """
+    if _runner is None or not _runner.ready.is_set():
+        return None
+    try:
+        gid    = int(str(guild_id).strip())
+        a_vcid = int(str(team_a_vc_id).strip())
+        b_vcid = int(str(team_b_vc_id).strip())
+    except (TypeError, ValueError):
+        return None
+
+    # Normalise + dedupe per team (the caller may pass empty strings
+    # for un-mapped roster slots; those should silently skip, not error)
+    a_ids = [s for s in (str(x).strip() for x in team_a_discord_ids) if s]
+    b_ids = [s for s in (str(x).strip() for x in team_b_discord_ids) if s]
+
+    async def _do():
+        guild = _runner.bot.get_guild(gid)
+        if guild is None:
+            guild = await _runner.bot.fetch_guild(gid)
+        a_ch = guild.get_channel(a_vcid)
+        b_ch = guild.get_channel(b_vcid)
+        if a_ch is None or not isinstance(a_ch, discord.VoiceChannel):
+            return None
+        if b_ch is None or not isinstance(b_ch, discord.VoiceChannel):
+            return None
+
+        sem = asyncio.Semaphore(5)
+        moved_a = 0
+        moved_b = 0
+        skipped = 0
+        errors: list[str] = []
+
+        async def _move_one(member_id_str: str, target_ch, target_label: str):
+            nonlocal moved_a, moved_b, skipped
+            async with sem:
+                try:
+                    mid = int(member_id_str)
+                except ValueError:
+                    skipped += 1
+                    return
+                # `get_member` is the in-cache lookup — for any guild with
+                # member chunking enabled (default for small guilds) this
+                # is O(1).  For larger guilds where chunking is disabled
+                # it'd return None; we fall back to a fetch.
+                member = guild.get_member(mid)
+                if member is None:
+                    try:
+                        member = await guild.fetch_member(mid)
+                    except Exception:
+                        skipped += 1
+                        return
+                # Must currently be in voice for move_to to do anything.
+                if member.voice is None or member.voice.channel is None:
+                    skipped += 1
+                    return
+                # Already in their team's VC — count as moved (idempotent)
+                if member.voice.channel.id == target_ch.id:
+                    if target_label == "A": moved_a += 1
+                    else:                   moved_b += 1
+                    return
+                try:
+                    await member.move_to(target_ch, reason=f"Oblivion team-split → team {target_label}")
+                    if target_label == "A": moved_a += 1
+                    else:                   moved_b += 1
+                except discord.Forbidden:
+                    errors.append(f"{member.display_name}: bot lacks Move Members permission")
+                except discord.HTTPException as exc:
+                    errors.append(f"{member.display_name}: {exc}")
+
+        tasks = (
+            [_move_one(mid, a_ch, "A") for mid in a_ids] +
+            [_move_one(mid, b_ch, "B") for mid in b_ids]
+        )
+        await asyncio.gather(*tasks)
+        return {
+            "moved_a": moved_a, "moved_b": moved_b,
+            "skipped": skipped, "errors": errors,
+            "team_a_name": a_ch.name, "team_b_name": b_ch.name,
+        }
+
+    try:
+        fut = _runner.submit(_do())
+        return fut.result(timeout=timeout)
+    except Exception as exc:
+        _log.info("bot_move_to_team_channels(%s) failed: %s", guild_id, exc)
+        return None
+
+
 def bot_text_channels(guild_id: str, *, timeout: float = 8.0) -> list[dict] | None:
     """v0.11.18 — Return {id, name}[] for every TEXT channel in the guild.
 

@@ -534,6 +534,17 @@ class AppCore:
         self.discord_guild_id:            str = ""
         self.discord_veto_channel_id:     str = ""
         self.discord_voice_channel_id:    str = ""
+        # v0.12.0 — per-team voice channels for bot-driven team splits.
+        # When both team_a/b VCs are configured AND auto_move toggle is ON,
+        # /api/veto/distribute fires a background move that drags every
+        # rostered player with a discord_id into their team's VC.  Same
+        # behaviour available on-demand via the SPA "Move teams now"
+        # button and the `/move-teams now` slash command.  Toggle is
+        # explicit (not implicit-if-both-set) so the operator can keep
+        # both VC IDs configured but pause auto-moves during testing.
+        self.discord_team_a_voice_channel_id: str = ""
+        self.discord_team_b_voice_channel_id: str = ""
+        self.discord_auto_move_on_distribute_enabled: bool = False
 
         # Runtime state
         self.public_ip:           str                      = ""
@@ -734,6 +745,11 @@ class AppCore:
         self.discord_veto_channel_id     = cfg.get("discord_veto_channel_id", "")
         # v0.11.15 — default voice channel for one-click roster pull
         self.discord_voice_channel_id    = cfg.get("discord_voice_channel_id", "")
+        # v0.12.0 — per-team VCs + auto-move toggle (see __init__ for prose)
+        self.discord_team_a_voice_channel_id = cfg.get("discord_team_a_voice_channel_id", "")
+        self.discord_team_b_voice_channel_id = cfg.get("discord_team_b_voice_channel_id", "")
+        self.discord_auto_move_on_distribute_enabled = bool(
+            cfg.get("discord_auto_move_on_distribute_enabled", False))
 
         # Workshop command-filter detection results + manual overrides (wid → bool).
         self._cmdfilter_auto       = dict(cfg.get("cmdfilter_auto", {}))
@@ -854,6 +870,10 @@ class AppCore:
                 "discord_veto_channel_id":       self.discord_veto_channel_id,
                 # v0.11.15 — default VC for one-click roster pull
                 "discord_voice_channel_id":      self.discord_voice_channel_id,
+                # v0.12.0 — per-team VCs + auto-move toggle
+                "discord_team_a_voice_channel_id":            self.discord_team_a_voice_channel_id,
+                "discord_team_b_voice_channel_id":            self.discord_team_b_voice_channel_id,
+                "discord_auto_move_on_distribute_enabled":    self.discord_auto_move_on_distribute_enabled,
             }
             # Atomic write: serialize via _config_save_lock so concurrent
             # save_config calls don't interleave (Flask is threaded), and use
