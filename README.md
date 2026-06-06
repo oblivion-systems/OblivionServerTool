@@ -3,18 +3,24 @@
 A desktop application for managing a **Counter-Strike 2 dedicated server** on Windows.  
 Built with Python + Flask + pywebview (Edge WebView2). Ships as a single `.exe` with an optional installer.
 
-> **Status: v0.12.3 (released 2026-06-06).**  v0.12 line is
-> feature-complete: round summaries, remote player voting, team voice
-> splits, and the first slash-command tree the bot has ever had.
-> Previous day shipped the first real tournament (10-player CS2 5v5
-> with remote captains over Discord, completed cleanly on de_vertigo)
-> via seven hotfix releases (v0.11.20-25) over ~75 minutes from first
-> failure to clean match start; the next morning landed v0.11.26 +
-> v0.11.27 (audit cleanup, 8 of 10 findings closed), then v0.12.0 →
-> v0.12.3.  See `RETROSPECTIVE_2026_06_05.md` for the post-mortem.
-> **217/217 backend tests green.**
+> **Status: v0.12.5 (released 2026-06-06).**  v0.12 backlog **drained**.
+> Feature-complete + all 10 audit findings closed + Gaming Mode toggle
+> + scripts/ bundled into installer.  Previous day shipped the first
+> real tournament (10-player CS2 5v5 with remote captains over Discord,
+> completed cleanly on de_vertigo) via seven hotfix releases
+> (v0.11.20-25) over ~75 minutes; the next morning landed v0.11.26
+> through v0.12.5.  See `RETROSPECTIVE_2026_06_05.md` for the
+> post-mortem.  **222/222 backend tests green.**
 >
 > **What's new since v0.11.0**:
+> - **Gaming Mode toggle + scripts/ bundling** *(v0.12.5)* — new SPA
+>   section under Config: ⚡ ON / 💤 OFF / 📊 Status buttons wrap
+>   `scripts/gaming-mode.ps1` (Power Plan + cs2.exe core affinity).
+>   Installer now ships `scripts/` alongside the .exe.
+> - **Content-hashed `/static/*` URLs** *(v0.12.4)* — replace v0.11.24's
+>   blanket `no-store` with `?v=APP_VERSION` query strings +
+>   `Cache-Control: immutable`.  Cache-bust on rebuild AND aggressive
+>   caching between rebuilds.  Closes the last audit finding (#6).
 > - **Remote player voting** *(v0.12.3)* — bot DMs each rostered
 >   player a one-shot URL after Distribute.  Player taps → minimal
 >   voting page shows their team's 5 names → one click casts.  No

@@ -7,18 +7,16 @@
 
 ---
 
-## Where We Are — v0.12.3 (released 2026-06-06)
+## Where We Are — v0.12.5 (released 2026-06-06)
 
-**Thirty-one releases**, with the v0.12 line **feature-complete**:
-team voice splits + round summaries + remote player voting + first
-slash-command tree the bot has ever had + SSE broadcast observability.
-Day-after of the **first tournament (2026-06-05)** delivered six
-releases (v0.11.26, v0.11.27, v0.12.0, v0.12.1, v0.12.2, v0.12.3) —
-closing **9 of 10 audit findings** AND landing **all 3 v0.12 Discord
-features** (#134 round summaries, #135 remote voting, #136
-/move-teams, #145 slash wiring).  Only audit finding #6 (content-
-hashed static URLs, task #139) remains.  See
-`RETROSPECTIVE_2026_06_05.md` for the tournament post-mortem.
+**Thirty-three releases**, with the **v0.12 backlog drained**: all 3
+Discord features shipped, all 10 audit findings closed, Gaming Mode
+toggle in-app, scripts/ bundled into installer.  Day-after of the
+**first tournament (2026-06-05)** delivered eight releases (v0.11.26
+through v0.12.5) — closing tasks #95, #97, #134, #135, #136, #139,
+#143, #145.  Next phase = driver abstraction (#86) which is the
+actual v0.12 thesis the Discord features were ride-alongs to.
+See `RETROSPECTIVE_2026_06_05.md` for the tournament post-mortem.
 
 Highlights since v0.11.0:
 
@@ -55,8 +53,10 @@ Highlights since v0.11.0:
 | v0.12.1  | Round summaries + slash-command tree — RCON-poll daemon posts per-round embeds during live MatchZy match; `/round-summaries` + `/move-teams` slash commands (closes #134 + #145) |
 | v0.12.2  | SSE broadcast observability — drops counter, telemetry section in diag snapshot, queue maxsize 32 → 256 (closes audit finding #10) |
 | v0.12.3  | Remote player voting via per-player tokens — bot DMs each rostered player a one-shot voting URL; minimal voter SPA view (closes #135) |
+| v0.12.4  | Content-hashed `/static/*` URLs — `?v=APP_VERSION` + `Cache-Control: immutable` (closes audit finding #6 / task #139) |
+| v0.12.5  | Gaming Mode toggle in Config card + scripts/ bundled into installer (closes #95 + #97) |
 
-**217/217 backend tests green** through v0.12.3.
+**222/222 backend tests green** through v0.12.5.
 
 Full prose in [CHANGELOG.md](CHANGELOG.md).
 

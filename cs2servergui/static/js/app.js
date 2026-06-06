@@ -4382,6 +4382,35 @@ pages['config'] = async function() {
         </div>
 
         ${isLocal ? `
+        <!-- v0.12.5 / task #95 — Gaming Mode toggle.  Local-only because the
+             underlying script flips Windows Power Plan + cs2.exe core
+             affinity, which requires the operator's own machine.  Pairs
+             with TROUBLESHOOTING.md's "hosting + playing on the same PC"
+             section — same scripts, now reachable without leaving the SPA. -->
+        <div class="config-label">Gaming Mode (host + play perf)</div>
+        <div class="card mb-16">
+          <div class="text-sub text-sm" style="margin-bottom:12px">
+            Flips Windows Power Plan, Game Mode, Game DVR + pins cs2.exe to
+            cores 0-3 so the dedicated server keeps a stable tickrate while
+            you play.  Runs <code>scripts\\gaming-mode.ps1</code>.
+          </div>
+          <div class="flex gap-8" style="flex-wrap:wrap">
+            <button class="btn btn-accent" id="cfg-gaming-on"
+                    title="Switch to High Performance + pin cs2.exe to cores 0-3">
+              ⚡ Gaming Mode ON
+            </button>
+            <button class="btn btn-ghost" id="cfg-gaming-off"
+                    title="Restore Balanced power plan, drop core pinning">
+              💤 Gaming Mode OFF
+            </button>
+            <button class="btn btn-ghost" id="cfg-gaming-status"
+                    title="Show current Power Plan / Game Mode / affinity">
+              📊 Status
+            </button>
+          </div>
+          <pre id="cfg-gaming-output" class="text-mono text-sm" style="margin-top:12px;max-height:300px;overflow:auto;background:var(--bg-1);padding:10px;border-radius:6px;display:none"></pre>
+        </div>
+
         <div class="config-label">Discord (v0.11.0 bot integration)</div>
         <div class="card mb-16">
           <div class="text-sub text-sm" style="margin-bottom:12px">
@@ -4858,6 +4887,36 @@ pages['config'] = async function() {
   _refreshVoiceChannelPreview();
 
   // v0.11.0 polish — Discord connection-check buttons
+  // v0.12.5 / task #95 — Gaming Mode buttons.  Same handler shape for
+  // all three modes; output dumped into the <pre> for transparency.
+  ['on', 'off', 'status'].forEach(mode => {
+    const btn = el(`cfg-gaming-${mode}`);
+    if (!btn) return;
+    btn.addEventListener('click', async () => {
+      const out = el('cfg-gaming-output');
+      btn.disabled = true; const orig = btn.textContent;
+      btn.textContent = 'Running…';
+      try {
+        const r = await api.gamingMode(mode);
+        if (out) {
+          out.style.display = '';
+          out.textContent =
+            (r.stdout || '(no stdout)') +
+            (r.stderr ? `\n--- stderr ---\n${r.stderr}` : '') +
+            `\n--- returncode: ${r.returncode} ---`;
+        }
+        toast(r.ok
+                ? `Gaming Mode ${mode.toUpperCase()} ✓`
+                : `Gaming Mode ${mode}: exited ${r.returncode}`,
+              r.ok ? 'var(--ok)' : 'var(--bad)');
+      } catch (e) {
+        toast(e.message, 'var(--bad)');
+      } finally {
+        btn.disabled = false; btn.textContent = orig;
+      }
+    });
+  });
+
   const testEmbedBtn = el('cfg-discord-test-embed');
   if (testEmbedBtn) testEmbedBtn.addEventListener('click', async () => {
     testEmbedBtn.disabled = true; testEmbedBtn.textContent = 'Posting…';

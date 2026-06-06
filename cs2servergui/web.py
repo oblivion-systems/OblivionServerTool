@@ -19,6 +19,7 @@ from __future__ import annotations
 import functools
 import json
 import os
+import subprocess
 import sys
 import queue
 import re
@@ -1296,6 +1297,65 @@ def create_flask(core: AppCore) -> Flask:
             return jsonify({"error": "Invalid workshop ID — digits only"}), 400
         core.request_workshop_download(wid, requester=request.remote_addr or "remote")
         return jsonify({"ok": True})
+
+    # ── Gaming Mode (v0.12.5 / task #95) ───────────────────────────────────
+    # The "Host + Play" perf toolkit lives in scripts/.  Operator can run
+    # gaming-mode-on / off / status from the SPA Config card without
+    # opening a terminal.  Local-only by design — we shell out to
+    # PowerShell with a 20s timeout; the operator's machine is implicitly
+    # trusted (we're already running on it).
+    def _scripts_dir():
+        """Return absolute path to scripts/.  Works in dev + frozen.
+        - Dev: <repo_root>/scripts/
+        - Frozen: <install_dir>/scripts/ (installer.iss bundles it)
+        """
+        if getattr(sys, "frozen", False):
+            # PyInstaller .exe — scripts ship alongside via installer.iss
+            return os.path.join(os.path.dirname(sys.executable), "scripts")
+        # Dev — cs2servergui/web.py → ../scripts/
+        return os.path.normpath(
+            os.path.join(os.path.dirname(__file__), "..", "scripts"))
+
+    def _run_gaming_mode(mode: str) -> tuple[int, str, str]:
+        """Run gaming-mode.ps1 -Mode <mode>; return (returncode, stdout, stderr)."""
+        ps1 = os.path.join(_scripts_dir(), "gaming-mode.ps1")
+        if not os.path.isfile(ps1):
+            return -1, "", f"gaming-mode.ps1 not found at {ps1}"
+        try:
+            res = subprocess.run(
+                ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                 "-File", ps1, "-Mode", mode],
+                capture_output=True, text=True, timeout=20.0,
+            )
+            return res.returncode, res.stdout or "", res.stderr or ""
+        except subprocess.TimeoutExpired:
+            return -1, "", "gaming-mode.ps1 timed out (>20s)"
+        except Exception as exc:
+            return -1, "", f"{type(exc).__name__}: {exc}"
+
+    @app.route("/api/system/gaming_mode", methods=["POST"])
+    @require_auth
+    @require_local
+    def system_gaming_mode():
+        """Run scripts/gaming-mode.ps1 with the requested action.
+        Body: {"mode": "on" | "off" | "status"}.
+        Returns: {ok, mode, returncode, stdout, stderr}.
+        """
+        d = request.get_json() or {}
+        mode = str(d.get("mode", "")).strip().lower()
+        if mode not in ("on", "off", "status"):
+            return jsonify({"error": "mode must be 'on', 'off', or 'status'"}), 400
+        # Capitalise to match ps1 -Mode param values (On / Off / Status)
+        ps_mode = {"on": "On", "off": "Off", "status": "Status"}[mode]
+        rc, stdout, stderr = _run_gaming_mode(ps_mode)
+        core.log(f"[gaming_mode] {mode} → rc={rc}")
+        return jsonify({
+            "ok":         rc == 0,
+            "mode":       mode,
+            "returncode": rc,
+            "stdout":     stdout,
+            "stderr":     stderr,
+        })
 
     # ── Server installation (local only) ───────────────────────────────────────
 
