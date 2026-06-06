@@ -2328,6 +2328,31 @@ t('match_events: round embed colored by winning side',
   t_match_events_round_embed_color_by_winner)
 
 
+def t_diag_snapshot_includes_sse_broadcast_telemetry():
+    """v0.12.2 — diagnostic snapshot includes the SSE broadcast telemetry
+    section so an operator can confirm whether silent queue drops are
+    actually happening in production (audit finding #10 / task #143).
+    Pre-v0.12.2 the polling fallback masked drops without proof of
+    overflow — the operator had no way to tell if the polling was
+    necessary or papering over a different bug."""
+    _, _, c = _new_app(); _login(c)
+    # /api/diag/snapshot is @require_local; forge is_local=True like the
+    # other snapshot tests do (see t_diag_snapshot_returns_pasteable_text).
+    from cs2servergui import web as _web
+    for tok in list(_web._sessions.keys()):
+        _web._sessions[tok]['is_local'] = True
+    r = c.get('/api/diag/snapshot')
+    text = r.get_data(as_text=True)
+    ok = (r.status_code == 200
+          and 'SSE broadcast telemetry' in text
+          and 'events_total' in text
+          and 'drops_total' in text
+          and 'active_subscribers' in text)
+    return ok, f'status={r.status_code} contains_section={("SSE broadcast telemetry" in text)}'
+t('diag (v0.12.2): SSE broadcast telemetry section present',
+  t_diag_snapshot_includes_sse_broadcast_telemetry)
+
+
 def t_match_events_start_stop_idempotent():
     """start(core) is idempotent — second call doesn't spawn a second
     poller.  stop() likewise idempotent + safe to call when not running."""
