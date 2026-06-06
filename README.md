@@ -3,17 +3,23 @@
 A desktop application for managing a **Counter-Strike 2 dedicated server** on Windows.  
 Built with Python + Flask + pywebview (Edge WebView2). Ships as a single `.exe` with an optional installer.
 
-> **Status: v0.12.0 (released 2026-06-06).**  First v0.12 minor —
-> Discord-driven team voice splits.  Previous day shipped the first
-> real tournament (10-player CS2 5v5 with remote captains over Discord,
-> completed cleanly on de_vertigo) via seven hotfix releases
-> (v0.11.20-25) over ~75 minutes from first failure to clean match
-> start; the next morning landed v0.11.26 + v0.11.27 (audit cleanup,
-> 8 of 10 findings closed), then v0.12.0 (this release).
-> See `RETROSPECTIVE_2026_06_05.md` for the post-mortem.
-> **208/208 backend tests green.**
+> **Status: v0.12.1 (released 2026-06-06).**  Round summaries during
+> live MatchZy matches + the first slash-command tree the bot has
+> ever had.  Previous day shipped the first real tournament (10-player
+> CS2 5v5 with remote captains over Discord, completed cleanly on
+> de_vertigo) via seven hotfix releases (v0.11.20-25) over ~75 minutes
+> from first failure to clean match start; the next morning landed
+> v0.11.26 + v0.11.27 (audit cleanup, 8 of 10 findings closed), then
+> v0.12.0 → v0.12.1.  See `RETROSPECTIVE_2026_06_05.md` for the
+> post-mortem.  **213/213 backend tests green.**
 >
 > **What's new since v0.11.0**:
+> - **Round summaries + slash commands** *(v0.12.1)* — background
+>   RCON-poll daemon detects score deltas every 3 s and posts a
+>   per-round embed to the veto channel during a live match.  Bot
+>   now has a slash-command tree: `/round-summaries on|off|status`
+>   and `/move-teams now / auto on|off / status`.  Per-guild
+>   sync = immediate propagation.
 > - **`/move-teams` + auto-move on Distribute** *(v0.12.0)* — bot
 >   moves rostered players with `discord_id` from the lobby VC into
 >   their team's configured VC.  Three triggers: SPA button on the
