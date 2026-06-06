@@ -545,6 +545,14 @@ class AppCore:
         self.discord_team_a_voice_channel_id: str = ""
         self.discord_team_b_voice_channel_id: str = ""
         self.discord_auto_move_on_distribute_enabled: bool = False
+        # v0.12.1 — round-summary embeds posted to discord_veto_channel_id
+        # during a live MatchZy match.  RCON-poll-based score-delta
+        # detection (every 3s on `mp_t_score` + `mp_ct_score`); on change
+        # a round summary embed posts to the same channel that hosts the
+        # live veto embed.  Default OFF — opt-in.  Toggle owned by the
+        # /api/discord/round_summaries_toggle endpoint AND the
+        # `/round-summaries on|off` slash command — same field, two faces.
+        self.discord_round_summaries_enabled: bool = False
 
         # Runtime state
         self.public_ip:           str                      = ""
@@ -750,6 +758,9 @@ class AppCore:
         self.discord_team_b_voice_channel_id = cfg.get("discord_team_b_voice_channel_id", "")
         self.discord_auto_move_on_distribute_enabled = bool(
             cfg.get("discord_auto_move_on_distribute_enabled", False))
+        # v0.12.1 — round summaries (see __init__ for prose)
+        self.discord_round_summaries_enabled = bool(
+            cfg.get("discord_round_summaries_enabled", False))
 
         # Workshop command-filter detection results + manual overrides (wid → bool).
         self._cmdfilter_auto       = dict(cfg.get("cmdfilter_auto", {}))
@@ -874,6 +885,8 @@ class AppCore:
                 "discord_team_a_voice_channel_id":            self.discord_team_a_voice_channel_id,
                 "discord_team_b_voice_channel_id":            self.discord_team_b_voice_channel_id,
                 "discord_auto_move_on_distribute_enabled":    self.discord_auto_move_on_distribute_enabled,
+                # v0.12.1 — round summaries
+                "discord_round_summaries_enabled":            self.discord_round_summaries_enabled,
             }
             # Atomic write: serialize via _config_save_lock so concurrent
             # save_config calls don't interleave (Flask is threaded), and use

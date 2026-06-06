@@ -2256,6 +2256,105 @@ t('auto_move_toggle: enable with both VCs set persists',
   t_auto_move_toggle_enable_persists_when_vcs_set)
 
 
+# ─── v0.12.1 — /round-summaries toggle + match_events score parser ────────
+
+def t_round_summaries_toggle_persists_both_ways():
+    """Round summaries toggle: 200 for both enable and disable, persists.
+    Unlike auto-move, has no precondition check on enable (the embed
+    target is discord_veto_channel_id which is reused from the live
+    veto embed; if blank, the post helper silently no-ops)."""
+    ac, _, c = _new_app(); _login(c)
+    ac.discord_round_summaries_enabled = False
+    # Enable
+    r1 = c.post('/api/discord/round_summaries_toggle', json={'enabled': True})
+    body1 = r1.get_json() or {}
+    ok1 = (r1.status_code == 200 and body1.get('enabled') is True
+           and ac.discord_round_summaries_enabled is True)
+    # Disable
+    r2 = c.post('/api/discord/round_summaries_toggle', json={'enabled': False})
+    body2 = r2.get_json() or {}
+    ok2 = (r2.status_code == 200 and body2.get('enabled') is False
+           and ac.discord_round_summaries_enabled is False)
+    return (ok1 and ok2), \
+           f'r1={r1.status_code}/{body1} r2={r2.status_code}/{body2} ac.toggle={ac.discord_round_summaries_enabled}'
+t('round_summaries_toggle: enable + disable both persist',
+  t_round_summaries_toggle_persists_both_ways)
+
+
+def t_match_events_parse_scores_happy_path():
+    """Parse mp_t_score + mp_ct_score from the typical RCON reply shape.
+    CS2 returns `"mp_t_score" = "8"` style; the parser must extract
+    both ints from a batched reply."""
+    from cs2servergui.match_events import _parse_scores
+    reply = (
+        '"mp_t_score" = "8" ( def. "0" ) game notify\n'
+        '"mp_ct_score" = "5" ( def. "0" ) game notify\n'
+        '"host_map_name" = "de_vertigo"\n'
+    )
+    result = _parse_scores(reply)
+    return (result == (8, 5)), f'result={result!r}'
+t('match_events: _parse_scores extracts (t, ct) from batched RCON reply',
+  t_match_events_parse_scores_happy_path)
+
+
+def t_match_events_parse_scores_missing_returns_none():
+    """If either score cvar is missing from the reply (e.g. RCON
+    truncated, only one cvar echoed), return None so the poller
+    skips the tick without crashing."""
+    from cs2servergui.match_events import _parse_scores
+    only_t = '"mp_t_score" = "3"\n'
+    no_scores = '"host_map_name" = "de_dust2"\n'
+    return (_parse_scores(only_t) is None and
+            _parse_scores(no_scores) is None and
+            _parse_scores('') is None), \
+           f'only_t={_parse_scores(only_t)} no_scores={_parse_scores(no_scores)} empty={_parse_scores("")}'
+t('match_events: _parse_scores returns None on missing cvars',
+  t_match_events_parse_scores_missing_returns_none)
+
+
+def t_match_events_round_embed_color_by_winner():
+    """T win → blue; CT win → orange.  Sanity check on the embed
+    builder so a color tweak doesn't silently invert the convention."""
+    from cs2servergui.match_events import _build_round_embed
+    t_embed = _build_round_embed(
+        t_score=1, ct_score=0, team_a_name='A', team_b_name='B',
+        map_name='de_dust2', who_won='T')
+    ct_embed = _build_round_embed(
+        t_score=0, ct_score=1, team_a_name='A', team_b_name='B',
+        map_name='de_dust2', who_won='CT')
+    return (t_embed.get('color') == 0x3498DB and ct_embed.get('color') == 0xE67E22), \
+           f't={hex(t_embed.get("color", 0))} ct={hex(ct_embed.get("color", 0))}'
+t('match_events: round embed colored by winning side',
+  t_match_events_round_embed_color_by_winner)
+
+
+def t_match_events_start_stop_idempotent():
+    """start(core) is idempotent — second call doesn't spawn a second
+    poller.  stop() likewise idempotent + safe to call when not running."""
+    from cs2servergui import match_events
+    ac, _, _ = _new_app()
+    # Make sure we're starting clean
+    match_events.stop()
+    assert match_events.is_running() is False, 'expected not-running pre-start'
+    # First start
+    match_events.start(ac)
+    running_after_first = match_events.is_running()
+    # Second start — should be no-op (same thread still alive)
+    match_events.start(ac)
+    running_after_second = match_events.is_running()
+    # Stop + verify
+    match_events.stop()
+    running_after_stop = match_events.is_running()
+    # Belt-and-braces — stop twice
+    match_events.stop()
+    return (running_after_first is True and running_after_second is True
+            and running_after_stop is False), \
+           (f'first={running_after_first} second={running_after_second} '
+            f'after_stop={running_after_stop}')
+t('match_events: start/stop are idempotent',
+  t_match_events_start_stop_idempotent)
+
+
 # ─── Auto-generated pytest cases ──────────────────────────────────────────
 def _slug(name):
     out = ''.join(c if c.isalnum() else '_' for c in name).strip('_').lower()

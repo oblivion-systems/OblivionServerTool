@@ -4342,6 +4342,24 @@ pages['config'] = async function() {
               Default OFF — opt in.
             </div>
           </div>
+          <!-- v0.12.1 — round summaries.  During a live MatchZy match,
+               every round-end posts a small embed to the same veto
+               channel as the live veto embed.  RCON-poll based; toggle
+               can also be flipped from inside Discord via the
+               /round-summaries slash command. -->
+          <div class="field" style="margin-top:10px">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" id="cfg-discord-round-summaries"
+                     ${cfg.discord_round_summaries_enabled ? 'checked' : ''}>
+              <span>Post round summaries to the veto channel during a live match</span>
+            </label>
+            <div class="field-hint" style="color:var(--text-4)">
+              Polls the server every 3s and posts an embed after each round.
+              Uses the same channel as the live veto embed above.  Can also
+              be toggled from Discord via <code>/round-summaries on|off</code>.
+              Default OFF.
+            </div>
+          </div>
           <div id="cfg-discord-status" class="text-sm" style="margin-top:12px;color:var(--text-3)">
             <!-- Populated by pollState from /api/state.discord_bot -->
           </div>
@@ -4675,6 +4693,24 @@ pages['config'] = async function() {
     } catch (e) {
       // Revert checkbox on rejection (typical: VCs not configured yet).
       autoMoveCb.checked = !want;
+      toast(e.message, 'var(--bad)');
+    }
+  });
+
+  // v0.12.1 — Round-summaries toggle.  No precondition check (the embed
+  // target = discord_veto_channel_id which is already required for the
+  // live veto embed; if it's blank, the post helper silently no-ops).
+  const roundCb = el('cfg-discord-round-summaries');
+  if (roundCb) roundCb.addEventListener('change', async () => {
+    const want = roundCb.checked;
+    try {
+      const r = await api.discord.roundSummariesToggle(want);
+      toast(r.enabled
+              ? 'Round summaries: ON'
+              : 'Round summaries: OFF',
+            'var(--accent)');
+    } catch (e) {
+      roundCb.checked = !want;
       toast(e.message, 'var(--bad)');
     }
   });
