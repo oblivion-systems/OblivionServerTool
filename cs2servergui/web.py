@@ -294,20 +294,34 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden) tick
 def create_flask(core: AppCore) -> Flask:
     app = Flask(__name__)   # static_folder=<pkg>/static, template_folder=<pkg>/templates
 
-    # v0.11.24 — no-cache headers on the SPA assets.  Without this the
-    # embedded WebView2 (or any browser) ETag-caches app.js / api.js /
-    # app.css across rebuilds.  The .exe ships a new app.js, but the
-    # browser serves the stale one from cache — fixes don't take effect
-    # until the user manually hard-refreshes.  Symptom this caused on
-    # tournament night: SPA still using v0.11.20 click handlers while
-    # the .exe was v0.11.23, votes/bans needed a tab refresh to show.
+    # v0.12.4 (audit finding #6 / task #139) — content-hashed static URLs.
+    # The template injects `?v={{ app_version }}` into every /static/* URL
+    # it emits, so each release ships a new URL and the browser treats
+    # the asset as a fresh resource.  Combined with `immutable`, this is
+    # the standard "cache-busting via URL change" pattern — gives both
+    # cache-bust on rebuild AND aggressive caching between rebuilds.
+    #
+    # Replaces v0.11.24's blanket Cache-Control: no-store, which was
+    # correct but a perf regression (every page load re-downloaded the
+    # full ~600KB app.js even when the .exe hadn't changed).
+    #
+    # The `v` query param doesn't need to be parsed by Flask — it's
+    # purely a URL-uniqueness key for the browser cache.  Requests with
+    # NO version param (an old cached HTML pointing at /static/js/app.js)
+    # still serve the current asset, but get no cache headers.  That's
+    # safe: only the embedded SPA template emits versioned URLs, and the
+    # template is re-rendered every page load.
     @app.after_request
-    def _no_cache_static(resp):
+    def _static_cache_headers(resp):
         try:
-            if request.path.startswith("/static/"):
-                resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-                resp.headers["Pragma"] = "no-cache"
-                resp.headers["Expires"] = "0"
+            if request.path.startswith("/static/") and request.args.get("v"):
+                # Versioned URL → cache aggressively.  1-year max-age +
+                # immutable signals "this URL's content will never change."
+                resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+                # Drop the no-cache markers that would have been inherited
+                # from a previous request via response template defaults.
+                resp.headers.pop("Pragma", None)
+                resp.headers.pop("Expires", None)
         except Exception:
             pass
         return resp
