@@ -2442,6 +2442,12 @@ def create_flask(core: AppCore) -> Flask:
             return jsonify({"error": "missing token"}), 400
         # caller_id = client IP so re-opens from the same browser are idempotent.
         caller_ip = request.remote_addr or ""
+        # v0.11.26 — hold _veto_lock through BOTH claim_captain AND the
+        # captain-session mint.  Without this, a concurrent veto_reset can
+        # land between the lock release and _create_session, producing a
+        # captain cookie that references core._veto_session=None (a zombie
+        # session that survives reset and silently auto-authenticates against
+        # the next session's team A).  Audit finding #1.
         with core._veto_lock:
             if core._veto_session is None:
                 return jsonify({"error": "no active veto session"}), 400
@@ -2449,13 +2455,10 @@ def create_flask(core: AppCore) -> Flask:
                 team = _veto.claim_captain(core._veto_session, token, caller_id=caller_ip)
             except Exception as e:
                 return _veto_error_response(e)
-        # Mint a captain session.  Reuse _create_session but extend with the
-        # `captain_team` field so /api/veto/step can authorise per-team.
-        session_token = _create_session(caller_ip, is_local=False, role="captain")
-        # Annotate the session record with the captain team.
-        sess = _get_session(session_token)
-        if sess is not None:
-            sess["captain_team"] = team
+            session_token = _create_session(caller_ip, is_local=False, role="captain")
+            sess = _get_session(session_token)
+            if sess is not None:
+                sess["captain_team"] = team
         core.log(f"[veto] captain {team} claimed from {caller_ip}")
         _veto_broadcast()
         # v0.11.0 Layer 1C: if this claim flipped state to `veto`, post the
@@ -2476,6 +2479,9 @@ def create_flask(core: AppCore) -> Flask:
         token = request.args.get("join", "").strip()
         if token:
             caller_ip = request.remote_addr or ""
+            # v0.11.26 — hold _veto_lock through claim + _create_session; see
+            # audit finding #1 and the /api/veto/claim handler above.
+            session_token = None
             with core._veto_lock:
                 try:
                     if core._veto_session is not None:
@@ -2485,11 +2491,12 @@ def create_flask(core: AppCore) -> Flask:
                 except Exception as e:
                     core.log(f"[veto] share-link claim failed: {e}")
                     team = None
-            if team is not None:
-                session_token = _create_session(caller_ip, is_local=False, role="captain")
-                sess = _get_session(session_token)
-                if sess is not None:
-                    sess["captain_team"] = team
+                if team is not None:
+                    session_token = _create_session(caller_ip, is_local=False, role="captain")
+                    sess = _get_session(session_token)
+                    if sess is not None:
+                        sess["captain_team"] = team
+            if team is not None and session_token is not None:
                 _veto_broadcast()
                 # Serve a real HTML page (not a 302 redirect) so that iOS
                 # WKWebView / Discord in-app browser doesn't treat this as a
@@ -2512,6 +2519,14 @@ def create_flask(core: AppCore) -> Flask:
                 resp = make_response(html, 200)
                 resp.set_cookie("session", session_token, httponly=True, samesite="Lax",
                                 secure=_request_is_https())    # v0.11.17 A3 / v0.11.20
+                # v0.11.26 — refuse intermediary caching.  The URL contains a
+                # one-shot token; if Cloudflare / a carrier proxy caches this
+                # 200 HTML, the SECOND request with the same URL would get the
+                # body without the Set-Cookie, leaving the captain at /#veto
+                # unauthenticated AND the token already consumed server-side.
+                # Audit finding #2.
+                resp.headers["Cache-Control"] = "no-store, private"
+                resp.headers["Pragma"] = "no-cache"
                 return resp
         # Fall through — render the SPA shell; the frontend handles the rest.
         return redirect("/#veto")
@@ -2992,6 +3007,13 @@ def create_flask(core: AppCore) -> Flask:
     @app.route("/api/veto/reset", methods=["POST"])
     @require_auth
     def veto_reset():
+        # v0.11.26 — sweep _sessions while still holding _veto_lock.  The
+        # captain-claim path (above) now mints _create_session under the
+        # same _veto_lock; this nesting closes the race window where a
+        # concurrent claim landed AFTER the sweep snapshot but BEFORE the
+        # captain saw the reset, producing a zombie captain session that
+        # auto-authenticated against the next session's team A.
+        # Audit finding #1.
         with core._veto_lock:
             if core._veto_session is not None:
                 _veto.reset(core._veto_session)
@@ -3002,17 +3024,15 @@ def create_flask(core: AppCore) -> Flask:
             # crashed handler that exited before reaching that point
             # might have left it stuck True.
             core._finale_firing = False
-        # v0.11.20 — invalidate every captain HTTP session.  Without this,
-        # captains who claimed tokens for the previous session keep their
-        # session cookie with captain_team set, and when they reconnect
-        # they appear authenticated as captain of a team whose tokens are
-        # already dead.  They need to re-claim with a fresh token DM'd
-        # from the new session.
-        with _sessions_lock:
-            dropped = [tok for tok, s in _sessions.items()
-                       if s.get("role") == "captain"]
-            for tok in dropped:
-                _sessions.pop(tok, None)
+            # v0.11.20 — invalidate every captain HTTP session.  Without
+            # this, captains who claimed tokens for the previous session
+            # keep their cookie with captain_team set and appear auth'd
+            # as captain of a team whose tokens are already dead.
+            with _sessions_lock:
+                dropped = [tok for tok, s in _sessions.items()
+                           if s.get("role") == "captain"]
+                for tok in dropped:
+                    _sessions.pop(tok, None)
         if dropped:
             core.log(f"[veto] invalidated {len(dropped)} captain session(s)")
         _veto_broadcast()
