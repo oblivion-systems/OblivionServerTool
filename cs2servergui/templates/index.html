@@ -4,9 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Oblivion Server Tool</title>
-  <link rel="icon" type="image/png"     href="/static/favicon.png" sizes="32x32">
-  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-  <link rel="stylesheet" href="/static/css/app.css">
+  <link rel="icon" type="image/png"     href="/static/favicon.png?v={{ app_version }}" sizes="32x32">
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v={{ app_version }}">
+  <link rel="stylesheet" href="/static/css/app.css?v={{ app_version }}">
 </head>
 <body>
 
@@ -20,7 +20,7 @@
         <span class="lb-bracket lb-tr"></span>
         <span class="lb-bracket lb-bl"></span>
         <span class="lb-bracket lb-br"></span>
-        <img src="/static/images/emblem.png" class="login-emblem" alt="Oblivion">
+        <img src="/static/images/emblem.png?v={{ app_version }}" class="login-emblem" alt="Oblivion">
       </div>
       <div class="login-brand-name">OBLIVION</div>
       <div class="login-sub">SERVER · TOOL</div>
@@ -129,7 +129,7 @@
       </svg>
     </button>
     <div class="hdr-brand">
-      <img src="/static/images/emblem.png" class="hdr-logo" alt="Oblivion">
+      <img src="/static/images/emblem.png?v={{ app_version }}" class="hdr-logo" alt="Oblivion">
       <div class="hdr-brand-text">
         <span class="brand-name">Oblivion</span>
         <span class="brand-sub">Server Tool</span>
@@ -345,8 +345,8 @@
 
 </div>
 
-<script src="/static/js/api.js"></script>
-<script src="/static/js/app.js"></script>
+<script src="/static/js/api.js?v={{ app_version }}"></script>
+<script src="/static/js/app.js?v={{ app_version }}"></script>
 {% endif %}
 
 </body>

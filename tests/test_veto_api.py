@@ -2328,6 +2328,54 @@ t('match_events: round embed colored by winning side',
   t_match_events_round_embed_color_by_winner)
 
 
+# ─── v0.12.4 / task #139 — Content-hashed static URLs ─────────────────────
+
+def t_static_with_version_param_caches_aggressively():
+    """v0.12.4 — `/static/foo?v=0.12.4` returns
+    Cache-Control: public, max-age=31536000, immutable.  Combined with
+    the template injecting `?v={{ app_version }}` on every static URL,
+    this gives both cache-bust on rebuild AND aggressive caching
+    between rebuilds."""
+    _, _, c = _new_app()
+    r = c.get('/static/css/app.css?v=0.12.4')
+    cc = r.headers.get('Cache-Control', '')
+    return ('immutable' in cc and 'max-age=31536000' in cc), \
+           f'status={r.status_code} cache-control={cc!r}'
+t('static (v0.12.4): versioned URL serves immutable cache headers',
+  t_static_with_version_param_caches_aggressively)
+
+
+def t_static_without_version_param_does_not_cache():
+    """Without a version param, no immutable headers — Flask's default
+    behaviour (which uses ETag).  Backwards compatible: any stray
+    request to /static/foo without the version still works."""
+    _, _, c = _new_app()
+    r = c.get('/static/css/app.css')
+    cc = r.headers.get('Cache-Control', '')
+    return (r.status_code == 200 and 'immutable' not in cc), \
+           f'status={r.status_code} cache-control={cc!r}'
+t('static (v0.12.4): unversioned URL falls back to Flask defaults',
+  t_static_without_version_param_does_not_cache)
+
+
+def t_index_template_injects_version_into_static_urls():
+    """The login page (no auth) renders index.html with `?v=<APP_VERSION>`
+    on every /static/* URL.  Confirms the template was updated to use
+    the app_version variable Flask already passes in."""
+    _, _, c = _new_app()
+    # Hit / (login page — no auth needed)
+    r = c.get('/')
+    body = r.get_data(as_text=True)
+    from cs2servergui.config import APP_VERSION
+    expected = f'?v={APP_VERSION}'
+    return (r.status_code == 200
+            and f'app.css{expected}' in body
+            and f'emblem.png{expected}' in body), \
+           f'status={r.status_code} APP_VERSION={APP_VERSION} contains_app_css={expected in body and "app.css" + expected in body}'
+t('index template (v0.12.4): injects ?v=APP_VERSION into /static/ URLs',
+  t_index_template_injects_version_into_static_urls)
+
+
 # ─── v0.12.3 / task #135 — Remote voter tokens ────────────────────────────
 
 def t_voter_tokens_refuses_outside_voting_state():
