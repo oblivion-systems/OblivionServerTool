@@ -3852,6 +3852,25 @@ def create_flask(core: AppCore) -> Flask:
         for icon, label, detail in tldr:
             lines.append(f"  {icon} {label:9} {detail}")
 
+        # ─── Driver (v0.13.0 / task #86) ───
+        # First thing the operator sees after TL;DR — confirms which
+        # game driver the build is running.  Will become more relevant
+        # when v0.13 adds TF2 + v0.15 adds FiveM and one .exe can
+        # potentially load multiple drivers.
+        try:
+            hr("Driver")
+            d = core.driver.describe()
+            kv("game",                d.get("game_name", "?"))
+            kv("short_name",          d.get("short_name", "?"))
+            kv("default_port",        d.get("default_port", "?"))
+            kv("process_image_name",  d.get("process_image_name", "?"))
+            kv("process_args_marker", d.get("process_args_marker", "?"))
+            kv("plugin_layer",        d.get("plugin_layer", "?"))
+            kv("match_layer",         d.get("match_layer", "?"))
+            kv("mode_count",          d.get("mode_count", "?"))
+        except Exception as exc:
+            kv("driver_status", f"(unavailable: {exc})")
+
         # ─── Server status ───
         hr("Server status")
         kv("running",       core.running)

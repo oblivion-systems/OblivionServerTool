@@ -3,16 +3,22 @@
 A desktop application for managing a **Counter-Strike 2 dedicated server** on Windows.  
 Built with Python + Flask + pywebview (Edge WebView2). Ships as a single `.exe` with an optional installer.
 
-> **Status: v0.12.5 (released 2026-06-06).**  v0.12 backlog **drained**.
-> Feature-complete + all 10 audit findings closed + Gaming Mode toggle
-> + scripts/ bundled into installer.  Previous day shipped the first
-> real tournament (10-player CS2 5v5 with remote captains over Discord,
-> completed cleanly on de_vertigo) via seven hotfix releases
-> (v0.11.20-25) over ~75 minutes; the next morning landed v0.11.26
-> through v0.12.5.  See `RETROSPECTIVE_2026_06_05.md` for the
-> post-mortem.  **222/222 backend tests green.**
+> **Status: v0.13.0 (released 2026-06-06).**  Driver abstraction seam
+> opened (task #86) — `GameDriver` base class + `CS2Driver`
+> implementation + `AppCore.driver` attribute.  Foundation for v0.13.x
+> TF2 driver and v0.15 FiveM driver.  Strangler-fig migration: existing
+> CS2-hardcoded code still works; new code uses `core.driver.X`.
+> Previous day shipped the first real tournament + drained the v0.12
+> backlog in 8 releases.  See `RETROSPECTIVE_2026_06_05.md` for the
+> post-mortem.  **231/231 backend tests green.**
 >
 > **What's new since v0.11.0**:
+> - **Driver abstraction seam** *(v0.13.0)* — `cs2servergui/drivers/`
+>   package with `GameDriver` ABC + `CS2Driver` subclass.  Diagnostic
+>   snapshot now has a "Driver" section showing game name, port,
+>   process image, plugin layer.  v0.13.x will migrate `core.py`
+>   methods into the driver one seam at a time; v0.13.x.y adds the
+>   TF2 driver as the proof point.
 > - **Gaming Mode toggle + scripts/ bundling** *(v0.12.5)* — new SPA
 >   section under Config: ⚡ ON / 💤 OFF / 📊 Status buttons wrap
 >   `scripts/gaming-mode.ps1` (Power Plan + cs2.exe core affinity).
