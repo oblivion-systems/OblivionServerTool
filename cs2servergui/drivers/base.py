@@ -92,6 +92,24 @@ class GameDriver(abc.ABC):
         CS2 Competitive, ``cp_dustbowl`` for TF2 Payload)."""
         ...
 
+    # ─── Filesystem layout ─────────────────────────────────────────
+    # The dedicated-server install root.  All driver path operations
+    # (addons, cfg, logs) are children of this.  v0.13.1 — first
+    # migration target.  See PLATFORM.md § 5.
+
+    @abc.abstractmethod
+    def install_root(self, core: "AppCore") -> str:
+        """Return the absolute path of the dedicated-server install
+        root (the directory containing the server binary's adjacent
+        ``cfg/``, ``addons/``, log files, etc.).  For Source-engine
+        games this is typically ``<server_dir>/steamapps/common/
+        <Game>/game/<game_short>/``.
+
+        Driver-owned because the path layout differs per game (CS2 →
+        ``csgo/``, TF2 → ``tf/``, FiveM → wherever ``FXServer.exe``
+        lives + ``resources/``)."""
+        ...
+
     # ─── Console-log discovery ─────────────────────────────────────
 
     def console_log_dir(self, core: "AppCore") -> str | None:
@@ -99,13 +117,14 @@ class GameDriver(abc.ABC):
         dedicated-server console log, or None if the install isn't
         configured / locatable.
 
-        Default implementation: ``core._csgo_dir()`` for Source-engine
-        games.  Override in non-Source drivers."""
+        Default implementation: ``install_root(core)`` for Source-engine
+        games where the log lives directly in the game-short dir.
+        Override in drivers whose log lives elsewhere (e.g. FiveM
+        writes to a separate ``logs/`` subtree)."""
         try:
-            csgo = core._csgo_dir() if hasattr(core, "_csgo_dir") else None
+            return self.install_root(core)
         except Exception:
-            csgo = None
-        return csgo
+            return None
 
     def console_log_path(self, core: "AppCore") -> str | None:
         """Convenience: absolute path of the console log file.

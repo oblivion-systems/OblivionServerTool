@@ -3,16 +3,17 @@
 A desktop application for managing a **Counter-Strike 2 dedicated server** on Windows.  
 Built with Python + Flask + pywebview (Edge WebView2). Ships as a single `.exe` with an optional installer.
 
-> **Status: v0.13.0 (released 2026-06-06).**  Driver abstraction seam
-> opened (task #86) — `GameDriver` base class + `CS2Driver`
-> implementation + `AppCore.driver` attribute.  Foundation for v0.13.x
-> TF2 driver and v0.15 FiveM driver.  Strangler-fig migration: existing
-> CS2-hardcoded code still works; new code uses `core.driver.X`.
-> Previous day shipped the first real tournament + drained the v0.12
-> backlog in 8 releases.  See `RETROSPECTIVE_2026_06_05.md` for the
-> post-mortem.  **231/231 backend tests green.**
+> **Status: v0.13.1 (released 2026-06-06).**  PLATFORM.md design doc +
+> first driver-method migration (`install_root()` from `_csgo_dir()`).
+> The strangler-fig pattern is now proven on one method; v0.13.2+ moves
+> the rest one at a time per the doc.  Closes design task #84.
+> **233/233 backend tests green.**
 >
 > **What's new since v0.11.0**:
+> - **PLATFORM.md + worked-example migration** *(v0.13.1)* — the design
+>   doc + the first concrete method extraction (`install_root()`).
+>   AppCore's `_csgo_dir()` is now a thin shim that delegates to the
+>   driver.  Every subsequent v0.13.x migration follows this template.
 > - **Driver abstraction seam** *(v0.13.0)* — `cs2servergui/drivers/`
 >   package with `GameDriver` ABC + `CS2Driver` subclass.  Diagnostic
 >   snapshot now has a "Driver" section showing game name, port,

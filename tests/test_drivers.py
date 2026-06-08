@@ -138,6 +138,34 @@ t('appcore: instantiates with .driver attribute (CS2Driver)',
   t_appcore_has_driver_attribute)
 
 
+def t_cs2driver_install_root_returns_parent_of_addons_dir():
+    """v0.13.1 — first method migration.  install_root() returns
+    csgo/, which is the parent of CS2_ADDONS_DIR (=csgo/addons)."""
+    import os as _os
+    d = CS2Driver()
+    expected = _os.path.dirname(_cfg.CS2_ADDONS_DIR)
+    # Driver doesn't actually need core for this method (lazy import
+    # of config), so a stub is fine.
+    class FakeCore: pass
+    got = d.install_root(FakeCore())
+    return (got == expected), f'expected={expected!r} got={got!r}'
+t('cs2driver: install_root() returns parent of CS2_ADDONS_DIR',
+  t_cs2driver_install_root_returns_parent_of_addons_dir)
+
+
+def t_appcore_csgo_dir_delegates_to_driver_install_root():
+    """v0.13.1 — AppCore._csgo_dir() is now a thin shim that delegates
+    to driver.install_root().  Same return value as the direct call —
+    catches drift if someone re-implements _csgo_dir.
+    """
+    from cs2servergui.core import AppCore
+    ac = AppCore()
+    return (ac._csgo_dir() == ac.driver.install_root(ac)), \
+           f'_csgo_dir={ac._csgo_dir()!r} install_root={ac.driver.install_root(ac)!r}'
+t('appcore: _csgo_dir() delegates to driver.install_root()',
+  t_appcore_csgo_dir_delegates_to_driver_install_root)
+
+
 def t_base_gamedriver_is_abstract():
     """GameDriver shouldn't be instantiable directly — subclasses
     must declare modes() + default_map().  Catches the case where

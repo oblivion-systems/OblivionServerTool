@@ -2137,8 +2137,18 @@ class AppCore:
     # ── plugin deployment ─────────────────────────────────────────────────────
 
     def _csgo_dir(self) -> str:
-        """Return the game/csgo/ directory (parent of addons/)."""
-        return os.path.dirname(_config.CS2_ADDONS_DIR)
+        """Return the game/csgo/ directory (parent of addons/).
+
+        v0.13.1 / task #86 — first method migration.  The real
+        implementation now lives on ``CS2Driver.install_root()``; this
+        is a thin backward-compat shim so the dozens of existing call
+        sites in this file keep working unchanged.  New code should
+        call ``self.driver.install_root(self)`` directly.  Each call
+        site migrates over time; when the last one switches over the
+        shim disappears.  See PLATFORM.md § 5 for the migration
+        pattern.
+        """
+        return self.driver.install_root(self)
 
     # ── Plugin infrastructure helpers ─────────────────────────────────────────
     # MetaMod must be referenced in csgo/gameinfo.gi for the engine to load it.

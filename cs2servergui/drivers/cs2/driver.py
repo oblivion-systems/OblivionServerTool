@@ -81,16 +81,21 @@ class CS2Driver(GameDriver):
         # "Start without a map selected" code path.
         return "de_dust2"
 
-    # ─── Console-log path (override default) ───────────────────────
+    # ─── Filesystem layout (v0.13.1 — first method migration) ─────
 
-    def console_log_dir(self, core):
-        """CS2's console log lives under csgo/, not the parent
-        Counter-Strike Global Offensive/ dir.  Use core._csgo_dir()
-        which already resolves to the right place."""
-        try:
-            return core._csgo_dir() if hasattr(core, "_csgo_dir") else None
-        except Exception:
-            return None
+    def install_root(self, core) -> str:
+        """csgo/ directory (parent of addons/).  This is the canonical
+        CS2 install-root expression — every CS2-specific path the app
+        cares about (cfg, addons, logs, gameinfo.gi) is a child of
+        this.  Sourced from config.CS2_ADDONS_DIR by stripping the
+        ``addons`` suffix; that constant respects the operator's
+        runtime-configured server_dir."""
+        from ... import config as _cfg
+        import os as _os
+        return _os.path.dirname(_cfg.CS2_ADDONS_DIR)
+
+    # console_log_dir uses the default (= install_root) — no override needed.
+    # CS2's console.log lives directly in csgo/.
 
     # ─── Status-line formatter (mode-aware) ────────────────────────
 
