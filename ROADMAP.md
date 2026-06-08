@@ -58,8 +58,9 @@ Highlights since v0.11.0:
 | v0.12.4  | Content-hashed `/static/*` URLs — `?v=APP_VERSION` + `Cache-Control: immutable` (closes audit finding #6 / task #139) |
 | v0.12.5  | Gaming Mode toggle in Config card + scripts/ bundled into installer (closes #95 + #97) |
 | v0.13.0  | **Driver abstraction seam** — `GameDriver` ABC + `CS2Driver` + `AppCore.driver` + diagnostic snapshot "Driver" section (closes #86) |
+| v0.13.1  | **PLATFORM.md design doc** + worked-example migration: `install_root()` from `_csgo_dir()` (closes #84) |
 
-**231/231 backend tests green** through v0.13.0.
+**233/233 backend tests green** through v0.13.1.
 
 Full prose in [CHANGELOG.md](CHANGELOG.md).
 

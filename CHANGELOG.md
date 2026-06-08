@@ -2,6 +2,81 @@
 
 ---
 
+## v0.13.1 — 2026-06-06 (PLATFORM.md + first method migration)
+
+Two things land together: the design doc that informs every future
+driver-migration commit, and the worked-example first migration that
+proves the strangler-fig pattern.
+
+### PLATFORM.md (task #84)
+New top-level doc.  ~350 lines.  Covers:
+1. Why the driver abstraction exists
+2. What v0.13.0 already landed (the seam)
+3. The boundary — what stays generic vs. CS2-only vs. contested
+4. Driver interface (current + planned methods, in migration order)
+5. The strangler-fig migration plan with worked example
+6. Constraints + lessons from the tournament (mutation contract,
+   cookie-without-redirects, no silent drops, game-specific timing,
+   plugin verification)
+7. v0.13 → v0.14 → v0.15 → v1.0 roadmap impact
+8. Plugin Manager seam (how plugins relate to drivers — informs #92)
+9. v1.0 readiness criteria for drivers
+10. Open questions (multi-driver per process, driver versioning,
+    third-party drivers, plugin registry mono vs. per-plugin repos)
+
+Closes task #84 (was: "Write PLATFORM.md after first real session").
+The tournament is done; the doc captures what we learned.
+
+### First method migration: `install_root()` (task #86 ongoing)
+The smallest CS2-specific method in `core.py` moves into the driver
+as the worked example for every subsequent migration.
+
+**Before:**
+```python
+# core.py
+class AppCore:
+    def _csgo_dir(self) -> str:
+        return os.path.dirname(_config.CS2_ADDONS_DIR)
+```
+
+**After:**
+```python
+# drivers/cs2/driver.py
+class CS2Driver(GameDriver):
+    def install_root(self, core) -> str:
+        return os.path.dirname(_cfg.CS2_ADDONS_DIR)
+
+# core.py
+class AppCore:
+    def _csgo_dir(self) -> str:
+        # v0.13.1 — thin shim; real impl lives on the driver
+        return self.driver.install_root(self)
+```
+
+All ~8 existing call sites of `_csgo_dir()` keep working unchanged.
+New code calls `self.driver.install_root(self)` directly.  When the
+last call site migrates, the shim deletes.
+
+Pattern established: **add abstract method to `GameDriver` → implement
+in `CS2Driver` → reduce AppCore method to a delegate → test
+extensively → ship.**  Every subsequent v0.13.x migration follows
+this template.
+
+### Tests
++2 new in `tests/test_drivers.py`:
+- `cs2driver.install_root()` returns parent of CS2_ADDONS_DIR
+- `AppCore._csgo_dir()` delegates to `driver.install_root()` (drift guard)
+**233/233 green.**
+
+### Next (v0.13.2+)
+Per PLATFORM.md § 4, the migration order is:
+- `addons_dir()`, `cfg_dir()`, `match_config_target()` (paths — small)
+- `is_server_process()`, `process_kill_filter()` (process detection)
+- `start_server()`, `stop_server()` (large — the real meat)
+- `deploy_plugins_for_mode()` (depends on plugin registry #90)
+
+---
+
 ## v0.13.0 — 2026-06-06 (driver abstraction seam — task #86)
 
 First v0.13 release.  Opens the **driver abstraction** that v0.13.x +
