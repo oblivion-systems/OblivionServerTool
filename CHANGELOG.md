@@ -2,6 +2,101 @@
 
 ---
 
+## v0.13.0 — 2026-06-06 (driver abstraction seam — task #86)
+
+First v0.13 release.  Opens the **driver abstraction** that v0.13.x +
+v0.14 + v0.15 build on: a single `GameDriver` interface so future
+versions can add TF2 / GTA-RP / FiveM drivers without touching the
+Flask web layer, the SPA, the veto state machine, the Discord bot,
+or the broadcast/SSE plumbing.
+
+**Scope** — this is the seed of the driver layer, not the full
+extraction.  The strangler-fig migration moves CS2-specific logic
+out of `core.py` one method at a time.  v0.13.0 ships the interface
++ a CS2 implementation + the SPA snapshot section that surfaces
+which driver is active.  v0.13.x will pull more methods (start/stop,
+RCON, plugin deploy, MatchZy handoff) into the driver as the
+TF2 driver work for v0.13.x reveals each seam.
+
+### New
+* **`cs2servergui/drivers/` package** (3 new files):
+  - `drivers/base.py` — `GameDriver` abstract base class with the
+    minimum-viable interface for v0.13: identity properties
+    (game_name, short_name, default_port, process_image_name,
+    process_args_marker, console_log_filename), `modes()` +
+    `default_map()` abstract methods, default `console_log_dir()`
+    + `console_log_path()` + `status_line()` + `describe()`.
+  - `drivers/cs2/driver.py` — `CS2Driver` concrete implementation.
+    Identity = Counter-Strike 2 / cs2.exe / port 27015 /
+    `-dedicated` filter.  `modes()` proxies `config.MODE_SETTINGS`
+    keys so adding a mode in config picks up everywhere without
+    a driver edit.  `default_map()` walks `config.MODE_MAPS`.
+    `status_line()` adds an MR12 hint for competitive-family modes.
+  - `drivers/__init__.py` — exports `GameDriver` + `CS2Driver` and
+    documents the architecture + migration strategy.
+* **`AppCore.driver`** — instantiated in `__init__` with `CS2Driver()`.
+  New code reaches game-specific knobs via `core.driver.X` instead
+  of hardcoding `"cs2.exe"` / `"MatchZy"` literals.  Existing core
+  code still uses the literals; those get migrated one seam at a time.
+* **Diagnostic snapshot — new "Driver" section** above the Server
+  Status block.  Operator sees game name, short_name, default_port,
+  process image, plugin layer, match layer, mode count at a glance.
+
+### Why a v0.13.0 (not v0.12.6)?
+This is the start of the **driver abstraction series**.  v0.13.x will
+fill in the rest of the migration (start/stop, RCON, plugin deploy,
+MatchZy handoff each get a driver method); v0.13.1+ adds the TF2
+driver as the proof point.  The minor bump signals "the codebase
+just gained a structural seam"; future v0.13.x patches are the
+migration work behind that seam.
+
+### Migration strategy (strangler fig)
+Existing CS2-hardcoded code in `core.py` / `web.py` / `veto.py` still
+works untouched.  New code uses `core.driver.X`.  Over time,
+function-by-function, the body of `core.start_server` (etc.) moves
+into `CS2Driver.start_server`; the AppCore method becomes a thin
+delegate.  When TF2Driver lands, only the methods that have been
+moved into the driver need a TF2 equivalent — anything still in
+AppCore is the migration TODO list.
+
+### What stays generic (driver doesn't touch these)
+- `web.py` Flask routes, auth, SSE, broadcast
+- `static/js/*` SPA (entire frontend)
+- `veto.py` VetoSession state machine, captain/voter tokens
+- `discord_bot.py` bot lifecycle + slash commands
+- `match_events.py` round-summary poller (driver mediates RCON only)
+- `rcon.py` Source RCON protocol (TF2 also uses it; FiveM does not —
+  FiveM driver will provide its own command runner)
+
+### What's CS2-only forever (always in the driver)
+- MetaMod + CounterStrikeSharp plugin layout
+- MatchZy match-config JSON shape + `matchzy_loadmatch` RCON cmd
+- `csgo/cfg/MatchZy/` write target
+- `cs2.exe -dedicated` process detection
+- `de_dust2` / `de_mirage` / etc. map pool
+
+### Tests
++9 new in `tests/test_drivers.py`:
+- CS2Driver identity props match legacy hardcoded values (regression-guard)
+- modes() matches `config.MODE_SETTINGS` keys (drift guard)
+- default_map() returns first of mode allow-list + falls back to de_dust2
+- status_line() reports offline cleanly; adds (MR12) hint only for
+  competitive-family modes
+- describe() includes CS2-specific extras (plugin_layer + match_layer)
+- AppCore instantiates with a `.driver` attribute (CS2Driver)
+- GameDriver is abstract (cannot instantiate directly)
+**231/231 green.**
+
+### Next (v0.13.x)
+- Migrate `core.start_server` body into `CS2Driver.start_server` (first
+  real method extraction, not just identity)
+- Plugin deploy logic per-mode (the `_PLUGIN_*` tables are pure CS2)
+- MatchZy handoff
+- Add `drivers/tf2/` skeleton + identity to validate the seam works
+- v0.13.x.y eventually ships a working TF2 driver as the proof point
+
+---
+
 ## v0.12.5 — 2026-06-06 (Gaming Mode toggle + scripts bundling)
 
 Closes tasks #95 + #97 — the last two pending v0.12 polish items.

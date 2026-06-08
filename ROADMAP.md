@@ -7,16 +7,18 @@
 
 ---
 
-## Where We Are — v0.12.5 (released 2026-06-06)
+## Where We Are — v0.13.0 (released 2026-06-06)
 
-**Thirty-three releases**, with the **v0.12 backlog drained**: all 3
-Discord features shipped, all 10 audit findings closed, Gaming Mode
-toggle in-app, scripts/ bundled into installer.  Day-after of the
-**first tournament (2026-06-05)** delivered eight releases (v0.11.26
-through v0.12.5) — closing tasks #95, #97, #134, #135, #136, #139,
-#143, #145.  Next phase = driver abstraction (#86) which is the
-actual v0.12 thesis the Discord features were ride-alongs to.
-See `RETROSPECTIVE_2026_06_05.md` for the tournament post-mortem.
+**Thirty-four releases**, with the **driver-abstraction seam now
+open**.  v0.12 backlog drained the day before (all 3 Discord features
+shipped, all 10 audit findings closed, Gaming Mode in-app, scripts/
+bundled).  v0.13.0 lands the `GameDriver` ABC + `CS2Driver` subclass
++ `AppCore.driver` attribute — the strangler-fig seam that v0.13.x
+TF2 driver and v0.15 FiveM driver plug into.  Existing CS2-specific
+code in `core.py` still works untouched; new code uses
+`core.driver.X` instead of hardcoded `"cs2.exe"` literals.  Closes
+task #86.  See `RETROSPECTIVE_2026_06_05.md` for the tournament
+post-mortem.
 
 Highlights since v0.11.0:
 
@@ -55,8 +57,9 @@ Highlights since v0.11.0:
 | v0.12.3  | Remote player voting via per-player tokens — bot DMs each rostered player a one-shot voting URL; minimal voter SPA view (closes #135) |
 | v0.12.4  | Content-hashed `/static/*` URLs — `?v=APP_VERSION` + `Cache-Control: immutable` (closes audit finding #6 / task #139) |
 | v0.12.5  | Gaming Mode toggle in Config card + scripts/ bundled into installer (closes #95 + #97) |
+| v0.13.0  | **Driver abstraction seam** — `GameDriver` ABC + `CS2Driver` + `AppCore.driver` + diagnostic snapshot "Driver" section (closes #86) |
 
-**222/222 backend tests green** through v0.12.5.
+**231/231 backend tests green** through v0.13.0.
 
 Full prose in [CHANGELOG.md](CHANGELOG.md).
 

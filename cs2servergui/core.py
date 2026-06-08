@@ -390,6 +390,17 @@ class AppCore:
     """Single source of truth shared between the local GUI and Flask."""
 
     def __init__(self) -> None:
+        # v0.13.0 / task #86 — game driver.  The active driver
+        # is the single point of truth for game-specific identity
+        # (process name, log path, modes, port).  New code reaches
+        # game-specific knobs via `core.driver.X` instead of
+        # hardcoding "cs2.exe" / "MatchZy" literals.  Existing code
+        # in this file still uses the literals — those get migrated
+        # one seam at a time (strangler-fig).
+        # See cs2servergui/drivers/__init__.py for the architecture.
+        from .drivers import CS2Driver
+        self.driver = CS2Driver()
+
         self.proc:         subprocess.Popen | None = None
         self.running:      bool = False
         self.boot_state:   str  = "offline"   # "offline" | "booting" | "ready"
