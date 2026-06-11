@@ -754,6 +754,21 @@ def create_flask(core: AppCore) -> Flask:
         # (defensive: shouldn't happen for bundled plugins now they all
         # have manifests, but keeps the endpoint working if one is removed).
         from .core import _DISCOVERED_PLUGINS
+        # v0.15.2 slice 3 — also reach into the registry so we can mark
+        # "update available" when a local plugin has an older version
+        # than what the registry advertises.  Cached fetch is cheap
+        # (24h TTL) and gracefully empty if the registry is offline.
+        try:
+            from . import registry_client as _reg
+            reg_catalog = _reg.fetch_catalog(force=False) or {}
+            reg_index = {
+                p["slug"]: ((p.get("versions") or [{}])[0].get("version") or "")
+                for p in (reg_catalog.get("plugins") or [])
+                if p.get("slug")
+            }
+        except Exception:
+            reg_index = {}
+            _reg = None  # type: ignore[assignment]
         bundled: list[dict] = []
         all_slugs = sorted(set(_DISCOVERED_PLUGINS.keys())
                            | set(_PLUGIN_CATALOG.keys())
@@ -768,15 +783,23 @@ def create_flask(core: AppCore) -> Flask:
             author       = manifest.get("author")       or meta.get("author") or ""
             source       = manifest.get("_source")      or "bundled"
             plugin_dir   = manifest.get("_plugin_dir")  or os.path.join(_PLUGINS_BASE, slug)
+            installed_ver = manifest.get("version") or ""
+            latest_ver    = reg_index.get(slug, "")
+            update = False
+            if _reg is not None and latest_ver:
+                update = _reg.has_update(installed_ver, latest_ver)
             bundled.append({
-                "slug":            slug,
-                "display_name":    display_name,
-                "summary":         summary,
-                "author":          author,
-                "source":          source,    # "bundled" | "local"
-                "source_present":  os.path.isdir(plugin_dir),
-                "modes":           sorted(modes_for_slug.get(slug, [])),
-                "deployed":        slug in deployed_slugs,
+                "slug":              slug,
+                "display_name":      display_name,
+                "summary":           summary,
+                "author":            author,
+                "source":            source,    # "bundled" | "local"
+                "source_present":    os.path.isdir(plugin_dir),
+                "modes":             sorted(modes_for_slug.get(slug, [])),
+                "deployed":          slug in deployed_slugs,
+                "installed_version": installed_ver,
+                "latest_version":    latest_ver,
+                "update_available":  update,
             })
 
         return jsonify({
@@ -955,6 +978,128 @@ def create_flask(core: AppCore) -> Flask:
         status  = registry_client.get_registry_status()
         return jsonify({"catalog": catalog, "status": status})
 
+    # v0.15.2 slice 3 — re-discover bundled + local plugins WITHOUT an app
+    # restart.  Called after install_from_registry / install_from_url /
+    # uninstall, and exposed as a "Reload" button in the SPA so operators
+    # can drop a folder into %APPDATA%/.../plugins/ and pick it up live.
+    def _reload_plugin_tables() -> dict:
+        from . import core as _core
+        fresh = _core._discover_plugins()
+        (_core._PLUGIN_KIND,
+         _core._PLUGIN_VERIFY_FILES,
+         _core._PLUGIN_COPY_RULES,
+         _core._PLUGIN_CLEANUP_ITEMS,
+         _core._MODE_PLUGIN_NAMES) = _core._populate_plugin_tables(fresh)
+        _core._DISCOVERED_PLUGINS = fresh
+        bundled = sum(1 for m in fresh.values() if m.get("_source") == "bundled")
+        local   = sum(1 for m in fresh.values() if m.get("_source") == "local")
+        return {"total": len(fresh), "bundled": bundled, "local": local}
+
+    @app.route("/api/plugins/reload", methods=["POST"])
+    @require_auth
+    @require_local
+    def api_plugins_reload():
+        stats = _reload_plugin_tables()
+        return jsonify({"ok": True, "stats": stats})
+
+    # v0.15.2 slice 3 — Uninstall a LOCAL plugin (bundled plugins live in
+    # the .exe and can't be removed from disk).  Refuses if the plugin is
+    # bound to the current mode (operator should switch first) — prevents
+    # the next /api/server/start from booting into a mode whose plugins
+    # were just deleted.
+    @app.route("/api/plugins/uninstall", methods=["POST"])
+    @require_auth
+    @require_local
+    def api_plugins_uninstall():
+        import shutil
+        d    = request.get_json(silent=True) or {}
+        slug = (d.get("slug") or "").strip()
+        if not slug:
+            return jsonify({"error": "slug is required"}), 400
+
+        ok, status, err = _plugin_action_preflight()
+        if not ok:
+            return jsonify(err), status
+
+        from .core import _DISCOVERED_PLUGINS, _MODE_PLUGIN_NAMES, _resolve_user_plugins_dir
+        manifest = _DISCOVERED_PLUGINS.get(slug)
+        if not manifest:
+            return jsonify({"error": f"plugin {slug!r} not found"}), 404
+        if manifest.get("_source") != "local":
+            return jsonify({
+                "error": f"plugin {slug!r} is bundled inside the .exe and "
+                         "cannot be uninstalled.  It will not appear on disk.",
+            }), 400
+
+        # If this plugin is bound to the currently-active mode, refuse so
+        # we don't strand the operator with a half-functional server.
+        cur_mode = (core.current_mode or "").strip()
+        if cur_mode and slug in _MODE_PLUGIN_NAMES.get(cur_mode, []):
+            return jsonify({
+                "error": f"plugin {slug!r} is part of the active mode "
+                         f"{cur_mode!r}.  Switch to another mode (Vanilla "
+                         f"works) before uninstalling.",
+            }), 409
+
+        # The slug-keyed folder lives under user plugins dir.  We
+        # deliberately rmtree only that one folder — never anything else
+        # under %APPDATA%/.../plugins/.
+        target = os.path.join(_resolve_user_plugins_dir(), slug)
+        if not os.path.isdir(target):
+            return jsonify({
+                "error": f"plugin folder {target!r} not on disk; nothing to "
+                         "uninstall",
+            }), 404
+
+        try:
+            shutil.rmtree(target, ignore_errors=False)
+        except Exception as exc:
+            return jsonify({"error": f"rmtree failed: {exc!r}"}), 500
+
+        stats = _reload_plugin_tables()
+        return jsonify({
+            "ok":     True,
+            "slug":   slug,
+            "stats":  stats,
+            "removed_path": target,
+        })
+
+    # v0.15.2 slice 3 — Custom URL install (advanced).  Operator pastes a
+    # zip URL; backend downloads + verifies + extracts.  Same safety as
+    # install_from_registry minus the catalog cross-check; the SHA-256 is
+    # optional but recommended.  The SPA warns when the operator submits
+    # without a hash.
+    @app.route("/api/plugins/install_from_url", methods=["POST"])
+    @require_auth
+    @require_local
+    def api_plugins_install_from_url():
+        from . import registry_client
+        d        = request.get_json(silent=True) or {}
+        url      = (d.get("url") or "").strip()
+        sha256   = (d.get("sha256") or "").strip() or None
+        exp_slug = (d.get("expected_slug") or "").strip() or None
+        if not url:
+            return jsonify({"error": "url is required"}), 400
+        # The registry URL has its own dedicated endpoint — disallow
+        # passing it here so operators don't bypass the catalog cross-check.
+        if url == _config.OBLIVION_REGISTRY_URL:
+            return jsonify({
+                "error": "Registry URL must be installed via "
+                         "/api/plugins/install_from_registry",
+            }), 400
+
+        try:
+            result = registry_client.install_from_url(
+                url, expected_sha256=sha256, expected_slug=exp_slug,
+            )
+        except registry_client.RegistryError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:  # pragma: no cover — defensive
+            return jsonify({"error": f"unexpected: {exc!r}"}), 500
+
+        stats = _reload_plugin_tables()
+        return jsonify({"ok": True, "result": result, "stats": stats})
+
     @app.route("/api/plugins/install_from_registry", methods=["POST"])
     @require_auth
     @require_local
@@ -977,21 +1122,12 @@ def create_flask(core: AppCore) -> Flask:
 
         # The plugin is now on disk under %APPDATA%/.../plugins/<slug>/.
         # Re-run discovery so subsequent /api/plugins reflects it without
-        # an app restart.
-        from . import core as _core
-        fresh = _core._discover_plugins()
-        # Rebuild the derived tables in place.  Tuple-unpack matches the
-        # module-load assignment.
-        (_core._PLUGIN_KIND,
-         _core._PLUGIN_VERIFY_FILES,
-         _core._PLUGIN_COPY_RULES,
-         _core._PLUGIN_CLEANUP_ITEMS,
-         _core._MODE_PLUGIN_NAMES) = _core._populate_plugin_tables(fresh)
-        _core._DISCOVERED_PLUGINS = fresh
-
+        # an app restart.  Shared with /api/plugins/reload and uninstall.
+        stats = _reload_plugin_tables()
         return jsonify({
             "ok":     True,
             "result": result,
+            "stats":  stats,
         })
 
     @app.route("/api/plugins/packs")

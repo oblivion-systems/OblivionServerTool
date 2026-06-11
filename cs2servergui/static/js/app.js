@@ -2459,13 +2459,22 @@ async function _renderPluginsTab() {
   const items = (data.bundled || []).map(p => {
     // v0.15.0 slice 1 — Local plugins get a different badge so operators
     // can spot what they've added themselves vs what shipped with the .exe.
+    // v0.15.2 slice 3 — Update Available pill when the registry advertises
+    // a newer version than what's installed locally.
     const isLocal = p.source === 'local';
+    const hasUpdate = !!p.update_available;
     const stateLabel = p.deployed
       ? '<span class="pill pill-ok">Active</span>'
       : (p.source_present
           ? (isLocal ? '<span class="pill pill-blue">Local</span>'
                      : '<span class="pill pill-mute">Available</span>')
           : '<span class="pill pill-warn">Source missing</span>');
+    const updatePill = hasUpdate
+      ? `<span class="pill pill-warn" title="Registry has v${esc(p.latest_version)}, you have v${esc(p.installed_version || '?')}">Update v${esc(p.latest_version)}</span>`
+      : '';
+    const versionLine = p.installed_version
+      ? `<div class="text-sm text-sub">Installed: v${esc(p.installed_version)}</div>`
+      : '';
     const modesTxt = p.modes && p.modes.length
       ? `<div class="text-sm text-sub">Used by: ${p.modes.map(esc).join(', ')}</div>`
       : '<div class="text-sm text-sub">Standalone — not bound to a mode</div>';
@@ -2500,16 +2509,35 @@ async function _renderPluginsTab() {
       }
     }
 
+    // v0.15.2 slice 3 — Remove button on Local cards.  Bundled plugins
+    // can't be removed (they live inside the .exe); they show no button.
+    // The Remove confirm warns about deletion of operator-edited files.
+    const removeBtn = isLocal && p.source_present
+      ? `<button class="btn btn-sm btn-ghost plugins-uninstall-btn"
+                 data-slug="${esc(p.slug)}"
+                 data-name="${esc(p.display_name)}"
+                 ${actionsBlocked ? 'disabled' : ''}
+                 title="Delete %APPDATA%/.../plugins/${esc(p.slug)}/ — bundled plugins cannot be removed">
+           Remove
+         </button>`
+      : '';
     return `
       <div class="plugin-card" data-slug="${esc(p.slug)}">
         <div class="plugin-card-head">
           <span class="plugin-card-title">${esc(p.display_name)}</span>
-          ${stateLabel}
+          <div style="display:flex; gap:6px; flex-wrap:wrap">
+            ${updatePill}
+            ${stateLabel}
+          </div>
         </div>
         <div class="text-sm">${esc(p.summary || '')}</div>
         ${modesTxt}
+        ${versionLine}
         ${p.author ? `<div class="text-sm text-sub">By ${esc(p.author)}</div>` : ''}
-        ${actionBtn}
+        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:6px">
+          ${actionBtn}
+          ${removeBtn}
+        </div>
       </div>
     `;
   }).join('');
@@ -2534,7 +2562,15 @@ async function _renderPluginsTab() {
       const cat       = (registryData && registryData.catalog) || {};
       const status    = (registryData && registryData.status) || {};
       const installed = new Set((registryData && registryData.installed_slugs) || []);
-      const available = (cat.plugins || []).filter(p => !installed.has(p.slug));
+      // v0.15.2 slice 3 — also surface entries that ARE installed but have
+      // a newer registry version (update_available=true on the /api/plugins
+      // entry).  The button copy becomes "Update" instead of "Install".
+      const updatableSlugs = new Set(
+        (data.bundled || []).filter(b => b.update_available).map(b => b.slug)
+      );
+      const available = (cat.plugins || []).filter(p =>
+        !installed.has(p.slug) || updatableSlugs.has(p.slug)
+      );
       const ageHours  = status.fetched_at
         ? Math.max(0, Math.round((Date.now() / 1000 - status.fetched_at) / 3600))
         : null;
@@ -2560,12 +2596,16 @@ async function _renderPluginsTab() {
           </div>`;
       } else {
         const items = available.map(p => {
-          const v0 = (p.versions || [])[0] || {};
+          const v0       = (p.versions || [])[0] || {};
+          const isUpdate = updatableSlugs.has(p.slug);
+          const versionPill = isUpdate
+            ? `<span class="pill pill-warn">Update → v${esc(v0.version || '?')}</span>`
+            : `<span class="pill pill-mute">v${esc(v0.version || '?')}</span>`;
           return `
             <div class="plugin-card" data-slug="${esc(p.slug)}">
               <div class="plugin-card-head">
                 <span class="plugin-card-title">${esc(p.display_name || p.slug)}</span>
-                <span class="pill pill-mute">v${esc(v0.version || '?')}</span>
+                ${versionPill}
               </div>
               <div class="text-sm">${esc(p.summary || '')}</div>
               ${p.modes && p.modes.length
@@ -2576,8 +2616,9 @@ async function _renderPluginsTab() {
                       data-slug="${esc(p.slug)}"
                       data-name="${esc(p.display_name || p.slug)}"
                       data-version="${esc(v0.version || '')}"
+                      data-action="${isUpdate ? 'update' : 'install'}"
                       ${actionsBlocked ? 'disabled' : ''}>
-                Install
+                ${isUpdate ? 'Update' : 'Install'}
               </button>
             </div>`;
         }).join('');
@@ -2598,10 +2639,43 @@ async function _renderPluginsTab() {
   document.querySelectorAll('.plugins-install-btn').forEach(btn => {
     btn.addEventListener('click', () => _pluginInstallFromRegistry(btn));
   });
+  // v0.15.2 slice 3 — Remove button on Local-source library cards.
+  document.querySelectorAll('.plugins-uninstall-btn').forEach(btn => {
+    btn.addEventListener('click', () => _pluginUninstall(btn));
+  });
   const vBtn = el('plugins-vanilla-btn');
   if (vBtn) vBtn.addEventListener('click', _pluginVanilla);
   const refreshBtn = el('plugins-registry-refresh');
   if (refreshBtn) refreshBtn.addEventListener('click', _pluginsRegistryRefresh);
+  // Re-apply the search filter (page may have re-rendered after an action).
+  if (typeof _applyPluginsSearchFilter === 'function') _applyPluginsSearchFilter();
+}
+
+async function _pluginUninstall(btn) {
+  const slug = btn.dataset.slug;
+  const name = btn.dataset.name || slug;
+  if (!window.confirm(
+    `Remove ${name}?\n\n`
+    + `This deletes the folder %APPDATA%\\Oblivion Server Tool\\plugins\\${slug}\\ `
+    + `from disk — including any operator edits to its files.\n\n`
+    + `If the plugin is currently the active mode's plugin, the backend will refuse — `
+    + `switch to a different mode first.\n\n`
+    + `Proceed?`
+  )) return;
+  const allButtons = document.querySelectorAll(
+    '#plugins-library-body button, #plugins-vanilla-btn, .plugins-pack-btn, '
+    + '#plugins-registry-body button'
+  );
+  allButtons.forEach(b => b.disabled = true);
+  toast(`Removing ${name}…`);
+  try {
+    const r = await api.plugins.uninstall(slug);
+    toast(`✓ ${name} removed`, 'var(--ok)');
+  } catch (e) {
+    toast(`Remove failed: ${e.message}`, 'var(--bad)');
+  } finally {
+    await _renderPluginsTab();
+  }
 }
 
 async function _pluginsRegistryRefresh() {
@@ -2621,22 +2695,36 @@ async function _pluginInstallFromRegistry(btn) {
   const slug    = btn.dataset.slug;
   const name    = btn.dataset.name;
   const version = btn.dataset.version || null;
-  if (!window.confirm(
-    `Install ${name}?\n\n`
-    + `This downloads the plugin from the OblivionPluginRegistry and `
-    + `extracts it into %APPDATA%\\Oblivion Server Tool\\plugins\\${slug}\\.\n\n`
-    + `It will appear in the Library after install — click Activate to deploy it.`
-  )) return;
+  // v0.15.2 audit fix — the same handler serves Install and Update.
+  // Confirm copy must match the action the operator actually clicked,
+  // including the fact that Update OVERWRITES the existing folder.
+  const isUpdate = btn.dataset.action === 'update';
+  const confirmMsg = isUpdate
+    ? `Update ${name} to v${version || '?'}?\n\n`
+      + `This downloads the new version from the OblivionPluginRegistry and `
+      + `OVERWRITES %APPDATA%\\Oblivion Server Tool\\plugins\\${slug}\\, `
+      + `including any operator edits to that folder.\n\n`
+      + `Your active mode binding is preserved — if the plugin is currently `
+      + `deployed, restart the server (or hot-reload via mode switch) to pick `
+      + `up the new files.`
+    : `Install ${name}?\n\n`
+      + `This downloads the plugin from the OblivionPluginRegistry and `
+      + `extracts it into %APPDATA%\\Oblivion Server Tool\\plugins\\${slug}\\.\n\n`
+      + `It will appear in the Library after install — click Activate to deploy it.`;
+  if (!window.confirm(confirmMsg)) return;
   const allButtons = document.querySelectorAll(
     '#plugins-registry-body button, #plugins-library-body button, #plugins-vanilla-btn'
   );
   allButtons.forEach(b => b.disabled = true);
-  toast(`Installing ${name}…`);
+  toast(isUpdate ? `Updating ${name}…` : `Installing ${name}…`);
   try {
     const r = await api.plugins.installFromRegistry(slug, version);
-    toast(`✓ ${name} v${r.result.version} installed (${r.result.files_written} files)`, 'var(--ok)');
+    toast(isUpdate
+            ? `✓ ${name} updated to v${r.result.version} (${r.result.files_written} files)`
+            : `✓ ${name} v${r.result.version} installed (${r.result.files_written} files)`,
+          'var(--ok)');
   } catch (e) {
-    toast(`Install failed: ${e.message}`, 'var(--bad)');
+    toast(`${isUpdate ? 'Update' : 'Install'} failed: ${e.message}`, 'var(--bad)');
   } finally {
     await _renderPluginsTab();
   }
@@ -2913,12 +3001,27 @@ pages['plugins'] = async function() {
       </div>
     </div>
 
+    <!-- v0.15.2 slice 3: search filter + Reload + Install-from-URL toolbar.
+         Single search input filters BOTH the Library and the Registry grids
+         so the operator types once.  Reload picks up dropped folders without
+         restarting the app.  Install-from-URL is the advanced path. -->
     <div class="card" style="margin-top:14px">
-      <div class="section-hdr">
+      <div class="section-hdr" style="flex-wrap:wrap; gap:8px">
         <span class="card-title" style="margin-bottom:0">Plugin Library</span>
-        <span class="text-sm text-sub">
-          Per-plugin activation — bundled + locally-installed
-        </span>
+        <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center">
+          <input class="input" id="plugins-search" type="text"
+                 placeholder="Filter…"
+                 style="width:200px"
+                 autocomplete="off" spellcheck="false">
+          <button class="btn btn-sm" id="plugins-reload-btn"
+                  title="Re-scan bundled + %APPDATA%/plugins/ — picks up dropped folders without restarting">
+            ↻ Reload
+          </button>
+          <button class="btn btn-sm" id="plugins-install-url-btn"
+                  title="Install a plugin from any zip URL (advanced)">
+            📥 Install from URL
+          </button>
+        </div>
       </div>
       <div id="plugins-library-body">
         <div class="text-sm text-sub">Loading…</div>
@@ -2930,7 +3033,7 @@ pages['plugins'] = async function() {
         <span class="card-title" style="margin-bottom:0">Available to Install (Community)</span>
         <button class="btn btn-sm" id="plugins-registry-refresh"
                 title="Re-fetch the registry catalog (24h cache)">
-          ↻ Refresh
+          ↻ Refresh Registry
         </button>
       </div>
       <div id="plugins-registry-body">
@@ -2938,8 +3041,161 @@ pages['plugins'] = async function() {
       </div>
     </div>
   `;
+  // Preserve the search input value across re-renders by storing on the
+  // page handler closure.  Each _renderPluginsTab() reads this back.
+  if (typeof _pluginsSearchTerm === 'undefined') {
+    window._pluginsSearchTerm = '';
+  }
   await _renderPluginsTab();
+  const searchEl = el('plugins-search');
+  if (searchEl) {
+    searchEl.value = window._pluginsSearchTerm || '';
+    let debounce;
+    searchEl.addEventListener('input', () => {
+      window._pluginsSearchTerm = searchEl.value;
+      clearTimeout(debounce);
+      // Filter is pure DOM-level (no API call), so debounce is short.
+      debounce = setTimeout(_applyPluginsSearchFilter, 80);
+    });
+    _applyPluginsSearchFilter();
+  }
+  const reloadBtn = el('plugins-reload-btn');
+  if (reloadBtn) reloadBtn.addEventListener('click', _pluginsReload);
+  const urlBtn = el('plugins-install-url-btn');
+  if (urlBtn) urlBtn.addEventListener('click', _pluginsInstallFromUrlModal);
 };
+
+/* v0.15.2 slice 3 — case-insensitive substring filter across the Library
+ * and Registry grids.  We hide cards in place instead of re-rendering so
+ * focus stays in the search input.  Empty term = show all. */
+function _applyPluginsSearchFilter() {
+  const term = (window._pluginsSearchTerm || '').trim().toLowerCase();
+  const cards = document.querySelectorAll(
+    '#plugins-library-body .plugin-card, #plugins-registry-body .plugin-card'
+  );
+  cards.forEach(card => {
+    if (!term) { card.style.display = ''; return; }
+    const text = (card.textContent || '').toLowerCase();
+    card.style.display = text.includes(term) ? '' : 'none';
+  });
+}
+
+async function _pluginsReload() {
+  const btn = el('plugins-reload-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Reloading…'; }
+  try {
+    const r = await api.plugins.reload();
+    const s = r.stats || {};
+    toast(`✓ Reloaded — ${s.total} plugins (${s.bundled} bundled + ${s.local} local)`, 'var(--ok)');
+  } catch (e) {
+    toast(`Reload failed: ${e.message}`, 'var(--bad)');
+  } finally {
+    await _renderPluginsTab();
+    _applyPluginsSearchFilter();
+  }
+}
+
+function _pluginsInstallFromUrlModal() {
+  // Use a custom overlay rather than window.prompt because we need a
+  // URL input + an optional sha256 input + an unverified-source warning.
+  const overlay = document.createElement('div');
+  overlay.className = 'plugins-bootstrap-overlay';
+  overlay.innerHTML = `
+    <div class="plugins-bootstrap-modal">
+      <div class="section-hdr">
+        <span class="card-title" style="margin-bottom:0">Install plugin from URL</span>
+        <button class="btn btn-sm" id="plugins-url-close">Close</button>
+      </div>
+      <p class="text-sm">
+        Advanced. Paste a direct link to a plugin's zip file
+        (e.g. a GitHub release asset URL). The app downloads, extracts to
+        <code>%APPDATA%\\Oblivion Server Tool\\plugins\\&lt;slug&gt;\\</code>,
+        and the plugin appears in the Library.
+      </p>
+      <div class="field" style="margin-top:14px">
+        <label>Zip URL <span class="text-sub">(required, https://)</span></label>
+        <input class="input" id="plugins-url-input" type="url"
+               placeholder="https://github.com/author/plugin/releases/download/v1.0.0/plugin.zip"
+               spellcheck="false" autocomplete="off">
+      </div>
+      <div class="field" style="margin-top:10px">
+        <label>SHA-256 <span class="text-sub">(strongly recommended — verifies you got the right file)</span></label>
+        <input class="input" id="plugins-url-sha" type="text"
+               placeholder="64 hex chars from the author's release notes"
+               spellcheck="false" autocomplete="off" maxlength="64">
+      </div>
+      <div class="field" style="margin-top:10px">
+        <label>Expected slug <span class="text-sub">(optional — match against the plugin.json inside)</span></label>
+        <input class="input" id="plugins-url-slug" type="text"
+               placeholder="my-plugin (must equal plugin.json's slug)"
+               spellcheck="false" autocomplete="off">
+      </div>
+      <div id="plugins-url-warning" class="text-sm" style="margin-top:14px; color:var(--warn); min-height:18px"></div>
+      <div class="flex gap-8" style="margin-top:18px">
+        <button class="btn btn-accent flex-1" id="plugins-url-install">Download + Install</button>
+      </div>
+      <small class="text-sub text-sm" style="display:block; margin-top:10px; line-height:1.5">
+        The download is capped at 50 MB and uses a 12-second timeout. Without a SHA-256,
+        you're trusting the URL's TLS to deliver the file the author intended.
+      </small>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  el('plugins-url-close').addEventListener('click', close);
+
+  // Live-warn when sha256 is missing or malformed.
+  const shaEl = el('plugins-url-sha');
+  const warnEl = el('plugins-url-warning');
+  const updateWarning = () => {
+    const v = (shaEl.value || '').trim();
+    if (!v) {
+      warnEl.textContent = '⚠ No SHA-256 provided — install will proceed but the file is unverified.';
+    } else if (!/^[0-9a-f]{64}$/i.test(v)) {
+      warnEl.textContent = '⚠ SHA-256 must be 64 hex characters.';
+    } else {
+      warnEl.textContent = '';
+    }
+  };
+  shaEl.addEventListener('input', updateWarning);
+  updateWarning();
+
+  el('plugins-url-install').addEventListener('click', async () => {
+    const url  = (el('plugins-url-input').value || '').trim();
+    const sha  = (el('plugins-url-sha').value   || '').trim();
+    const slug = (el('plugins-url-slug').value  || '').trim();
+    if (!url) { toast('URL is required', 'var(--bad)'); return; }
+    if (!/^https?:\/\//i.test(url)) {
+      toast('URL must start with https:// (or http://localhost for testing)', 'var(--bad)');
+      return;
+    }
+    if (sha && !/^[0-9a-f]{64}$/i.test(sha)) {
+      toast('SHA-256 must be 64 hex chars (or blank)', 'var(--bad)');
+      return;
+    }
+    if (!sha) {
+      if (!window.confirm(
+        'Install without SHA-256 verification?\n\n'
+        + 'You\'re trusting that the URL delivers exactly the file the author intended. '
+        + 'A man-in-the-middle (between the server and you) could swap the zip.\n\n'
+        + 'Proceed anyway?'
+      )) return;
+    }
+    const installBtn = el('plugins-url-install');
+    installBtn.disabled = true; installBtn.textContent = 'Downloading…';
+    try {
+      const r = await api.plugins.installFromUrl(url, sha || null, slug || null);
+      const result = r.result || {};
+      toast(`✓ Installed ${result.slug} v${result.version || '?'} (${result.files_written} files)`, 'var(--ok)');
+      close();
+      await _renderPluginsTab();
+    } catch (e) {
+      toast(`Install failed: ${e.message}`, 'var(--bad)');
+      installBtn.disabled = false; installBtn.textContent = 'Download + Install';
+    }
+  });
+}
 
 /* Legacy: #workshop hash routes here, switching to the Workshop tab. */
 pages['workshop'] = function() {

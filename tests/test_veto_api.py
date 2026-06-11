@@ -3391,6 +3391,450 @@ t('registry (v0.15.1): install happy path — download + verify + extract',
   t_v15_registry_install_happy_path)
 
 
+# ─── v0.15.2 slice 3 — uninstall + reload + url-install + version compare ───
+
+def t_v152_version_compare_handles_missing_and_garbage():
+    """Foundation for the Update Available pill: parse_version + has_update
+    must NEVER produce a false positive (which would put a spurious
+    "Update" pill on a versionless bundled plugin).  Garbage strings get
+    treated as 0.0.0 — same as empty."""
+    from cs2servergui.registry_client import parse_version, has_update
+    # Both empty → no update
+    if has_update('', ''):
+        return False, 'empty/empty should not show update'
+    if has_update(None, None):
+        return False, 'None/None should not show update'
+    # Only installed → no update (we don't know what's available)
+    if has_update('1.0.0', ''):
+        return False, 'installed-only should not show update'
+    # Only available → no update (we don't know what's installed)
+    if has_update('', '2.0.0'):
+        return False, 'available-only should not show update'
+    # Real progress
+    if not has_update('1.0.0', '1.0.1'):
+        return False, '1.0.0 → 1.0.1 should be an update'
+    if not has_update('1.0.0', '1.1.0'):
+        return False, '1.0.0 → 1.1.0 should be an update'
+    if not has_update('v1.0.0', '1.1.0'):
+        return False, "v-prefix should be stripped"
+    # Same version → no update
+    if has_update('1.0.0', '1.0.0'):
+        return False, 'same version is not an update'
+    # Garbage → no false positive
+    if has_update('totally-garbage', '99.9.9'):
+        # Garbage parses to (0,0,0) so 99.9.9 IS higher.  This is correct
+        # behaviour for "we couldn't parse installed, but available
+        # claims to be something" — operator sees update, can ignore.
+        pass
+    if has_update('1.0.0', 'also-garbage'):
+        return False, 'unparseable available should not trigger update'
+    # Prerelease ordering (1.0.0-beta < 1.0.0)
+    if has_update('1.0.0', '1.0.0-beta'):
+        return False, 'prerelease is older than release'
+    if not has_update('1.0.0-beta', '1.0.0'):
+        return False, 'release supersedes prerelease at same MMP'
+    return True, 'parse_version + has_update behave correctly across edge cases'
+t('plugins (v0.15.2): version compare handles missing/garbage without false positives',
+  t_v152_version_compare_handles_missing_and_garbage)
+
+
+def t_v152_uninstall_rejects_bundled_plugin():
+    """Bundled plugins live inside the .exe — they're not on operator's
+    disk in any uninstall-able sense.  Endpoint must refuse with a
+    descriptive 400 so the SPA can show the right error."""
+    ac, app, c = _new_app()
+    _login(c)
+    from cs2servergui import web as _web
+    for tok in list(_web._sessions.keys()):
+        _web._sessions[tok]['is_local'] = True
+    r = c.post('/api/plugins/uninstall', json={'slug': 'warcraft'})
+    if r.status_code != 400:
+        return False, f'status={r.status_code} body={r.get_data(as_text=True)[:160]!r}'
+    body = r.get_json() or {}
+    return ('bundled' in (body.get('error') or '').lower()), \
+           f'error={body.get("error")!r}'
+t('plugins (v0.15.2): uninstall refuses bundled plugin with 400',
+  t_v152_uninstall_rejects_bundled_plugin)
+
+
+def t_v152_uninstall_rejects_active_mode_plugin():
+    """A plugin bound to the current mode must not be uninstalled — it would
+    leave the next /api/server/start booting into a mode whose plugins were
+    just deleted.  Test stages a fake local plugin bound to Practice + sets
+    current_mode=Practice then asserts 409."""
+    import os as _os, json as _json, tempfile, shutil
+    ac, app, c = _new_app()
+    _login(c)
+    from cs2servergui import web as _web, core as _core
+    for tok in list(_web._sessions.keys()):
+        _web._sessions[tok]['is_local'] = True
+
+    user_dir = tempfile.mkdtemp(prefix='oblivion_uninstall_test_')
+    original_resolve = _core._resolve_user_plugins_dir
+    _core._resolve_user_plugins_dir = lambda: user_dir
+    try:
+        slug = 'test-mode-bound'
+        plug = _os.path.join(user_dir, slug)
+        _os.makedirs(plug)
+        with open(_os.path.join(plug, 'plugin.json'), 'w', encoding='utf-8') as f:
+            _json.dump({
+                'schema_version': 1, 'slug': slug, 'display_name': 'Mode-bound',
+                'kind': 'css', 'modes': ['Practice'],
+                'copy_rules': [{'src': 'addons', 'dst': 'addons'}],
+            }, f)
+        # Rebuild discovery so the test plugin is seen.
+        _core._DISCOVERED_PLUGINS = _core._discover_plugins()
+        (_core._PLUGIN_KIND, _core._PLUGIN_VERIFY_FILES,
+         _core._PLUGIN_COPY_RULES, _core._PLUGIN_CLEANUP_ITEMS,
+         _core._MODE_PLUGIN_NAMES) = _core._populate_plugin_tables(
+            _core._DISCOVERED_PLUGINS)
+        ac.current_mode = 'Practice'
+
+        r = c.post('/api/plugins/uninstall', json={'slug': slug})
+        if r.status_code != 409:
+            return False, f'status={r.status_code} body={r.get_data(as_text=True)[:160]!r}'
+        body = r.get_json() or {}
+        if 'active mode' not in (body.get('error') or '').lower():
+            return False, f'error message should mention active mode: {body!r}'
+        # Folder should still exist (rejection means no destructive op).
+        if not _os.path.isdir(plug):
+            return False, 'plugin folder was removed despite 409'
+        return True, 'mode-bound plugin uninstall correctly blocked'
+    finally:
+        _core._resolve_user_plugins_dir = original_resolve
+        shutil.rmtree(user_dir, ignore_errors=True)
+        # Restore discovery to pristine state.
+        _core._DISCOVERED_PLUGINS = _core._discover_plugins()
+        (_core._PLUGIN_KIND, _core._PLUGIN_VERIFY_FILES,
+         _core._PLUGIN_COPY_RULES, _core._PLUGIN_CLEANUP_ITEMS,
+         _core._MODE_PLUGIN_NAMES) = _core._populate_plugin_tables(
+            _core._DISCOVERED_PLUGINS)
+t('plugins (v0.15.2): uninstall refuses plugin bound to active mode with 409',
+  t_v152_uninstall_rejects_active_mode_plugin)
+
+
+def t_v152_uninstall_happy_path():
+    """Local plugin not bound to current mode → 200, folder removed,
+    derived tables rebuilt."""
+    import os as _os, json as _json, tempfile, shutil
+    ac, app, c = _new_app()
+    _login(c)
+    from cs2servergui import web as _web, core as _core
+    for tok in list(_web._sessions.keys()):
+        _web._sessions[tok]['is_local'] = True
+
+    user_dir = tempfile.mkdtemp(prefix='oblivion_uninstall_test_')
+    original_resolve = _core._resolve_user_plugins_dir
+    _core._resolve_user_plugins_dir = lambda: user_dir
+    try:
+        slug = 'test-happy-uninstall'
+        plug = _os.path.join(user_dir, slug)
+        _os.makedirs(plug)
+        with open(_os.path.join(plug, 'plugin.json'), 'w', encoding='utf-8') as f:
+            _json.dump({
+                'schema_version': 1, 'slug': slug, 'display_name': 'Happy',
+                'kind': 'css', 'modes': ['Casual'],
+                'copy_rules': [{'src': 'addons', 'dst': 'addons'}],
+            }, f)
+        _core._DISCOVERED_PLUGINS = _core._discover_plugins()
+        (_core._PLUGIN_KIND, _core._PLUGIN_VERIFY_FILES,
+         _core._PLUGIN_COPY_RULES, _core._PLUGIN_CLEANUP_ITEMS,
+         _core._MODE_PLUGIN_NAMES) = _core._populate_plugin_tables(
+            _core._DISCOVERED_PLUGINS)
+        ac.current_mode = 'Competitive'    # no plugins for this mode
+
+        r = c.post('/api/plugins/uninstall', json={'slug': slug})
+        if r.status_code != 200:
+            return False, f'status={r.status_code} body={r.get_data(as_text=True)[:160]!r}'
+        if _os.path.isdir(plug):
+            return False, 'folder still on disk after uninstall'
+        # Discovery should no longer contain the slug.
+        if slug in _core._DISCOVERED_PLUGINS:
+            return False, 'slug still in _DISCOVERED_PLUGINS after uninstall'
+        return True, 'uninstall removed folder + rebuilt discovery'
+    finally:
+        _core._resolve_user_plugins_dir = original_resolve
+        shutil.rmtree(user_dir, ignore_errors=True)
+        _core._DISCOVERED_PLUGINS = _core._discover_plugins()
+        (_core._PLUGIN_KIND, _core._PLUGIN_VERIFY_FILES,
+         _core._PLUGIN_COPY_RULES, _core._PLUGIN_CLEANUP_ITEMS,
+         _core._MODE_PLUGIN_NAMES) = _core._populate_plugin_tables(
+            _core._DISCOVERED_PLUGINS)
+t('plugins (v0.15.2): uninstall happy path — local plugin removed + discovery rebuilt',
+  t_v152_uninstall_happy_path)
+
+
+def t_v152_reload_endpoint_returns_stats():
+    """POST /api/plugins/reload re-runs discovery and reports stats so the
+    SPA can toast "8 plugins (8 bundled + 0 local)"."""
+    ac, app, c = _new_app()
+    _login(c)
+    from cs2servergui import web as _web
+    for tok in list(_web._sessions.keys()):
+        _web._sessions[tok]['is_local'] = True
+    r = c.post('/api/plugins/reload')
+    if r.status_code != 200:
+        return False, f'status={r.status_code}'
+    body = r.get_json() or {}
+    stats = body.get('stats') or {}
+    if 'total' not in stats or 'bundled' not in stats or 'local' not in stats:
+        return False, f'stats missing keys: {stats!r}'
+    return stats['total'] >= 1, f'stats={stats}'
+t('plugins (v0.15.2): /api/plugins/reload returns total + bundled + local stats',
+  t_v152_reload_endpoint_returns_stats)
+
+
+def t_v152_install_from_url_rejects_plain_http():
+    """Custom-URL install must reject plain http:// (except localhost)
+    so an operator copy-pasting from a forum can't accidentally download
+    over a downgradable transport."""
+    ac, app, c = _new_app()
+    _login(c)
+    from cs2servergui import web as _web
+    for tok in list(_web._sessions.keys()):
+        _web._sessions[tok]['is_local'] = True
+    r = c.post('/api/plugins/install_from_url',
+               json={'url': 'http://example.com/plugin.zip'})
+    if r.status_code != 400:
+        return False, f'status={r.status_code}'
+    body = r.get_json() or {}
+    msg = (body.get('error') or '').lower()
+    return ('http://' in msg or 'https://' in msg), \
+           f'error should mention scheme: {body!r}'
+t('plugins (v0.15.2): install_from_url rejects plain http (non-localhost)',
+  t_v152_install_from_url_rejects_plain_http)
+
+
+def t_v152_install_from_url_rejects_registry_url():
+    """Operator must not bypass the catalog cross-check by installing
+    the registry URL as a "raw" zip — there's a dedicated endpoint."""
+    ac, app, c = _new_app()
+    _login(c)
+    from cs2servergui import web as _web
+    for tok in list(_web._sessions.keys()):
+        _web._sessions[tok]['is_local'] = True
+    from cs2servergui.config import OBLIVION_REGISTRY_URL
+    r = c.post('/api/plugins/install_from_url',
+               json={'url': OBLIVION_REGISTRY_URL})
+    if r.status_code != 400:
+        return False, f'status={r.status_code}'
+    body = r.get_json() or {}
+    return 'install_from_registry' in (body.get('error') or ''), \
+           f'error should point at registry endpoint: {body!r}'
+t('plugins (v0.15.2): install_from_url refuses the registry URL itself',
+  t_v152_install_from_url_rejects_registry_url)
+
+
+def t_v152_install_from_url_happy_path_no_sha():
+    """End-to-end install from a URL.  We mock the network with a zip
+    blob; sha256 is omitted to exercise the "unverified" path."""
+    import hashlib as _h, json as _json, os as _os, tempfile, shutil
+    from unittest import mock
+    from cs2servergui import registry_client, core as _core
+    slug = 'test-url-install'
+    plugin_json = _json.dumps({
+        'schema_version': 1, 'slug': slug, 'display_name': 'URL Install',
+        'kind': 'css', 'modes': ['Practice'],
+        'copy_rules': [{'src': 'addons', 'dst': 'addons'}],
+    }).encode('utf-8')
+    zip_bytes = _make_test_zip({f'{slug}/plugin.json': plugin_json})
+    user_dir = tempfile.mkdtemp(prefix='oblivion_url_install_')
+    original_resolve = _core._resolve_user_plugins_dir
+    _core._resolve_user_plugins_dir = lambda: user_dir
+    try:
+        with mock.patch.object(registry_client, '_http_fetch',
+                                return_value=zip_bytes):
+            result = registry_client.install_from_url(
+                'https://example.invalid/p.zip', expected_sha256=None)
+        # Must have written the folder
+        if not _os.path.isfile(_os.path.join(user_dir, slug, 'plugin.json')):
+            return False, 'plugin.json not on disk'
+        if result.get('sha256_provided') is not False:
+            return False, f'sha256_provided should be False: {result!r}'
+        if result.get('sha256') != _h.sha256(zip_bytes).hexdigest():
+            return False, f'sha256 in result should equal computed: {result!r}'
+        return True, f'installed {slug} from URL without sha256'
+    finally:
+        _core._resolve_user_plugins_dir = original_resolve
+        shutil.rmtree(user_dir, ignore_errors=True)
+t('plugins (v0.15.2): install_from_url happy path (no sha256)',
+  t_v152_install_from_url_happy_path_no_sha)
+
+
+def t_v152_install_from_url_rejects_slug_mismatch():
+    """expected_slug arg: when supplied, the extracted plugin.json must
+    declare the same slug.  Defends against the operator pasting a URL
+    they thought was for plugin A but actually serves plugin B."""
+    import json as _json, tempfile, shutil
+    from unittest import mock
+    from cs2servergui import registry_client, core as _core
+    zip_bytes = _make_test_zip({
+        'actually-different/plugin.json': _json.dumps({
+            'schema_version': 1, 'slug': 'actually-different',
+            'display_name': 'Different', 'kind': 'css', 'modes': [],
+            'copy_rules': [],
+        }).encode('utf-8'),
+    })
+    user_dir = tempfile.mkdtemp(prefix='oblivion_url_test_')
+    original_resolve = _core._resolve_user_plugins_dir
+    _core._resolve_user_plugins_dir = lambda: user_dir
+    try:
+        with mock.patch.object(registry_client, '_http_fetch',
+                                return_value=zip_bytes):
+            try:
+                registry_client.install_from_url(
+                    'https://example.invalid/p.zip',
+                    expected_slug='what-i-expected')
+                return False, 'expected_slug mismatch should have been rejected'
+            except registry_client.RegistryError as exc:
+                if 'expected' not in str(exc).lower():
+                    return False, f'wrong error: {exc!r}'
+                return True, f'expected_slug mismatch rejected: {exc}'
+    finally:
+        _core._resolve_user_plugins_dir = original_resolve
+        shutil.rmtree(user_dir, ignore_errors=True)
+t('plugins (v0.15.2): install_from_url rejects expected_slug mismatch',
+  t_v152_install_from_url_rejects_slug_mismatch)
+
+
+def t_v152_install_from_url_rejects_multiple_plugin_jsons():
+    """Zip with multiple plugin.json files at different depths is
+    ambiguous — refuse instead of guessing which one to use."""
+    import tempfile, shutil
+    from unittest import mock
+    from cs2servergui import registry_client, core as _core
+    zip_bytes = _make_test_zip({
+        'plugin-a/plugin.json': b'{"slug":"a"}',
+        'plugin-b/plugin.json': b'{"slug":"b"}',
+    })
+    user_dir = tempfile.mkdtemp(prefix='oblivion_ambig_')
+    original_resolve = _core._resolve_user_plugins_dir
+    _core._resolve_user_plugins_dir = lambda: user_dir
+    try:
+        with mock.patch.object(registry_client, '_http_fetch',
+                                return_value=zip_bytes):
+            try:
+                registry_client.install_from_url('https://example.invalid/x.zip')
+                return False, 'multi-plugin.json zip should have been rejected'
+            except registry_client.RegistryError as exc:
+                if 'multiple' not in str(exc).lower():
+                    return False, f'wrong error: {exc!r}'
+                return True, f'ambiguous zip rejected: {exc}'
+    finally:
+        _core._resolve_user_plugins_dir = original_resolve
+        shutil.rmtree(user_dir, ignore_errors=True)
+t('plugins (v0.15.2): install_from_url refuses zip with multiple plugin.json files',
+  t_v152_install_from_url_rejects_multiple_plugin_jsons)
+
+
+def t_v152_api_plugins_surfaces_version_fields():
+    """Every entry in /api/plugins.bundled now carries installed_version,
+    latest_version, update_available — the SPA needs all three to render
+    the Update pill correctly."""
+    ac, app, c = _new_app()
+    _login(c)
+    from cs2servergui import web as _web
+    for tok in list(_web._sessions.keys()):
+        _web._sessions[tok]['is_local'] = True
+    r = c.get('/api/plugins')
+    if r.status_code != 200:
+        return False, f'status={r.status_code}'
+    body = r.get_json() or {}
+    for entry in (body.get('bundled') or []):
+        for k in ('installed_version', 'latest_version', 'update_available'):
+            if k not in entry:
+                return False, f"entry {entry.get('slug')!r} missing {k!r}"
+    return True, 'all entries carry version fields'
+t('plugins (v0.15.2): /api/plugins surfaces version + update_available fields',
+  t_v152_api_plugins_surfaces_version_fields)
+
+
+def t_v152_api_plugins_update_available_end_to_end():
+    """Audit-fix integration test: prove that when the registry advertises
+    a higher version than what's installed locally, /api/plugins.bundled
+    surfaces update_available=True on that slug.  Closes the test-coverage
+    gap the adversarial review identified: the component pieces are tested
+    (has_update unit tests, fetch_catalog mocked), but the GLUE in web.py
+    that wires them together had zero end-to-end coverage.  A regression
+    that flipped has_update's arg order or zeroed reg_index would
+    previously pass every test; now this one fails.
+
+    The bundled plugins don't have a `version` field, so registry advertise
+    can't be compared against them (has_update needs both sides).  We stage
+    a fake LOCAL plugin with a known version, then mock fetch_catalog to
+    return a higher version for the same slug."""
+    import os as _os, json as _json, tempfile, shutil
+    from unittest import mock
+    ac, app, c = _new_app()
+    _login(c)
+    from cs2servergui import web as _web, core as _core, registry_client as _reg
+    for tok in list(_web._sessions.keys()):
+        _web._sessions[tok]['is_local'] = True
+
+    user_dir = tempfile.mkdtemp(prefix='oblivion_update_int_')
+    original_resolve = _core._resolve_user_plugins_dir
+    _core._resolve_user_plugins_dir = lambda: user_dir
+    try:
+        slug = 'updatable-test-plugin'
+        plug = _os.path.join(user_dir, slug)
+        _os.makedirs(plug)
+        with open(_os.path.join(plug, 'plugin.json'), 'w', encoding='utf-8') as f:
+            _json.dump({
+                'schema_version': 1, 'slug': slug,
+                'display_name': 'Updatable', 'author': 't',
+                'kind': 'css', 'modes': ['Practice'],
+                'copy_rules': [{'src': 'addons', 'dst': 'addons'}],
+                'version': '1.0.0',
+            }, f)
+        # Force a rediscovery so the local plugin is in _DISCOVERED_PLUGINS.
+        _core._DISCOVERED_PLUGINS = _core._discover_plugins()
+        (_core._PLUGIN_KIND, _core._PLUGIN_VERIFY_FILES,
+         _core._PLUGIN_COPY_RULES, _core._PLUGIN_CLEANUP_ITEMS,
+         _core._MODE_PLUGIN_NAMES) = _core._populate_plugin_tables(
+            _core._DISCOVERED_PLUGINS)
+
+        # Mock the registry to advertise version 2.0.0 for the same slug.
+        fake_catalog = {
+            'schema_version': 1,
+            'plugins': [{
+                'slug': slug, 'display_name': 'Updatable',
+                'kind': 'css', 'modes': ['Practice'],
+                'versions': [{
+                    'version': '2.0.0',
+                    'download_url': 'https://example.invalid/u.zip',
+                    'sha256': 'a' * 64,
+                }],
+            }],
+        }
+        with mock.patch.object(_reg, 'fetch_catalog', return_value=fake_catalog):
+            r = c.get('/api/plugins')
+        if r.status_code != 200:
+            return False, f'status={r.status_code}'
+        body = r.get_json() or {}
+        entry = next((e for e in (body.get('bundled') or [])
+                      if e.get('slug') == slug), None)
+        if not entry:
+            return False, f'{slug!r} not in /api/plugins response'
+        if entry.get('installed_version') != '1.0.0':
+            return False, f"installed_version={entry.get('installed_version')!r} expected '1.0.0'"
+        if entry.get('latest_version') != '2.0.0':
+            return False, f"latest_version={entry.get('latest_version')!r} expected '2.0.0'"
+        if entry.get('update_available') is not True:
+            return False, (f'update_available={entry.get("update_available")!r} — '
+                           'wiring broken in web.py reg_index/has_update integration')
+        return True, 'end-to-end: registry 2.0.0 vs installed 1.0.0 → update_available=True'
+    finally:
+        _core._resolve_user_plugins_dir = original_resolve
+        shutil.rmtree(user_dir, ignore_errors=True)
+        _core._DISCOVERED_PLUGINS = _core._discover_plugins()
+        (_core._PLUGIN_KIND, _core._PLUGIN_VERIFY_FILES,
+         _core._PLUGIN_COPY_RULES, _core._PLUGIN_CLEANUP_ITEMS,
+         _core._MODE_PLUGIN_NAMES) = _core._populate_plugin_tables(
+            _core._DISCOVERED_PLUGINS)
+t('plugins (v0.15.2): update_available wiring is end-to-end correct (web.py + has_update integration)',
+  t_v152_api_plugins_update_available_end_to_end)
+
+
 # ─── v0.14.0 slice 5 — Runtime bootstrap detection ───────────────────────
 
 def t_plugins_runtime_install_state_surfaced():
