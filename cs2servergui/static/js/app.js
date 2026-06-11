@@ -2254,11 +2254,16 @@ async function loadWorkshopMapsGrid(grid, mode) {
 /* Shared between the page render and post-action re-render so an
  * Activate / Switch-to-vanilla doesn't tear down + rebuild the whole tab. */
 async function _renderPluginsTab() {
-  let data, packsData;
+  let data, packsData, registryData;
   try {
-    [data, packsData] = await Promise.all([
+    // v0.15.1 slice 2 — registry fetch is best-effort.  If it fails
+    // (offline, registry repo not published yet, malformed cache) we
+    // still want the rest of the tab to render.  Errors get swallowed
+    // here and surfaced inline in the Available card.
+    [data, packsData, registryData] = await Promise.all([
       api.plugins.list(),
       api.plugins.packs(),
+      api.plugins.registry().catch(e => ({ _error: e.message })),
     ]);
   } catch (e) {
     el('plugins-runtime-body').innerHTML =
@@ -2513,6 +2518,76 @@ async function _renderPluginsTab() {
     <div class="plugins-grid">${items}</div>
   `;
 
+  // ─── Registry section ──────────────────────────────────────────
+  // v0.15.1 slice 2 — Community plugin registry.  Shows entries from
+  // OblivionPluginRegistry that aren't already installed locally.
+  // Click Install → backend downloads + sha256-verifies + extracts.
+  const regBody = el('plugins-registry-body');
+  if (regBody) {
+    if (registryData && registryData._error) {
+      regBody.innerHTML = `
+        <div class="text-sm text-sub">
+          Registry currently unreachable: ${esc(registryData._error)}
+          — the locally bundled and installed plugins still work.
+        </div>`;
+    } else {
+      const cat       = (registryData && registryData.catalog) || {};
+      const status    = (registryData && registryData.status) || {};
+      const installed = new Set((registryData && registryData.installed_slugs) || []);
+      const available = (cat.plugins || []).filter(p => !installed.has(p.slug));
+      const ageHours  = status.fetched_at
+        ? Math.max(0, Math.round((Date.now() / 1000 - status.fetched_at) / 3600))
+        : null;
+      const ageLabel = ageHours == null
+        ? '<span class="text-sub">never fetched</span>'
+        : (status.stale
+            ? `<span class="text-sub">refreshed ${ageHours}h ago (stale)</span>`
+            : `<span class="text-sub">refreshed ${ageHours}h ago</span>`);
+      if (cat._offline) {
+        regBody.innerHTML = `
+          <div class="text-sm text-sub">
+            Registry is offline. The catalog repo isn't published yet, or
+            this machine has no internet right now.
+            <br>${ageLabel}
+          </div>`;
+      } else if (!available.length) {
+        regBody.innerHTML = `
+          <div class="text-sm text-sub">
+            ${(cat.plugins || []).length === 0
+                ? 'Registry is empty — no community plugins published yet.'
+                : 'Everything in the registry is already installed locally.'}
+            <br>${ageLabel}
+          </div>`;
+      } else {
+        const items = available.map(p => {
+          const v0 = (p.versions || [])[0] || {};
+          return `
+            <div class="plugin-card" data-slug="${esc(p.slug)}">
+              <div class="plugin-card-head">
+                <span class="plugin-card-title">${esc(p.display_name || p.slug)}</span>
+                <span class="pill pill-mute">v${esc(v0.version || '?')}</span>
+              </div>
+              <div class="text-sm">${esc(p.summary || '')}</div>
+              ${p.modes && p.modes.length
+                  ? `<div class="text-sm text-sub">Used by: ${p.modes.map(esc).join(', ')}</div>`
+                  : ''}
+              ${p.author ? `<div class="text-sm text-sub">By ${esc(p.author)}</div>` : ''}
+              <button class="btn btn-sm plugins-install-btn"
+                      data-slug="${esc(p.slug)}"
+                      data-name="${esc(p.display_name || p.slug)}"
+                      data-version="${esc(v0.version || '')}"
+                      ${actionsBlocked ? 'disabled' : ''}>
+                Install
+              </button>
+            </div>`;
+        }).join('');
+        regBody.innerHTML = `
+          <div class="text-sm text-sub" style="margin-bottom:10px">${ageLabel}</div>
+          <div class="plugins-grid">${items}</div>`;
+      }
+    }
+  }
+
   // ─── Wire button handlers (delegated on the freshly-rendered DOM) ──
   document.querySelectorAll('.plugins-activate-btn').forEach(btn => {
     btn.addEventListener('click', () => _pluginActivate(btn));
@@ -2520,8 +2595,51 @@ async function _renderPluginsTab() {
   document.querySelectorAll('.plugins-pack-btn').forEach(btn => {
     btn.addEventListener('click', () => _pluginApplyPack(btn));
   });
+  document.querySelectorAll('.plugins-install-btn').forEach(btn => {
+    btn.addEventListener('click', () => _pluginInstallFromRegistry(btn));
+  });
   const vBtn = el('plugins-vanilla-btn');
   if (vBtn) vBtn.addEventListener('click', _pluginVanilla);
+  const refreshBtn = el('plugins-registry-refresh');
+  if (refreshBtn) refreshBtn.addEventListener('click', _pluginsRegistryRefresh);
+}
+
+async function _pluginsRegistryRefresh() {
+  const btn = el('plugins-registry-refresh');
+  if (btn) { btn.disabled = true; btn.textContent = 'Refreshing…'; }
+  try {
+    await api.plugins.registryRefresh();
+    toast('Registry refreshed');
+  } catch (e) {
+    toast(`Refresh failed: ${e.message}`, 'var(--bad)');
+  } finally {
+    await _renderPluginsTab();
+  }
+}
+
+async function _pluginInstallFromRegistry(btn) {
+  const slug    = btn.dataset.slug;
+  const name    = btn.dataset.name;
+  const version = btn.dataset.version || null;
+  if (!window.confirm(
+    `Install ${name}?\n\n`
+    + `This downloads the plugin from the OblivionPluginRegistry and `
+    + `extracts it into %APPDATA%\\Oblivion Server Tool\\plugins\\${slug}\\.\n\n`
+    + `It will appear in the Library after install — click Activate to deploy it.`
+  )) return;
+  const allButtons = document.querySelectorAll(
+    '#plugins-registry-body button, #plugins-library-body button, #plugins-vanilla-btn'
+  );
+  allButtons.forEach(b => b.disabled = true);
+  toast(`Installing ${name}…`);
+  try {
+    const r = await api.plugins.installFromRegistry(slug, version);
+    toast(`✓ ${name} v${r.result.version} installed (${r.result.files_written} files)`, 'var(--ok)');
+  } catch (e) {
+    toast(`Install failed: ${e.message}`, 'var(--bad)');
+  } finally {
+    await _renderPluginsTab();
+  }
 }
 
 /* v0.14.0 slice 5 — guided runtime bootstrap.
@@ -2799,11 +2917,24 @@ pages['plugins'] = async function() {
       <div class="section-hdr">
         <span class="card-title" style="margin-bottom:0">Plugin Library</span>
         <span class="text-sm text-sub">
-          Per-plugin activation — community registry coming in v0.14
+          Per-plugin activation — bundled + locally-installed
         </span>
       </div>
       <div id="plugins-library-body">
         <div class="text-sm text-sub">Loading…</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:14px">
+      <div class="section-hdr">
+        <span class="card-title" style="margin-bottom:0">Available to Install (Community)</span>
+        <button class="btn btn-sm" id="plugins-registry-refresh"
+                title="Re-fetch the registry catalog (24h cache)">
+          ↻ Refresh
+        </button>
+      </div>
+      <div id="plugins-registry-body">
+        <div class="text-sm text-sub">Loading registry…</div>
       </div>
     </div>
   `;

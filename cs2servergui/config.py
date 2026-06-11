@@ -66,7 +66,33 @@ DEPOTDL_RELEASE_URL = (
 # ── App self-update ────────────────────────────────────────────────────────────
 # Bump APP_VERSION before each release tag, then push and create a GitHub
 # release tagged "v<APP_VERSION>" — all connected clients will see the update.
-APP_VERSION      = "0.15.0"
+APP_VERSION      = "0.15.1"
+
+# ── Plugin registry (v0.15 slice 2) ────────────────────────────────────────────
+# Where the community plugin catalog lives.  Repo: OblivionPluginRegistry.
+# Pointed at GitHub raw so the app reads the file directly without a build step.
+# If the URL changes (rename, move to another mirror), bump this and ship —
+# the app will fall back to its last cached catalog while operators upgrade.
+#
+# When the registry repo doesn't exist yet (pre-launch), the fetch step
+# returns an empty catalog gracefully so the SPA's "Available to install"
+# section is empty rather than showing a network error.
+OBLIVION_REGISTRY_URL = (
+    "https://raw.githubusercontent.com/jacquesvniekerk-eng/"
+    "OblivionPluginRegistry/main/catalog.json"
+)
+# Catalog cache lives next to oblivion_config.json so it persists across
+# app restarts and survives in-place upgrades.  TTL = 24 h — refreshed
+# on-demand via "Refresh registry" button (added below) or on startup if
+# the cache is missing/expired.
+REGISTRY_CACHE_TTL_SECONDS = 86400
+# Hard ceiling on registry-served plugin download size.  A hostile or
+# misconfigured catalog can't drain disk / OOM the app this way.  50 MiB
+# is comfortably above every bundled plugin's footprint (warcraft is the
+# biggest at ~3 MB) but small enough that a malicious entry can't ship
+# a hundred-MB payload.
+REGISTRY_MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024
+REGISTRY_FETCH_TIMEOUT_SECONDS = 12   # full fetch (connect + read)
 APP_REPO         = "jacquesvniekerk-eng/OblivionServerTool"
 APP_RELEASES_URL = f"https://github.com/{APP_REPO}/releases/latest"
 APP_API_URL      = f"https://api.github.com/repos/{APP_REPO}/releases/latest"

@@ -922,6 +922,78 @@ def create_flask(core: AppCore) -> Flask:
             "restarting": False,
         })
 
+    # v0.15.1 slice 2 — Community plugin registry.
+    # Read: returns the cached catalog + freshness metadata.
+    # Refresh: forces a re-fetch (POST so it's idempotent-ish but cache-busting).
+    # Install: downloads + sha256-verifies + extracts a registry plugin into
+    #          %APPDATA%/.../plugins/<slug>/ and re-runs discovery.
+    @app.route("/api/plugins/registry")
+    @require_auth
+    @require_local
+    def api_plugins_registry():
+        from . import registry_client
+        catalog = registry_client.fetch_catalog(force=False)
+        status  = registry_client.get_registry_status()
+        # SPA wants to know which registry plugins are already installed
+        # locally so it can hide them (or show "Update available" in a
+        # later slice).  We just include the installed-slug set here and
+        # let the SPA do the filtering.
+        from .core import _DISCOVERED_PLUGINS
+        installed_slugs = sorted(_DISCOVERED_PLUGINS.keys())
+        return jsonify({
+            "catalog":         catalog,
+            "status":          status,
+            "installed_slugs": installed_slugs,
+        })
+
+    @app.route("/api/plugins/registry/refresh", methods=["POST"])
+    @require_auth
+    @require_local
+    def api_plugins_registry_refresh():
+        from . import registry_client
+        catalog = registry_client.fetch_catalog(force=True)
+        status  = registry_client.get_registry_status()
+        return jsonify({"catalog": catalog, "status": status})
+
+    @app.route("/api/plugins/install_from_registry", methods=["POST"])
+    @require_auth
+    @require_local
+    def api_plugins_install_from_registry():
+        from . import registry_client
+        d       = request.get_json(silent=True) or {}
+        slug    = (d.get("slug") or "").strip()
+        version = (d.get("version") or "").strip() or None
+        if not slug:
+            return jsonify({"error": "slug is required"}), 400
+        try:
+            result = registry_client.install_plugin(slug, version=version)
+        except registry_client.RegistryError as exc:
+            # Differentiate "operator-fixable" errors (404, sha mismatch,
+            # bad zip) from infrastructure errors.  Both are 400 here —
+            # the message tells the operator what to retry.
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:  # pragma: no cover — defensive
+            return jsonify({"error": f"unexpected: {exc!r}"}), 500
+
+        # The plugin is now on disk under %APPDATA%/.../plugins/<slug>/.
+        # Re-run discovery so subsequent /api/plugins reflects it without
+        # an app restart.
+        from . import core as _core
+        fresh = _core._discover_plugins()
+        # Rebuild the derived tables in place.  Tuple-unpack matches the
+        # module-load assignment.
+        (_core._PLUGIN_KIND,
+         _core._PLUGIN_VERIFY_FILES,
+         _core._PLUGIN_COPY_RULES,
+         _core._PLUGIN_CLEANUP_ITEMS,
+         _core._MODE_PLUGIN_NAMES) = _core._populate_plugin_tables(fresh)
+        _core._DISCOVERED_PLUGINS = fresh
+
+        return jsonify({
+            "ok":     True,
+            "result": result,
+        })
+
     @app.route("/api/plugins/packs")
     @require_auth
     def api_plugins_packs():

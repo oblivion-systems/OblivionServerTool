@@ -3153,6 +3153,244 @@ t('plugins (v0.15.0): /api/plugins surfaces source per entry',
   t_v15_api_plugins_surfaces_source)
 
 
+# ─── v0.15.1 slice 2 — Community plugin registry ─────────────────────────
+
+def _make_test_zip(files: dict) -> bytes:
+    """Build an in-memory zip with the given {relpath: bytes} entries."""
+    import io as _io, zipfile as _zf
+    buf = _io.BytesIO()
+    with _zf.ZipFile(buf, 'w', _zf.ZIP_DEFLATED) as z:
+        for path, data in files.items():
+            z.writestr(path, data)
+    return buf.getvalue()
+
+
+def t_v15_registry_fetch_falls_back_to_empty_on_offline():
+    """Audit-grade safety: when the registry repo doesn't exist yet
+    (the case for every operator until task #90 lands the repo),
+    fetch_catalog returns an empty-but-valid catalog, NOT a crash."""
+    from unittest import mock
+    from cs2servergui import registry_client
+    # Force a hard failure on every HTTP attempt.
+    with mock.patch.object(registry_client, '_http_fetch',
+                            side_effect=registry_client.RegistryError('boom')):
+        with mock.patch.object(registry_client, '_load_cached_catalog',
+                                return_value=None):
+            catalog = registry_client.fetch_catalog(force=True)
+    return (isinstance(catalog, dict)
+            and catalog.get('schema_version') == 1
+            and catalog.get('plugins') == []
+            and catalog.get('_offline') is True), \
+           f'catalog={catalog!r}'
+t('registry (v0.15.1): offline fetch returns empty catalog with _offline flag',
+  t_v15_registry_fetch_falls_back_to_empty_on_offline)
+
+
+def t_v15_registry_fetch_uses_cache_when_fresh():
+    """Within the 24h TTL window, fetch_catalog should NOT hit the
+    network — it returns the cached catalog directly."""
+    from unittest import mock
+    from cs2servergui import registry_client
+    import time as _t
+    cached = {
+        'schema_version': 1,
+        'fetched_at': int(_t.time()),    # right now → fresh
+        'source_url': 'https://example.invalid/catalog.json',
+        'catalog': {'schema_version': 1, 'plugins': [{'slug': 'cached',
+                                                       'versions': [{'version': '1', 'download_url': 'x', 'sha256': 'y'}]}]},
+    }
+    http_calls = []
+    def _http_spy(*a, **kw):
+        http_calls.append(a)
+        return b'{"schema_version":1,"plugins":[]}'
+    with mock.patch.object(registry_client, '_load_cached_catalog',
+                            return_value=cached):
+        with mock.patch.object(registry_client, '_http_fetch', side_effect=_http_spy):
+            result = registry_client.fetch_catalog(force=False)
+    if http_calls:
+        return False, f'fresh cache should not hit network; calls={len(http_calls)}'
+    if not any(p.get('slug') == 'cached' for p in result.get('plugins', [])):
+        return False, f'expected cached entry in result; got {result!r}'
+    return True, 'fresh cache served without network hit'
+t('registry (v0.15.1): fresh cache short-circuits network fetch',
+  t_v15_registry_fetch_uses_cache_when_fresh)
+
+
+def t_v15_registry_install_rejects_sha256_mismatch():
+    """Bad sha256 → RegistryError + nothing written to disk.
+    Critical safety guarantee: this is the line of defence against
+    transport tampering even if the registry repo itself is honest."""
+    from unittest import mock
+    from cs2servergui import registry_client
+    fake_catalog = {
+        'schema_version': 1,
+        'plugins': [{
+            'slug': 'evil-plugin',
+            'display_name': 'Evil',
+            'kind': 'css',
+            'modes': [],
+            'versions': [{
+                'version': '1.0.0',
+                'download_url': 'https://example.invalid/evil.zip',
+                'sha256': 'a' * 64,    # wrong sha
+            }],
+        }],
+    }
+    zip_bytes = _make_test_zip({'evil-plugin/plugin.json': b'{}'})
+    with mock.patch.object(registry_client, 'fetch_catalog', return_value=fake_catalog):
+        with mock.patch.object(registry_client, '_http_fetch', return_value=zip_bytes):
+            try:
+                registry_client.install_plugin('evil-plugin')
+                return False, 'install should have rejected sha mismatch'
+            except registry_client.RegistryError as exc:
+                if 'sha256 mismatch' not in str(exc):
+                    return False, f'wrong error: {exc!r}'
+                return True, f'sha256 mismatch rejected: {exc}'
+t('registry (v0.15.1): install rejects sha256 mismatch',
+  t_v15_registry_install_rejects_sha256_mismatch)
+
+
+def t_v15_registry_install_rejects_zip_slip():
+    """A zip with a member like '../../../../oblivion_config.json'
+    must be refused before extraction.  Safety guarantee — even with a
+    correct sha256, a malicious zip can't escape the plugins dir."""
+    import hashlib as _h
+    from unittest import mock
+    from cs2servergui import registry_client
+    # Build a zip with a path-traversal entry.
+    evil_zip = _make_test_zip({
+        '../../../bad-thing.txt': b'pwned',
+        'innocent-plugin/plugin.json': b'{"slug":"innocent-plugin"}',
+    })
+    fake_catalog = {
+        'schema_version': 1,
+        'plugins': [{
+            'slug': 'innocent-plugin',
+            'display_name': 'Innocent',
+            'kind': 'css',
+            'modes': [],
+            'versions': [{
+                'version': '1.0.0',
+                'download_url': 'https://example.invalid/innocent.zip',
+                'sha256': _h.sha256(evil_zip).hexdigest(),
+            }],
+        }],
+    }
+    with mock.patch.object(registry_client, 'fetch_catalog', return_value=fake_catalog):
+        with mock.patch.object(registry_client, '_http_fetch', return_value=evil_zip):
+            try:
+                registry_client.install_plugin('innocent-plugin')
+                return False, 'zip slip should have been blocked'
+            except registry_client.RegistryError as exc:
+                if 'zip slip' not in str(exc).lower():
+                    return False, f'wrong error: {exc!r}'
+                return True, f'zip slip rejected: {exc}'
+t('registry (v0.15.1): install rejects zip slip path traversal',
+  t_v15_registry_install_rejects_zip_slip)
+
+
+def t_v15_registry_install_rejects_slug_confusion():
+    """Catalog says slug=X but the extracted plugin.json declares slug=Y.
+    Reject — protects against name-confusion attacks."""
+    import hashlib as _h
+    from unittest import mock
+    from cs2servergui import registry_client
+    zip_bytes = _make_test_zip({
+        'mismatch/plugin.json': b'{"slug":"totally-different-name"}',
+    })
+    fake_catalog = {
+        'schema_version': 1,
+        'plugins': [{
+            'slug': 'mismatch',
+            'display_name': 'Mismatch',
+            'kind': 'css',
+            'modes': [],
+            'versions': [{
+                'version': '1.0.0',
+                'download_url': 'https://example.invalid/mm.zip',
+                'sha256': _h.sha256(zip_bytes).hexdigest(),
+            }],
+        }],
+    }
+    with mock.patch.object(registry_client, 'fetch_catalog', return_value=fake_catalog):
+        with mock.patch.object(registry_client, '_http_fetch', return_value=zip_bytes):
+            try:
+                registry_client.install_plugin('mismatch')
+                return False, 'slug confusion should have been rejected'
+            except registry_client.RegistryError as exc:
+                if 'slug=' not in str(exc):
+                    return False, f'wrong error: {exc!r}'
+                return True, f'slug confusion rejected: {exc}'
+t('registry (v0.15.1): install rejects slug confusion (catalog vs manifest)',
+  t_v15_registry_install_rejects_slug_confusion)
+
+
+def t_v15_registry_install_happy_path():
+    """End-to-end happy path with mocked network: catalog → download →
+    sha256 verify → extract → manifest validates → moves into
+    %APPDATA%/.../plugins/<slug>/.  Then verifies the slug appears in a
+    fresh discovery pass."""
+    import hashlib as _h, json as _json, os as _os, tempfile, shutil
+    from unittest import mock
+    from cs2servergui import registry_client, core as _core
+    slug = 'test-happy-install'
+    plugin_json = _json.dumps({
+        'schema_version': 1,
+        'slug': slug,
+        'display_name': 'Happy Install',
+        'kind': 'css',
+        'modes': ['Practice'],
+        'copy_rules': [{'src': 'addons', 'dst': 'addons'}],
+    }).encode('utf-8')
+    zip_bytes = _make_test_zip({
+        f'{slug}/plugin.json': plugin_json,
+        f'{slug}/addons/.gitkeep': b'',
+    })
+    fake_catalog = {
+        'schema_version': 1,
+        'plugins': [{
+            'slug': slug,
+            'display_name': 'Happy Install',
+            'kind': 'css',
+            'modes': ['Practice'],
+            'versions': [{
+                'version': '1.0.0',
+                'download_url': 'https://example.invalid/h.zip',
+                'sha256': _h.sha256(zip_bytes).hexdigest(),
+            }],
+        }],
+    }
+    # Redirect APPDATA-based plugin dir so the test doesn't pollute real
+    # %APPDATA%.  Restore both originals in the finally block.
+    test_user_dir = tempfile.mkdtemp(prefix='oblivion_install_test_')
+    original_resolve = _core._resolve_user_plugins_dir
+    _core._resolve_user_plugins_dir = lambda: test_user_dir
+    try:
+        with mock.patch.object(registry_client, 'fetch_catalog',
+                                return_value=fake_catalog):
+            with mock.patch.object(registry_client, '_http_fetch',
+                                    return_value=zip_bytes):
+                result = registry_client.install_plugin(slug)
+        # The plugin should now exist at <test_user_dir>/<slug>/plugin.json
+        manifest_path = _os.path.join(test_user_dir, slug, 'plugin.json')
+        if not _os.path.isfile(manifest_path):
+            return False, f'manifest not at {manifest_path!r}'
+        # Re-run discovery and confirm slug is there with source=local.
+        discovered = _core._discover_plugins()
+        if slug not in discovered:
+            return False, f'slug {slug!r} not in fresh discovery'
+        if discovered[slug].get('_source') != 'local':
+            return False, f'source not local: {discovered[slug].get("_source")!r}'
+        if result['version'] != '1.0.0' or result['files_written'] < 1:
+            return False, f'bad install result: {result!r}'
+        return True, f'installed {slug!r} → {result["files_written"]} files'
+    finally:
+        _core._resolve_user_plugins_dir = original_resolve
+        shutil.rmtree(test_user_dir, ignore_errors=True)
+t('registry (v0.15.1): install happy path — download + verify + extract',
+  t_v15_registry_install_happy_path)
+
+
 # ─── v0.14.0 slice 5 — Runtime bootstrap detection ───────────────────────
 
 def t_plugins_runtime_install_state_surfaced():
