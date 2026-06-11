@@ -215,6 +215,12 @@ const api = (() => {
       // v0.14.0: curated packs — one-click recipes (mode + map + plugins).
       packs:     ()             => get('/api/plugins/packs'),
       applyPack: (packId)       => post('/api/plugins/apply_pack', { pack_id: packId }),
+      // v0.15.1 slice 2: community plugin registry.
+      registry:        ()                    => get('/api/plugins/registry'),
+      registryRefresh: ()                    => post('/api/plugins/registry/refresh', {}),
+      installFromRegistry: (slug, version = null) =>
+        post('/api/plugins/install_from_registry',
+             version ? { slug, version } : { slug }),
     },
 
     // ── Game data ─────────────────────────────────────────────────────────
