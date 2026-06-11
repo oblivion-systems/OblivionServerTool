@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "slug": "zombie",
+  "display_name": "CS2Fixes (zombie base)",
+  "summary": "Engine-level fixes that unlock ZombieMod-style gameplay.",
+  "author": "Source2ZE",
+  "kind": "metamod",
+  "load_order": 10,
+  "modes": ["Deathmatch", "Zombie Escape"],
+  "copy_rules": [
+    { "src": "addons",      "dst": "addons" },
+    { "src": "cfg",         "dst": "cfg" },
+    { "src": "materials",   "dst": "materials" },
+    { "src": "particles",   "dst": "particles" },
+    { "src": "soundevents", "dst": "soundevents" },
+    { "src": "sounds",      "dst": "sounds" }
+  ],
+  "verify_files": [
+    "addons/metamod/cs2fixes.vdf",
+    "addons/cs2fixes/bin/win64/cs2fixes.dll"
+  ],
+  "cleanup": [
+    "addons/cs2fixes",
+    "addons/metamod/cs2fixes.vdf",
+    "cfg/cs2fixes",
+    "materials/cs2fixes",
+    "particles/cs2fixes",
+    "soundevents/cs2fixes",
+    "sounds/cs2fixes"
+  ]
+}

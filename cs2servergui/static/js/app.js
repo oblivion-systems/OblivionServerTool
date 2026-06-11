@@ -2452,10 +2452,14 @@ async function _renderPluginsTab() {
 
   // ─── Library grid ──────────────────────────────────────────────
   const items = (data.bundled || []).map(p => {
+    // v0.15.0 slice 1 — Local plugins get a different badge so operators
+    // can spot what they've added themselves vs what shipped with the .exe.
+    const isLocal = p.source === 'local';
     const stateLabel = p.deployed
       ? '<span class="pill pill-ok">Active</span>'
       : (p.source_present
-          ? '<span class="pill pill-mute">Available</span>'
+          ? (isLocal ? '<span class="pill pill-blue">Local</span>'
+                     : '<span class="pill pill-mute">Available</span>')
           : '<span class="pill pill-warn">Source missing</span>');
     const modesTxt = p.modes && p.modes.length
       ? `<div class="text-sm text-sub">Used by: ${p.modes.map(esc).join(', ')}</div>`

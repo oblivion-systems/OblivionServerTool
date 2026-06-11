@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "slug": "deathmatch",
+  "display_name": "Deathmatch",
+  "summary": "Instant respawn deathmatch with spawn protection.",
+  "author": "shobhit-pathak",
+  "kind": "css",
+  "load_order": 20,
+  "modes": ["Deathmatch"],
+  "copy_rules": [
+    { "src": "addons", "dst": "addons" }
+  ],
+  "verify_files": [
+    "addons/counterstrikesharp/plugins/Deathmatch/Deathmatch.dll"
+  ],
+  "cleanup": [
+    "addons/counterstrikesharp/plugins/Deathmatch",
+    "addons/counterstrikesharp/shared/DeathmatchAPI"
+  ]
+}

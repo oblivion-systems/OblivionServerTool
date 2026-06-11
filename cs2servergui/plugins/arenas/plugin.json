@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "slug": "arenas",
+  "display_name": "K4-Arenas",
+  "summary": "1v1 / 2v2 duel ladder with elo + queue.",
+  "author": "K4ryuu",
+  "kind": "css",
+  "load_order": 20,
+  "modes": ["1v1", "2v2"],
+  "copy_rules": [
+    { "src": "addons", "dst": "addons" }
+  ],
+  "verify_files": [
+    "addons/counterstrikesharp/plugins/K4-Arenas/K4-Arenas.dll",
+    "addons/counterstrikesharp/plugins/K4-Arenas-Bots/K4-Arenas-Bots.dll"
+  ],
+  "cleanup": [
+    "addons/counterstrikesharp/plugins/K4-Arenas",
+    "addons/counterstrikesharp/plugins/K4-Arenas-Bots",
+    "addons/counterstrikesharp/shared/K4-ArenaSharedApi",
+    "addons/counterstrikesharp/shared/KitsuneMenu",
+    "addons/counterstrikesharp/configs/plugins/K4-Arenas"
+  ]
+}

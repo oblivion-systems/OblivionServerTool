@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "slug": "jailbreak",
+  "display_name": "Jailbreak",
+  "summary": "T vs CT prison-style roleplay gamemode.",
+  "author": "CSS-Jailbreak community",
+  "kind": "css",
+  "load_order": 20,
+  "modes": ["Jailbreak"],
+  "copy_rules": [
+    { "src": "addons", "dst": "addons" }
+  ],
+  "verify_files": [
+    "addons/counterstrikesharp/plugins/Jailbreak/Jailbreak.dll"
+  ],
+  "cleanup": [
+    "addons/counterstrikesharp/plugins/Jailbreak"
+  ]
+}
