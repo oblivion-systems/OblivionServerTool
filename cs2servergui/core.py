@@ -37,7 +37,7 @@ from .config import (
     # the stale IP after a DHCP change or VPN/adapter shuffle.  Always read
     # `_config.RCON_HOST` at call time.
     RCON_PORT, RCON_PASSWORD,
-    MODE_SETTINGS, _DEFAULT_MODE,
+    MODE_SETTINGS, MODE_MAPS, _DEFAULT_MODE,
     _CONFIG_FILE,
     APP_VERSION, APP_API_URL, APP_RELEASES_URL,
     # Path constants (CS2_SERVER_DIR, CS2_PATH, STEAMCMD_PATH, WORKSHOP_DIR,
@@ -225,6 +225,140 @@ _PLUGIN_VERIFY_FILES: dict[str, list[str]] = {
                      "RetakesAllocator", "RetakesAllocator.dll"),
     ],
 }
+
+# Plugin catalog — display metadata for the Plugin Manager tab.
+#
+# v0.13.2 (task #92): hardcoded inline dict.
+# v0.14.0 slice 4 (task #90): moved to cs2servergui/registry/catalog.json
+# so new plugin entries don't need an app release.
+# v0.14.0 audit fix #4: inline fallback dict removed — silent drift between
+# the inline copy and the JSON was the real risk (audit caught that the
+# test only compared slugs, not display strings).  Now the JSON is the
+# sole source of truth.  If loading fails, an empty dict is returned and
+# the failure is logged loudly to stderr (also shows up in the .exe
+# console + Windows debug log) so a botched JSON edit is visible
+# immediately, not after the next deploy.
+#
+# Future v0.15.x layer: catalog.json gets fetched from a remote URL (the
+# OblivionPluginRegistry repo's raw.githubusercontent.com), merged with
+# the bundled file, cached locally.  The shape below is registry-
+# compatible — the "versions" array is empty for bundled-only plugins
+# and populated for registry-fetched plugins with downloadable artifacts.
+
+
+def _resolve_catalog_path() -> str:
+    """Mirror of _resolve_plugins_base for the registry/ folder.  In a
+    PyInstaller frozen .exe, sys._MEIPASS holds the temp extract root."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    candidate = os.path.join(here, "registry", "catalog.json")
+    if os.path.isfile(candidate):
+        return candidate
+    # Frozen .exe: PyInstaller extracts to sys._MEIPASS/<pkg>/registry/
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        fz = os.path.join(meipass, "cs2servergui", "registry", "catalog.json")
+        if os.path.isfile(fz):
+            return fz
+    return candidate  # return for diagnostic — load step will report not-found
+
+
+def _load_plugin_catalog() -> dict[str, dict]:
+    """Load registry/catalog.json into the same slug→meta shape the rest
+    of the codebase consumes.
+
+    On any failure (file missing, bad JSON, no plugins array), log the
+    error to stderr and return an empty dict.  The Plugin Manager tab
+    will then show "Unknown" cards instead of crashing, and the operator
+    sees the failure in the app's log drawer / diag snapshot rather than
+    silently getting stale inline-fallback data.
+    """
+    path = _resolve_catalog_path()
+    try:
+        with open(path, encoding="utf-8") as f:
+            doc = json.load(f)
+    except Exception as exc:
+        # Plain print to stderr — no logger available at module-import time,
+        # and AppCore.log doesn't exist yet.  Wraps in the same "[catalog]"
+        # prefix the runtime uses so operators can grep the .exe console.
+        print(f"[catalog] Failed to load {path!r}: {exc!r} — "
+              f"Plugin Manager will show unnamed cards until the JSON is fixed.",
+              file=sys.stderr)
+        return {}
+    out: dict[str, dict] = {}
+    for entry in (doc.get("plugins") or []):
+        slug = entry.get("slug")
+        if not slug:
+            continue
+        out[slug] = {
+            "display_name": entry.get("display_name") or slug,
+            "summary":      entry.get("summary") or "",
+            "author":       entry.get("author") or "",
+        }
+    if not out:
+        print(f"[catalog] {path!r} parsed OK but no usable 'plugins' entries — "
+              f"Plugin Manager will show unnamed cards.",
+              file=sys.stderr)
+    return out
+
+
+_PLUGIN_CATALOG: dict[str, dict] = _load_plugin_catalog()
+
+# Curated packs surfaced at the top of the Plugin Manager tab (v0.14.0 — task #91).
+# Each pack is a one-click recipe: switching to its mode auto-deploys the right
+# plugins (via _MODE_PLUGIN_NAMES) and stages the operator's most likely map.
+# The plugin list is derived, not stored — keeps packs in sync with mode→plugin
+# changes without a separate edit.  Order = SPA display order (left to right).
+#
+# Field reference:
+#   id           — stable slug used by /api/plugins/apply_pack
+#   name         — display name on the card
+#   mode         — must be a key in MODE_SETTINGS
+#   default_map  — staged as current_map on apply; must be in MODE_MAPS[mode]
+#                  (or None to skip the map stage — Jailbreak's workshop-only)
+#   summary      — one-line description shown on the card
+#   tags         — informational chips beneath the title (display-only)
+_PLUGIN_PACKS: list[dict] = [
+    {
+        "id":          "competitive_5v5",
+        "name":        "Competitive 5v5",
+        "mode":        "5v5",
+        "default_map": "de_dust2",
+        "summary":     "Tournament-style 5v5 — MatchZy knife round, pauses, demos, stats.",
+        "tags":        ["match", "tournament"],
+    },
+    {
+        "id":          "warcraft_night",
+        "name":        "Warcraft Night",
+        "mode":        "Warcraft",
+        "default_map": "de_mirage",
+        "summary":     "RPG overlay with 9 classes, XP, and abilities. Best for lobby nights.",
+        "tags":        ["casual", "rpg"],
+    },
+    {
+        "id":          "casual_deathmatch",
+        "name":        "Casual Deathmatch",
+        "mode":        "Deathmatch",
+        "default_map": "de_dust2",
+        "summary":     "Instant respawn deathmatch with spawn protection. Aim warm-up.",
+        "tags":        ["casual", "warmup"],
+    },
+    {
+        "id":          "retakes_inferno",
+        "name":        "Retakes",
+        "mode":        "Retakes",
+        "default_map": "de_inferno",
+        "summary":     "B3none bombsite retakes — curated spawns + RetakesAllocator loadouts.",
+        "tags":        ["practice"],
+    },
+    {
+        "id":          "vanilla_competitive",
+        "name":        "Vanilla Competitive",
+        "mode":        "Competitive",
+        "default_map": "de_dust2",
+        "summary":     "Stock CS2 with no managed plugins. Cleanest baseline for testing.",
+        "tags":        ["vanilla", "baseline"],
+    },
+]
 
 # Modes that need managed plugins; modes not listed → vanilla server.
 _MODE_PLUGIN_NAMES: dict[str, list[str]] = {
@@ -2807,6 +2941,90 @@ class AppCore:
             if on_done:
                 on_done(ok)
         threading.Thread(target=_do, daemon=True).start()
+
+    # ── Offline mode-switch + deploy ──────────────────────────────────────────
+    # v0.13.2 / task #92 — Plugin Manager actions.  Called from the
+    # /api/plugins/activate + /api/plugins/vanilla endpoints, which
+    # have already verified the server is stopped.
+    #
+    # change_map() is the canonical mode-switch path BUT it requires a
+    # running server and routes through RCON.  This is the offline
+    # equivalent: same lock discipline, same plugin-deploy step, no
+    # RCON.  The next /api/server/start will boot with the new mode +
+    # plugins already on disk.
+    def set_offline_mode_and_deploy(self, mode: str, caller: str = "plugin-tab",
+                                     map_name: str | None = None) -> dict:
+        """Stage a new mode for the next server start, deploying its
+        plugins synchronously.  Optionally stage a map at the same time.
+
+        Returns ``{"ok": bool, "mode": str, "map": str, "plugins": list[str],
+        "error": str | None}``.  ``deploy_plugins`` already logs its
+        own progress to the log drawer.
+
+        ``map_name`` is set under ``_lifecycle_lock`` after a successful
+        deploy, matching ``change_map``'s discipline.  Validated against
+        ``MODE_MAPS[mode]`` so a pack can't stage an off-mode map.
+        """
+        if self.running:
+            return {"ok": False, "error": "server is running",
+                    "mode": self.current_mode or "",
+                    "map":  self.current_map or "", "plugins": []}
+
+        if mode not in MODE_SETTINGS:
+            return {"ok": False, "error": f"unknown mode {mode!r}",
+                    "mode": self.current_mode or "",
+                    "map":  self.current_map or "", "plugins": []}
+
+        # Validate map against mode (None means "any workshop map" — Jailbreak).
+        if map_name:
+            mode_pool = MODE_MAPS.get(mode)
+            if mode_pool is not None and map_name not in mode_pool:
+                return {"ok": False,
+                        "error": f"map {map_name!r} not in {mode!r} pool",
+                        "mode": self.current_mode or "",
+                        "map":  self.current_map or "", "plugins": []}
+
+        with self._lifecycle_lock:
+            # Re-check inside the lock — a concurrent /api/server/start
+            # could have flipped running to True between the call and now.
+            if self.running:
+                return {"ok": False, "error": "server is running",
+                        "mode": self.current_mode or "",
+                        "map":  self.current_map or "", "plugins": []}
+
+            prev_mode = self.current_mode or "(none)"
+            self.log(f"[{caller}] Staging mode {prev_mode} → {mode}…")
+
+            try:
+                ok = self.deploy_plugins(mode)
+            except Exception as exc:
+                self.log(f"[{caller}] deploy_plugins({mode}) raised: {exc!r}")
+                return {"ok": False, "error": f"deploy raised: {exc}",
+                        "mode": self.current_mode or "",
+                        "map":  self.current_map or "", "plugins": []}
+
+            if not ok:
+                # deploy_plugins() logs the reason; don't blow away the
+                # current_mode on failure — operator can retry.
+                return {"ok": False, "error": "deploy_plugins returned False",
+                        "mode": self.current_mode or "",
+                        "map":  self.current_map or "", "plugins": []}
+
+            # Only after a successful deploy do we mark this as the active mode.
+            self.current_mode = mode
+            if map_name:
+                self.current_map = map_name
+                self.log(f"[{caller}] Staged map {map_name} for next start.")
+            self.log(f"[{caller}] Active mode is now {mode}.  Next start will "
+                     "boot with these plugins.")
+
+            return {
+                "ok":      True,
+                "mode":    mode,
+                "map":     self.current_map or "",
+                "plugins": list(_MODE_PLUGIN_NAMES.get(mode, [])),
+                "error":   None,
+            }
 
     # ── plugin checker ────────────────────────────────────────────────────────
 

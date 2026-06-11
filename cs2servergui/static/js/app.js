@@ -2233,6 +2233,579 @@ async function loadWorkshopMapsGrid(grid, mode) {
   }
 }
 
+/* ══════════════════════════════════════════════════════════════ PLUGINS TAB */
+/* v0.13.2 / task #92 — Plugin Manager.
+ *
+ * Slice 1: read-only inventory (runtime / deployed / library).
+ * Slice 2: Activate / Switch-to-vanilla actions.
+ *
+ * Backend safety rails enforced in /api/plugins/{activate,vanilla}:
+ *   - server stopped
+ *   - no workshop download in flight
+ *   - veto idle or complete
+ *   - csgo/ exists
+ * The SPA mirrors these by disabling buttons + showing a banner, but the
+ * backend is the source of truth — it 409s if the SPA's view is stale.
+ *
+ * Future slices add: external registry merge (#90), curated packs (#91),
+ * one-click runtime bootstrap, version updates, custom-source installs.
+ */
+
+/* Shared between the page render and post-action re-render so an
+ * Activate / Switch-to-vanilla doesn't tear down + rebuild the whole tab. */
+async function _renderPluginsTab() {
+  let data, packsData;
+  try {
+    [data, packsData] = await Promise.all([
+      api.plugins.list(),
+      api.plugins.packs(),
+    ]);
+  } catch (e) {
+    el('plugins-runtime-body').innerHTML =
+      `<div class="text-sm text-red">Failed to load: ${e.message}</div>`;
+    return;
+  }
+
+  const serverRunning = !!state.server.running;
+  const csgoReady     = !!(data.runtime && data.runtime.csgo_dir_exists);
+  // v0.14.1: server-running is no longer blocking — plugin actions route
+  // through change_map's stop-deploy-restart cycle when needed.  Only csgo/
+  // missing keeps buttons disabled (no install root = nothing to deploy).
+  const actionsBlocked = !csgoReady;
+
+  // ─── Packs strip ───────────────────────────────────────────────
+  // v0.14.0 — curated recipes above the library.  Click → confirm modal
+  // (shows what mode+map will be staged) → applyPack().  Single backend
+  // transaction, so half-applied state isn't possible.
+  const packsBody = el('plugins-packs-body');
+  if (packsBody) {
+    const packs = (packsData && packsData.packs) || [];
+    packsBody.innerHTML = `
+      <div class="plugins-packs-grid">
+        ${packs.map(p => {
+          // v0.14.0 audit fix #2: escape every interpolation that originates
+          // from catalog/pack data — today operator-trusted, tomorrow
+          // remote-fetched (v0.15 OblivionPluginRegistry).  Cheap to do now.
+          const tags = (p.tags || []).map(t => `<span class="chip">${esc(t)}</span>`).join(' ');
+          const plugins = (p.plugins && p.plugins.length)
+            ? (p.plugins.map(slug => {
+                const meta = (data.bundled || []).find(b => b.slug === slug) || {};
+                return esc(meta.display_name || slug);
+              }).join(' + '))
+            : 'vanilla';
+          // Active pack = the one whose mode matches current_mode.  The vanilla
+          // pack matches Competitive; if multiple packs share Competitive (none
+          // do today), we just light up the first.
+          const isActive = p.mode === (data.current_mode || '');
+          return `
+            <div class="plugin-pack-card ${isActive ? 'is-active' : ''}">
+              <div class="plugin-card-head">
+                <span class="plugin-card-title">${esc(p.name)}</span>
+                ${isActive ? '<span class="pill pill-ok">Active</span>' : ''}
+              </div>
+              <div class="text-sm">${esc(p.summary || '')}</div>
+              <div class="text-sm text-sub">
+                Mode <strong>${esc(p.mode)}</strong>${p.default_map ? ` · Map <strong>${esc(p.default_map)}</strong>` : ''}
+              </div>
+              <div class="text-sm text-sub">Plugins: ${plugins}</div>
+              ${tags ? `<div style="margin-top:4px">${tags}</div>` : ''}
+              ${isActive ? '' : `
+                <button class="btn btn-sm plugins-pack-btn"
+                        data-pack-id="${esc(p.id)}"
+                        data-name="${esc(p.name)}"
+                        data-mode="${esc(p.mode)}"
+                        data-map="${esc(p.default_map || '')}"
+                        ${actionsBlocked ? 'disabled' : ''}>
+                  Apply
+                </button>`}
+            </div>`;
+        }).join('')}
+      </div>
+    `;
+  }
+
+  // ─── Action banner ─────────────────────────────────────────────
+  // v0.14.1: server-running no longer blocks actions — the banner now
+  // warns instead, so operators understand a click WILL restart the
+  // server.  Maps tab already supports this same live-swap flow.
+  const banner = el('plugins-action-banner');
+  if (banner) {
+    if (!csgoReady) {
+      banner.innerHTML = `
+        <div class="install-banner">
+          <strong>CS2 install not found.</strong>
+          Set the server directory in <a href="#config">Config</a>
+          before installing plugins.
+        </div>`;
+    } else if (serverRunning) {
+      banner.innerHTML = `
+        <div class="install-banner">
+          <strong>Server is online.</strong>
+          Applying a pack or activating a plugin will
+          stop, swap plugins, and restart the server.
+        </div>`;
+    } else {
+      banner.innerHTML = '';
+    }
+  }
+
+  // ─── Runtime card ──────────────────────────────────────────────
+  // v0.14.0 slice 5: use the proper install detectors (metamod_installed +
+  // css_installed) so an empty addons/counterstrikesharp/ folder doesn't
+  // claim "installed".  Show a Bootstrap button when either is missing.
+  const rt = data.runtime || {};
+  const mmInstalled = !!rt.metamod_installed;
+  const cssInstalled = !!rt.css_installed;
+  const runtimeIncomplete = rt.csgo_dir_exists && (!mmInstalled || !cssInstalled);
+
+  const mmIcon =
+    rt.metamod_patched === true  ? '✓' :
+    rt.metamod_patched === false ? '✗' :
+                                    '?';
+  const mmCls =
+    rt.metamod_patched === true  ? 'ok'  :
+    rt.metamod_patched === false ? 'off' :
+                                    'unk';
+  const csgoIcon = rt.csgo_dir_exists ? '✓' : '✗';
+  const csgoCls  = rt.csgo_dir_exists ? 'ok' : 'off';
+
+  el('plugins-runtime-body').innerHTML = `
+    <div class="plugins-runtime-grid">
+      <div class="plugins-runtime-row">
+        <span class="plugins-runtime-dot ${csgoCls}">${csgoIcon}</span>
+        <span class="plugins-runtime-label">CS2 server installed</span>
+        <span class="plugins-runtime-value">${rt.csgo_dir ? esc(rt.csgo_dir) : '<em>not configured</em>'}</span>
+      </div>
+      <div class="plugins-runtime-row">
+        <span class="plugins-runtime-dot ${mmInstalled ? 'ok' : 'off'}">${mmInstalled ? '✓' : '✗'}</span>
+        <span class="plugins-runtime-label">MetaMod base installed</span>
+        <span class="plugins-runtime-value">${
+          mmInstalled ? 'addons/metamod/ present with loader files'
+                      : 'MISSING — required for every plugin (auto-loads at server boot)'
+        }</span>
+      </div>
+      <div class="plugins-runtime-row">
+        <span class="plugins-runtime-dot ${cssInstalled ? 'ok' : 'off'}">${cssInstalled ? '✓' : '✗'}</span>
+        <span class="plugins-runtime-label">CounterStrikeSharp installed</span>
+        <span class="plugins-runtime-value">${
+          cssInstalled ? 'addons/counterstrikesharp/{api,bin}/ present'
+                       : 'MISSING — required for CSS plugins (Warcraft, MatchZy, Retakes…)'
+        }</span>
+      </div>
+      <div class="plugins-runtime-row">
+        <span class="plugins-runtime-dot ${mmCls}">${mmIcon}</span>
+        <span class="plugins-runtime-label">MetaMod loaded by engine</span>
+        <span class="plugins-runtime-value">${
+          rt.metamod_patched === true  ? 'gameinfo.gi patched — engine will load MetaMod at boot' :
+          rt.metamod_patched === false ? 'gameinfo.gi unpatched — auto-applied on next plugin deploy' :
+                                          'unknown (gameinfo.gi unreadable)'
+        }</span>
+      </div>
+    </div>
+    ${runtimeIncomplete ? `
+      <div style="margin-top:14px; padding-top:14px; border-top:1px solid var(--line-1)">
+        <button class="btn" id="plugins-bootstrap-btn">
+          🔧 Set up plugin runtime
+        </button>
+        <span class="text-sm text-sub" style="margin-left:10px">
+          One-time setup — opens the install guide for MetaMod + CounterStrikeSharp
+        </span>
+      </div>` : ''}
+  `;
+  const bootBtn = el('plugins-bootstrap-btn');
+  if (bootBtn) bootBtn.addEventListener('click', () => _pluginBootstrap(rt));
+
+  // ─── Deployed card ─────────────────────────────────────────────
+  const m = data.manifest || {};
+  const vanillaBtn = (m.plugins && m.plugins.length)
+    ? `<button class="btn btn-sm" id="plugins-vanilla-btn"
+               ${actionsBlocked ? 'disabled' : ''}
+               title="Switch to a vanilla Competitive server (no managed plugins)">
+         Switch to vanilla
+       </button>`
+    : '';
+
+  if (!m.plugins || m.plugins.length === 0) {
+    el('plugins-deployed-body').innerHTML = `
+      <div class="text-sm text-sub">
+        Nothing deployed — current mode is
+        <strong>${esc(data.current_mode || '(none)')}</strong>, which runs vanilla.
+      </div>
+    `;
+  } else {
+    const chips = m.plugins.map(slug => {
+      const meta = (data.bundled || []).find(b => b.slug === slug) || {};
+      return `<span class="chip">${esc(meta.display_name || slug)}</span>`;
+    }).join(' ');
+    el('plugins-deployed-body').innerHTML = `
+      <div class="section-hdr">
+        <div class="text-sm">
+          Mode <strong>${esc(m.mode || '?')}</strong> deployed: ${chips}
+        </div>
+        ${vanillaBtn}
+      </div>
+      <div class="text-sm text-sub" style="margin-top:6px">
+        Deployed at ${esc(m.deployed_at || '—')}
+      </div>
+    `;
+  }
+
+  // ─── Library grid ──────────────────────────────────────────────
+  const items = (data.bundled || []).map(p => {
+    const stateLabel = p.deployed
+      ? '<span class="pill pill-ok">Active</span>'
+      : (p.source_present
+          ? '<span class="pill pill-mute">Available</span>'
+          : '<span class="pill pill-warn">Source missing</span>');
+    const modesTxt = p.modes && p.modes.length
+      ? `<div class="text-sm text-sub">Used by: ${p.modes.map(esc).join(', ')}</div>`
+      : '<div class="text-sm text-sub">Standalone — not bound to a mode</div>';
+
+    // Action: only show on cards that aren't already active AND have source.
+    // Single-mode plugins get a plain "Activate"; multi-mode get a dropdown
+    // so the operator's intent is explicit (MatchZy on Practice vs 5v5 are
+    // different match flows even though the plugin files are the same).
+    let actionBtn = '';
+    if (!p.deployed && p.source_present && p.modes && p.modes.length > 0) {
+      const disAttr = actionsBlocked ? 'disabled' : '';
+      if (p.modes.length === 1) {
+        actionBtn = `
+          <button class="btn btn-sm plugins-activate-btn"
+                  data-slug="${esc(p.slug)}" data-mode="${esc(p.modes[0])}"
+                  ${disAttr}>
+            Activate (${esc(p.modes[0])})
+          </button>`;
+      } else {
+        const opts = p.modes.map(m => `<option value="${esc(m)}">${esc(m)}</option>`).join('');
+        actionBtn = `
+          <div class="plugin-card-actions">
+            <select class="select plugins-activate-mode" data-slug="${esc(p.slug)}" ${disAttr}>
+              ${opts}
+            </select>
+            <button class="btn btn-sm plugins-activate-btn"
+                    data-slug="${esc(p.slug)}" data-mode=""
+                    ${disAttr}>
+              Activate
+            </button>
+          </div>`;
+      }
+    }
+
+    return `
+      <div class="plugin-card" data-slug="${esc(p.slug)}">
+        <div class="plugin-card-head">
+          <span class="plugin-card-title">${esc(p.display_name)}</span>
+          ${stateLabel}
+        </div>
+        <div class="text-sm">${esc(p.summary || '')}</div>
+        ${modesTxt}
+        ${p.author ? `<div class="text-sm text-sub">By ${esc(p.author)}</div>` : ''}
+        ${actionBtn}
+      </div>
+    `;
+  }).join('');
+
+  el('plugins-library-body').innerHTML = `
+    <div class="plugins-grid">${items}</div>
+  `;
+
+  // ─── Wire button handlers (delegated on the freshly-rendered DOM) ──
+  document.querySelectorAll('.plugins-activate-btn').forEach(btn => {
+    btn.addEventListener('click', () => _pluginActivate(btn));
+  });
+  document.querySelectorAll('.plugins-pack-btn').forEach(btn => {
+    btn.addEventListener('click', () => _pluginApplyPack(btn));
+  });
+  const vBtn = el('plugins-vanilla-btn');
+  if (vBtn) vBtn.addEventListener('click', _pluginVanilla);
+}
+
+/* v0.14.0 slice 5 — guided runtime bootstrap.
+ *
+ * Why this isn't an auto-downloader yet:
+ *   - sourcemm.net's MetaMod URL changes per version (gitNNNN suffix)
+ *   - CSS GitHub releases gate downloads behind unique asset names per tag
+ *   - Both upstreams have shifted layout twice in the past 18 months.
+ *
+ * A manual-with-explicit-links flow is far more resilient — when an
+ * upstream changes, the operator sees the new layout immediately instead
+ * of getting a cryptic 404 from an auto-downloader.  Once both upstreams
+ * have settled, v0.15 can add an auto path WITH this dialog as fallback.
+ *
+ * The dialog uses a full-screen overlay rather than window.alert/confirm
+ * because the install instructions are several paragraphs of formatted text.
+ */
+function _pluginBootstrap(rt) {
+  // v0.14.0 audit fix #2: csgo path is interpolated into <code> tags below;
+  // escape before use so a path with HTML special chars can't break out of
+  // the code element.  Same defense applies to the placeholder fallback.
+  const csgoDir = esc(rt.csgo_dir || '<your csgo folder>');
+  const mmNeeded  = !rt.metamod_installed;
+  const cssNeeded = !rt.css_installed;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'plugins-bootstrap-overlay';
+  overlay.innerHTML = `
+    <div class="plugins-bootstrap-modal">
+      <div class="section-hdr">
+        <span class="card-title" style="margin-bottom:0">Plugin Runtime Setup</span>
+        <button class="btn btn-sm" id="plugins-bootstrap-close">Close</button>
+      </div>
+
+      <p class="text-sm">
+        Plugins need two pieces of software installed into your CS2 server's
+        <code>csgo/</code> folder before any plugin can load.
+        Oblivion auto-patches <code>gameinfo.gi</code> for you,
+        but you have to install the runtimes once.
+      </p>
+
+      ${mmNeeded ? `
+        <div class="plugins-bootstrap-step">
+          <h4>1. Install MetaMod — Source 2</h4>
+          <p class="text-sm">
+            MetaMod is the loader the engine reads to find plugins.
+            Every plugin depends on it.
+          </p>
+          <p class="text-sm">
+            <a href="https://www.sourcemm.net/downloads.php?branch=master"
+               target="_blank" rel="noopener noreferrer"
+               class="plugins-bootstrap-link">
+              ↗ Open MetaMod download page
+            </a>
+          </p>
+          <ol class="text-sm">
+            <li>Download the latest <strong>Windows</strong> zip
+                (e.g. <code>mmsource-2.0.0-git&lt;NNNN&gt;-windows.zip</code>).</li>
+            <li>Open the zip — inside you'll see an <code>addons/</code> folder.</li>
+            <li>Extract the <code>addons/</code> folder directly into
+                <code>${csgoDir}</code>.</li>
+            <li>You should end up with
+                <code>${csgoDir}\\addons\\metamod\\bin\\win64\\metamod.2.cs2.dll</code>.</li>
+          </ol>
+        </div>` : `
+        <div class="plugins-bootstrap-step plugins-bootstrap-done">
+          <h4>✓ MetaMod already installed</h4>
+        </div>`}
+
+      ${cssNeeded ? `
+        <div class="plugins-bootstrap-step">
+          <h4>${mmNeeded ? '2.' : '1.'} Install CounterStrikeSharp</h4>
+          <p class="text-sm">
+            CounterStrikeSharp (CSS) is the C# host that runs most modern CS2
+            plugins — MatchZy, Warcraft, Retakes, etc. all depend on it.
+          </p>
+          <p class="text-sm">
+            <a href="https://github.com/roflmuffin/CounterStrikeSharp/releases/latest"
+               target="_blank" rel="noopener noreferrer"
+               class="plugins-bootstrap-link">
+              ↗ Open CounterStrikeSharp releases
+            </a>
+          </p>
+          <ol class="text-sm">
+            <li>Download the <strong>with-runtime</strong> Windows zip
+                (e.g. <code>counterstrikesharp-with-runtime-build-NNN-windows.zip</code>).</li>
+            <li>Open the zip — you'll see an <code>addons/</code> folder.</li>
+            <li>Extract the <code>addons/</code> folder directly into
+                <code>${csgoDir}</code>.</li>
+            <li>You should end up with
+                <code>${csgoDir}\\addons\\counterstrikesharp\\api\\</code>
+                AND <code>...\\counterstrikesharp\\bin\\</code>.</li>
+          </ol>
+        </div>` : `
+        <div class="plugins-bootstrap-step plugins-bootstrap-done">
+          <h4>✓ CounterStrikeSharp already installed</h4>
+        </div>`}
+
+      <div class="plugins-bootstrap-step">
+        <h4>Final step</h4>
+        <p class="text-sm">
+          Click below and Oblivion will re-check the install state.
+          If everything looks good the page will refresh and the warning
+          will disappear.
+        </p>
+        <button class="btn" id="plugins-bootstrap-verify">
+          ✓ I've installed them — verify now
+        </button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  const close = () => overlay.remove();
+  overlay.addEventListener('click', (e) => {
+    // Click on the overlay backdrop (not the modal itself) closes.
+    if (e.target === overlay) close();
+  });
+  el('plugins-bootstrap-close').addEventListener('click', close);
+  el('plugins-bootstrap-verify').addEventListener('click', async () => {
+    close();
+    toast('Re-checking install state…');
+    await _renderPluginsTab();
+    // Read the fresh state to give a useful confirmation toast.
+    try {
+      const fresh = await api.plugins.list();
+      const r2 = fresh.runtime || {};
+      if (r2.metamod_installed && r2.css_installed) {
+        toast('✓ Runtime fully installed — ready for plugins', 'var(--ok)');
+      } else {
+        const missing = [];
+        if (!r2.metamod_installed) missing.push('MetaMod');
+        if (!r2.css_installed)     missing.push('CounterStrikeSharp');
+        toast(`Still missing: ${missing.join(', ')}`, 'var(--warn)');
+      }
+    } catch (e) { /* re-render already toasted on failure */ }
+  });
+}
+
+async function _pluginApplyPack(btn) {
+  const packId = btn.dataset.packId;
+  const name   = btn.dataset.name;
+  const mode   = btn.dataset.mode;
+  const map    = btn.dataset.map;
+  const running = !!state.server.running;
+  const msg = `Apply pack: ${name}?\n\n`
+            + `This will:\n`
+            + `  • Switch to mode ${mode}\n`
+            + (map ? `  • Load map ${map}\n` : '')
+            + `  • Deploy the pack's plugins (or undeploy for vanilla)\n`
+            + (running ? `  • STOP and RESTART the server\n` : '')
+            + (running ? `\nServer is currently online — operator/players will see a brief downtime.` : '');
+  if (!window.confirm(msg)) return;
+  const allButtons = document.querySelectorAll(
+    '#plugins-library-body button, #plugins-vanilla-btn, .plugins-pack-btn'
+  );
+  allButtons.forEach(b => b.disabled = true);
+  toast(running ? `Restarting into ${name}…` : `Applying ${name}…`);
+  try {
+    const r = await api.plugins.applyPack(packId);
+    if (r.restarting) {
+      toast(`✓ Restarting into ${r.name} — watch Status tab`, 'var(--ok)');
+    } else {
+      toast(`✓ ${r.name} ready — mode ${r.mode}${r.map ? ` · ${r.map}` : ''}`, 'var(--ok)');
+    }
+  } catch (e) {
+    toast(`Pack apply failed: ${e.message}`, 'var(--bad)');
+  } finally {
+    await _renderPluginsTab();
+  }
+}
+
+async function _pluginActivate(btn) {
+  const slug = btn.dataset.slug;
+  let   mode = btn.dataset.mode;
+  // Multi-mode card: pull the chosen mode from the sibling <select>.
+  if (!mode) {
+    const sel = btn.parentElement.querySelector('.plugins-activate-mode');
+    mode = sel ? sel.value : '';
+    if (!mode) { toast('Pick a mode first', 'var(--bad)'); return; }
+  }
+  // v0.14.1 — confirm a live restart when the server is online.  No
+  // confirm when offline (matches the original behaviour — clicking
+  // Activate offline is low-stakes).
+  const running = !!state.server.running;
+  if (running) {
+    if (!window.confirm(
+      `Activate ${slug} for mode ${mode}?\n\n`
+      + `Server is currently online. This will STOP and RESTART it `
+      + `to swap plugins cleanly.\n\nProceed?`
+    )) return;
+  }
+  // Disable everything that could double-fire while the deploy is in flight.
+  // The backend serializes via _lifecycle_lock, but a fast double-click would
+  // race a stale tab-state read.
+  const allButtons = document.querySelectorAll(
+    '#plugins-library-body button, #plugins-vanilla-btn, .plugins-pack-btn'
+  );
+  allButtons.forEach(b => b.disabled = true);
+  toast(running ? `Restarting into ${mode}…` : `Deploying ${slug} for mode ${mode}…`);
+  try {
+    const r = await api.plugins.activate(slug, mode);
+    if (r.restarting) {
+      toast(`✓ Restarting into ${r.mode} — watch Status tab`, 'var(--ok)');
+    } else {
+      toast(`✓ ${slug} active for ${r.mode}`, 'var(--ok)');
+    }
+  } catch (e) {
+    toast(`Activate failed: ${e.message}`, 'var(--bad)');
+  } finally {
+    // Re-render reads fresh state and re-disables based on it.
+    await _renderPluginsTab();
+  }
+}
+
+async function _pluginVanilla() {
+  const running = !!state.server.running;
+  if (!window.confirm(
+    'Switch to vanilla Competitive?\n\nThis removes ALL deployed plugins ' +
+    '(MatchZy, Warcraft, Retakes, etc.) from the server. ' +
+    'You can re-activate them anytime.' +
+    (running ? '\n\nServer is currently online — this will STOP and RESTART it.' : '')
+  )) return;
+  const allButtons = document.querySelectorAll(
+    '#plugins-library-body button, #plugins-vanilla-btn, .plugins-pack-btn'
+  );
+  allButtons.forEach(b => b.disabled = true);
+  toast(running ? 'Restarting into vanilla…' : 'Undeploying plugins…');
+  try {
+    const r = await api.plugins.vanilla();
+    if (r.restarting) {
+      toast(`✓ Restarting into vanilla — watch Status tab`, 'var(--ok)');
+    } else {
+      toast(`✓ Switched to vanilla (${r.mode})`, 'var(--ok)');
+    }
+  } catch (e) {
+    toast(`Switch failed: ${e.message}`, 'var(--bad)');
+  } finally {
+    await _renderPluginsTab();
+  }
+}
+
+pages['plugins'] = async function() {
+  const root = el('content');
+  root.innerHTML = `
+    <div id="plugins-action-banner"></div>
+
+    <div class="card">
+      <div class="card-title">Server Readiness</div>
+      <div id="plugins-runtime-body">
+        <div class="text-sm text-sub">Loading…</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:14px">
+      <div class="section-hdr">
+        <span class="card-title" style="margin-bottom:0">Quick-Apply Packs</span>
+        <span class="text-sm text-sub">
+          One click — pick a recipe, server is ready to start
+        </span>
+      </div>
+      <div id="plugins-packs-body">
+        <div class="text-sm text-sub">Loading…</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:14px">
+      <div class="card-title">Currently Deployed</div>
+      <div id="plugins-deployed-body">
+        <div class="text-sm text-sub">Loading…</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:14px">
+      <div class="section-hdr">
+        <span class="card-title" style="margin-bottom:0">Plugin Library</span>
+        <span class="text-sm text-sub">
+          Per-plugin activation — community registry coming in v0.14
+        </span>
+      </div>
+      <div id="plugins-library-body">
+        <div class="text-sm text-sub">Loading…</div>
+      </div>
+    </div>
+  `;
+  await _renderPluginsTab();
+};
+
 /* Legacy: #workshop hash routes here, switching to the Workshop tab. */
 pages['workshop'] = function() {
   _mapsTab = 'workshop';
@@ -4263,337 +4836,149 @@ pages['config'] = async function() {
 
   const isLocal = cfg.is_local;
 
+  // v0.14.2 — single-column Config restructure (task #153).
+  // Section order follows operator's mental model:
+  //   Setup (Steam + Install)  →  Security  →  Server (+ Bots merged)
+  //   →  Match Flow  →  Discord (+ webhook moved here)  →  Tools row
+  // Each section is a <section class="cfg-section"> with a strong top
+  // divider + accent-bar title — see app.css ".cfg-section*".
   root.innerHTML = `
-    <div class="grid-2">
+    <div id="config-root">
 
-      <!-- Left column -->
-      <div>
-        <div class="config-label">Server Settings</div>
-        <div class="card mb-16">
-          <div class="flex-col gap-8">
-            <div class="field"><label>Hostname</label>
-              <input class="input" id="cfg-hostname" value="${esc(cfg.hostname || '')}"></div>
-            <div class="field"><label>Server Password (sv_password)</label>
-              <input class="input" id="cfg-svpassword" type="password"
-                     value="${esc(cfg.sv_password || '')}"></div>
-            ${isLocal ? `
-            <div class="field">
-              <label>Game Server Login Token <span class="field-label-note">(GSLT)</span></label>
-              <input class="input" id="cfg-gslt" placeholder="Leave blank for LAN / private use"
-                     value="${esc(cfg.gslt_token || '')}">
-              <div class="field-hint">Makes your server visible in the public browser.
-                Get one free at <strong>steamcommunity.com/dev/managegameservers</strong>
-                (App&nbsp;ID&nbsp;730). Left blank during setup? Paste it here.</div>
-            </div>
-            <div class="field"><label>Max Players Override (blank = mode default)</label>
-              <input class="input" id="cfg-maxplayers" placeholder="e.g. 16"
-                     value="${esc(cfg.max_players_override || '')}"></div>
-            ` : ''}
-            <div class="toggle-row">
-              <div class="toggle-info">
-                <strong>Tickrate 128</strong>
-                <small>-tickrate 128 on server launch</small>
-              </div>
-              <label class="toggle">
-                <input type="checkbox" id="cfg-tickrate" ${cfg.tickrate_128?'checked':''}>
-                <span class="toggle-track"></span><span class="toggle-thumb"></span>
-              </label>
-            </div>
-            <div class="toggle-row">
-              <div class="toggle-info">
-                <strong>Auto-start on launch</strong>
-                <small>Start server when tool opens</small>
-              </div>
-              <label class="toggle">
-                <input type="checkbox" id="cfg-autostart" ${cfg.auto_start?'checked':''}>
-                <span class="toggle-track"></span><span class="toggle-thumb"></span>
-              </label>
-            </div>
-            <div class="toggle-row">
-              <div class="toggle-info">
-                <strong>Auto-restart on crash</strong>
-                <small>Up to 3 consecutive restarts</small>
-              </div>
-              <label class="toggle">
-                <input type="checkbox" id="cfg-autorestart" ${cfg.auto_restart_on_crash?'checked':''}>
-                <span class="toggle-track"></span><span class="toggle-thumb"></span>
-              </label>
-            </div>
+      ${isLocal ? `
+      <!-- ── Setup ─────────────────────────────────────────────────── -->
+      <section class="cfg-section">
+        <h2 class="cfg-section-title">Setup</h2>
+        <p class="cfg-section-sub">
+          First-run essentials. Steam credentials, dedicated server install, and updates.
+        </p>
+
+        <div class="card">
+          <div class="cfg-card-title">Steam Account</div>
+          <div class="field"><label>Username</label>
+            <input class="input" id="cfg-steam-user" value="${esc(cfg.steam_username||'')}"></div>
+          <div class="field"><label>Password</label>
+            <input class="input" id="cfg-steam-pw" type="password" placeholder="Stored securely"></div>
+          <div class="text-sub text-sm" style="margin-top:10px">
+            Use a dedicated Steam account, not your personal one.
+            ${cfg.steam_session_active ? '<span class="text-green">✓ Active session</span>' : ''}
           </div>
-          <button class="btn btn-accent btn-full mt-16" id="cfg-server-save">Save Server Settings</button>
+          <div class="flex gap-8 btn-full">
+            <button class="btn btn-ghost flex-1" id="cfg-steam-save">Save Credentials</button>
+            <button class="btn btn-accent flex-1" id="cfg-steam-login">Login (Interactive)</button>
+          </div>
         </div>
 
-        <div class="config-label">Veto / Match Setup</div>
-        <div class="card mb-16">
+        <div class="card" style="margin-top:14px">
+          <div class="cfg-card-title">Server Installation</div>
           <div class="field">
-            <label>Public Share URL (for captain links on the internet)</label>
-            <input class="input" id="cfg-public-share-url" type="text"
-                   value="${esc(cfg.public_share_url || '')}"
-                   placeholder="https://random-words.trycloudflare.com">
-            <small style="color:var(--text-3);font-size:11px;line-height:1.5;display:block;margin-top:6px">
-              When set, captain join URLs use this base instead of <code>http://&lt;public_ip&gt;:&lt;port&gt;</code>.
-              Paste your Cloudflare tunnel URL here (see <a href="https://github.com/jacquesvniekerk-eng/OblivionServerTool/blob/master/TONIGHT.md">TONIGHT.md</a> for the tunnel setup).
-              Leave blank to fall back to <code>public_ip + port</code> (which requires a port-forward).
+            <label>Server Directory</label>
+            <div class="flex gap-8">
+              <input class="input flex-1" id="cfg-server-dir" value="${esc(cfg.server_dir||'')}">
+              <button class="btn btn-ghost btn-sm" id="cfg-browse-btn">Browse…</button>
+            </div>
+          </div>
+          <div class="flex gap-8 btn-full">
+            <button class="btn btn-ghost flex-1" id="cfg-dir-save">Set Directory</button>
+            <button class="btn btn-accent flex-1" id="cfg-install-btn">Install / Reinstall</button>
+          </div>
+          <button class="btn btn-ghost btn-full" id="cfg-update-btn" style="margin-top:10px">
+            ↻ Update / Validate CS2 (steamcmd)
+          </button>
+          <small class="text-sub text-sm" style="display:block;margin-top:8px;line-height:1.5">
+            Forces a steamcmd <code>app_update 730 validate</code> in place — use this when you need
+            to update even if no update badge is showing (the badge relies on a mirror that can lag
+            Valve). Stop the server first.
+          </small>
+        </div>
+      </section>
+
+      <!-- ── Security ──────────────────────────────────────────────── -->
+      <section class="cfg-section">
+        <h2 class="cfg-section-title">Security</h2>
+        <p class="cfg-section-sub">
+          PINs gate web access; the RCON password authenticates the in-game console.
+        </p>
+
+        <div class="card">
+          <div class="field"><label>Admin PIN <span class="text-sub">(4+ digits, full web-panel access)</span></label>
+            <input class="input" id="cfg-pin" type="password"
+                   value="" maxlength="8"
+                   placeholder="${cfg.admin_pin ? '(unchanged — leave blank to keep)' : '(set a PIN)'}"></div>
+          <div class="field"><label>Guest PIN <span class="text-sub">(optional — limited remote access: maps, modes &amp; workshop downloads only. Blank = off)</span></label>
+            <input class="input" id="cfg-guest-pin" type="password"
+                   value="" maxlength="8"
+                   placeholder="${cfg.guest_pin ? '(unchanged — leave blank to keep, type DISABLE to remove)' : '(disabled)'}"></div>
+          <div class="field"><label>RCON Password <span class="text-sub">(auto-generated, change if needed)</span></label>
+            <input class="input" id="cfg-rcon-pw" type="password"
+                   value=""
+                   placeholder="${cfg.rcon_password ? '(unchanged — leave blank to keep)' : '(none set)'}"></div>
+          <button class="btn btn-accent btn-full" id="cfg-security-save">Save Security Settings</button>
+        </div>
+      </section>
+      ` : ''}
+
+      <!-- ── Server ────────────────────────────────────────────────── -->
+      <section class="cfg-section">
+        <h2 class="cfg-section-title">Server</h2>
+        <p class="cfg-section-sub">
+          How the dedicated server runs and behaves. Includes bot fill.
+        </p>
+
+        <div class="card">
+          <div class="field"><label>Hostname</label>
+            <input class="input" id="cfg-hostname" value="${esc(cfg.hostname || '')}"></div>
+          <div class="field"><label>Server Password (sv_password)</label>
+            <input class="input" id="cfg-svpassword" type="password"
+                   value="${esc(cfg.sv_password || '')}"></div>
+          ${isLocal ? `
+          <div class="field">
+            <label>Game Server Login Token <span class="text-sub">(GSLT)</span></label>
+            <input class="input" id="cfg-gslt" placeholder="Leave blank for LAN / private use"
+                   value="${esc(cfg.gslt_token || '')}">
+            <small class="text-sub text-sm" style="display:block;margin-top:6px;line-height:1.5">
+              Makes your server visible in the public browser.
+              Get one free at <strong>steamcommunity.com/dev/managegameservers</strong>
+              (App&nbsp;ID&nbsp;730). Left blank during setup? Paste it here.
             </small>
           </div>
-          <div class="toggle-row" style="margin-top:14px">
+          <div class="field"><label>Max Players Override <span class="text-sub">(blank = mode default)</span></label>
+            <input class="input" id="cfg-maxplayers" placeholder="e.g. 16"
+                   value="${esc(cfg.max_players_override || '')}"></div>
+          ` : ''}
+          <div class="toggle-row">
             <div class="toggle-info">
-              <strong>Auto-launch when both captains ready</strong>
-              <small>Fire <code>matchzy_loadmatch</code> automatically when both captains tick Ready on the finale page.  Off by default — operator clicks GO manually so they can verify mode/server first.</small>
+              <strong>Tickrate 128</strong>
+              <small>-tickrate 128 on server launch</small>
             </div>
             <label class="toggle">
-              <input type="checkbox" id="cfg-veto-auto-launch" ${cfg.veto_auto_launch_on_ready?'checked':''}>
+              <input type="checkbox" id="cfg-tickrate" ${cfg.tickrate_128?'checked':''}>
               <span class="toggle-track"></span><span class="toggle-thumb"></span>
             </label>
           </div>
-          ${isLocal ? `
-          <div class="field" style="margin-top:14px">
-            <label>MatchZy cvars (override the defaults baked into the match-config)</label>
-            <div id="cfg-matchzy-cvars-list" class="cfg-cvar-list">
-              <!-- rendered below via _renderMatchzyCvars() -->
+          <div class="toggle-row">
+            <div class="toggle-info">
+              <strong>Auto-start on launch</strong>
+              <small>Start server when tool opens</small>
             </div>
-            <button class="btn btn-ghost btn-sm" id="cfg-matchzy-cvar-add" type="button" style="margin-top:6px">
-              + Add cvar
-            </button>
-            <small style="color:var(--text-3);font-size:11px;line-height:1.5;display:block;margin-top:6px">
-              These are merged on top of the built-in defaults
-              (<code>mp_warmup_pausetimer=0</code>, <code>matchzy_minimum_ready_required=2</code>)
-              when the finale writes the MatchZy config.  Your row wins on
-              conflicts.  Leave the <em>value</em> blank to actively suppress
-              a default cvar (so it won't be sent at all).
-              Examples: <code>matchzy_knife_enabled_default 1</code>,
-              <code>matchzy_pause_after_warmup 1</code>,
-              <code>matchzy_demo_path_prefix custom-path/</code>.
-            </small>
-          </div>
-          <div class="field" style="margin-top:14px">
-            <label>Discord Webhook URL (post finale results to a channel)</label>
-            <input class="input" id="cfg-discord-webhook" type="password"
-                   value=""
-                   placeholder="${cfg.discord_webhook_url ? '(unchanged — leave blank to keep, type CLEAR to remove)' : 'https://discord.com/api/webhooks/...'}">
-            <small style="color:var(--text-3);font-size:11px;line-height:1.5;display:block;margin-top:6px">
-              When set, the tool POSTs an embed (teams + maplist + decider + connect string) to this Discord channel when a finale completes.
-              Captures most of the v0.11.0 Discord-bot value without the gateway setup.
-              <strong>Create a webhook:</strong> Discord channel → ⚙ → Integrations → Webhooks → New Webhook → Copy URL.
-            </small>
-          </div>
-          ` : ''}
-          <button class="btn btn-accent btn-full mt-16" id="cfg-veto-save">Save Veto Settings</button>
-        </div>
-
-        ${isLocal ? `
-        <!-- v0.12.5 / task #95 — Gaming Mode toggle.  Local-only because the
-             underlying script flips Windows Power Plan + cs2.exe core
-             affinity, which requires the operator's own machine.  Pairs
-             with TROUBLESHOOTING.md's "hosting + playing on the same PC"
-             section — same scripts, now reachable without leaving the SPA. -->
-        <div class="config-label">Gaming Mode (host + play perf)</div>
-        <div class="card mb-16">
-          <div class="text-sub text-sm" style="margin-bottom:12px">
-            Flips Windows Power Plan, Game Mode, Game DVR + pins cs2.exe to
-            cores 0-3 so the dedicated server keeps a stable tickrate while
-            you play.  Runs <code>scripts\\gaming-mode.ps1</code>.
-          </div>
-          <div class="flex gap-8" style="flex-wrap:wrap">
-            <button class="btn btn-accent" id="cfg-gaming-on"
-                    title="Switch to High Performance + pin cs2.exe to cores 0-3">
-              ⚡ Gaming Mode ON
-            </button>
-            <button class="btn btn-ghost" id="cfg-gaming-off"
-                    title="Restore Balanced power plan, drop core pinning">
-              💤 Gaming Mode OFF
-            </button>
-            <button class="btn btn-ghost" id="cfg-gaming-status"
-                    title="Show current Power Plan / Game Mode / affinity">
-              📊 Status
-            </button>
-          </div>
-          <pre id="cfg-gaming-output" class="text-mono text-sm" style="margin-top:12px;max-height:300px;overflow:auto;background:var(--bg-1);padding:10px;border-radius:6px;display:none"></pre>
-        </div>
-
-        <div class="config-label">Discord (v0.11.0 bot integration)</div>
-        <div class="card mb-16">
-          <div class="text-sub text-sm" style="margin-bottom:12px">
-            Bot integration adds <strong>DM captain links</strong>, <strong>voice-channel roster pull</strong>, and <strong>live veto embed</strong> to your Discord server.
-            See <a href="https://github.com/jacquesvniekerk-eng/OblivionServerTool/blob/master/DISCORD.md">DISCORD.md</a> for the 5-minute setup guide.
-          </div>
-          <div class="field">
-            <label>Bot Token <span style="color:var(--text-4)">(local-only — never sent to remote sessions)</span></label>
-            <input class="input" id="cfg-discord-bot-token" type="password"
-                   value=""
-                   placeholder="${cfg.discord_bot_token ? '(unchanged — leave blank to keep, type CLEAR to remove)' : 'MTAxxxxxx.xxxxxxx.xxxxxxx...'}">
-          </div>
-          <div class="field" style="margin-top:10px">
-            <label>Server (Guild) ID</label>
-            <input class="input" id="cfg-discord-guild-id" type="text" inputmode="numeric"
-                   value="${esc(cfg.discord_guild_id||'')}"
-                   placeholder="123456789012345678">
-          </div>
-          <div class="field" style="margin-top:10px">
-            <label>Veto Embed Channel ID <span style="color:var(--text-4)">(optional — blank skips live embeds)</span></label>
-            <!-- v0.11.18 — 🔍 Browse helper for text channels, mirrors the
-                 v0.11.15 default-VC Browse.  Pick the channel from a list
-                 instead of fishing the ID out of Discord's right-click menu. -->
-            <div class="flex gap-8">
-              <input class="input flex-1" id="cfg-discord-channel-id" type="text" inputmode="numeric"
-                     value="${esc(cfg.discord_veto_channel_id||'')}"
-                     placeholder="234567890123456789">
-              <button class="btn btn-ghost" id="cfg-discord-channel-browse"
-                      title="Browse the bot's text channels and pick one">
-                🔍 Browse
-              </button>
-            </div>
-          </div>
-          <!-- v0.11.15 — default voice channel for one-click roster pull.
-               When set, the Veto "Pull from voice channel" button skips
-               the picker modal and pulls members directly.  Blank keeps
-               the picker behaviour. -->
-          <div class="field" style="margin-top:10px">
-            <label>Default Voice Channel ID
-              <span style="color:var(--text-4)">(optional — blank shows picker each session)</span>
+            <label class="toggle">
+              <input type="checkbox" id="cfg-autostart" ${cfg.auto_start?'checked':''}>
+              <span class="toggle-track"></span><span class="toggle-thumb"></span>
             </label>
-            <div class="flex gap-8">
-              <input class="input flex-1" id="cfg-discord-voice-channel-id" type="text" inputmode="numeric"
-                     value="${esc(cfg.discord_voice_channel_id||'')}"
-                     placeholder="345678901234567890">
-              <button class="btn btn-ghost" id="cfg-discord-voice-browse"
-                      title="Browse the bot's voice channels and pick one">
-                🔍 Browse
-              </button>
-            </div>
-            <div id="cfg-discord-voice-status" class="text-sm"
-                 style="margin-top:6px;color:var(--text-4);min-height:18px">
-              <!-- Populated by _refreshVoiceChannelPreview() on save + on load -->
-            </div>
           </div>
-          <!-- v0.12.0 — per-team VCs + auto-move toggle.  When both are set
-               AND the toggle is on, /api/veto/distribute fires a background
-               move that drags every rostered player with a discord_id into
-               their team's VC.  Bot needs Move Members permission. -->
-          <div class="field" style="margin-top:10px">
-            <label>Team A Voice Channel ID
-              <span style="color:var(--text-4)">(optional — needed for /move-teams)</span>
+          <div class="toggle-row">
+            <div class="toggle-info">
+              <strong>Auto-restart on crash</strong>
+              <small>Up to 3 consecutive restarts</small>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="cfg-autorestart" ${cfg.auto_restart_on_crash?'checked':''}>
+              <span class="toggle-track"></span><span class="toggle-thumb"></span>
             </label>
-            <div class="flex gap-8">
-              <input class="input flex-1" id="cfg-discord-team-a-vc-id" type="text" inputmode="numeric"
-                     value="${esc(cfg.discord_team_a_voice_channel_id||'')}"
-                     placeholder="456789012345678901">
-              <button class="btn btn-ghost" id="cfg-discord-team-a-vc-browse"
-                      title="Browse the bot's voice channels and pick one">
-                🔍 Browse
-              </button>
-            </div>
           </div>
-          <div class="field" style="margin-top:10px">
-            <label>Team B Voice Channel ID
-              <span style="color:var(--text-4)">(optional — needed for /move-teams)</span>
-            </label>
-            <div class="flex gap-8">
-              <input class="input flex-1" id="cfg-discord-team-b-vc-id" type="text" inputmode="numeric"
-                     value="${esc(cfg.discord_team_b_voice_channel_id||'')}"
-                     placeholder="567890123456789012">
-              <button class="btn btn-ghost" id="cfg-discord-team-b-vc-browse"
-                      title="Browse the bot's voice channels and pick one">
-                🔍 Browse
-              </button>
-            </div>
-          </div>
-          <div class="field" style="margin-top:10px">
-            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-              <input type="checkbox" id="cfg-discord-auto-move"
-                     ${cfg.discord_auto_move_on_distribute_enabled ? 'checked' : ''}>
-              <span>Auto-move teams to their VCs after Distribute</span>
-            </label>
-            <div class="field-hint" style="color:var(--text-4)">
-              Requires both team VCs above to be set. Bot needs the
-              <strong>Move Members</strong> permission in your Discord server.
-              Default OFF — opt in.
-            </div>
-          </div>
-          <!-- v0.12.1 — round summaries.  During a live MatchZy match,
-               every round-end posts a small embed to the same veto
-               channel as the live veto embed.  RCON-poll based; toggle
-               can also be flipped from inside Discord via the
-               /round-summaries slash command. -->
-          <div class="field" style="margin-top:10px">
-            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-              <input type="checkbox" id="cfg-discord-round-summaries"
-                     ${cfg.discord_round_summaries_enabled ? 'checked' : ''}>
-              <span>Post round summaries to the veto channel during a live match</span>
-            </label>
-            <div class="field-hint" style="color:var(--text-4)">
-              Polls the server every 3s and posts an embed after each round.
-              Uses the same channel as the live veto embed above.  Can also
-              be toggled from Discord via <code>/round-summaries on|off</code>.
-              Default OFF.
-            </div>
-          </div>
-          <div id="cfg-discord-status" class="text-sm" style="margin-top:12px;color:var(--text-3)">
-            <!-- Populated by pollState from /api/state.discord_bot -->
-          </div>
-          <button class="btn btn-accent btn-full mt-16" id="cfg-discord-save">Save Discord Settings</button>
 
-          <!-- v0.11.0 polish — verification helpers for Layer 1A + 1C.
-               Save settings first, then use these to confirm the bot can
-               post to your channel + DM you without walking a full veto. -->
-          <div style="margin-top:18px;padding-top:18px;border-top:1px solid var(--line-1)">
-            <div style="font-family:var(--font-mono);font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--text-3);margin-bottom:10px">
-              Connection check
-            </div>
-            <div class="flex gap-8">
-              <button class="btn btn-ghost flex-1" id="cfg-discord-test-embed"
-                      title="Post a sample embed to your configured veto channel">
-                📤 Send test embed
-              </button>
-              <button class="btn btn-ghost flex-1" id="cfg-discord-test-dm"
-                      title="DM a sample message to a Discord user (paste your own ID for a self-test)">
-                📨 Send test DM
-              </button>
-            </div>
-            <small style="color:var(--text-4);font-size:11px;display:block;margin-top:8px">
-              Use these to verify Layer 1C (embed posting) and Layer 1A (captain DMs) work
-              for your bot without having to walk a full veto session.
-            </small>
-          </div>
-        </div>
-        ` : ''}
+          <hr class="cfg-card-divider">
 
-        ${isLocal ? `
-        <div class="config-label">Troubleshooting</div>
-        <div class="card mb-16">
-          <div style="font-size:12px;color:var(--text-3);line-height:1.5;margin-bottom:10px">
-            Generates a single text snapshot covering app state, the
-            active veto session, plugin manifest, Discord bot status,
-            and the last 80 log lines.  Secrets are masked.  Copy +
-            paste into your support channel when something breaks.
-          </div>
-          <button class="btn btn-accent btn-full" id="cfg-diag-snapshot">
-            🔧 Copy diagnostic snapshot to clipboard
-          </button>
-        </div>
-
-        <div class="config-label">Security</div>
-        <div class="card mb-16">
-          <div class="flex-col gap-8">
-            <div class="field"><label>Admin PIN (4+ digits, full web-panel access)</label>
-              <input class="input" id="cfg-pin" type="password"
-                     value="" maxlength="8"
-                     placeholder="${cfg.admin_pin ? '(unchanged — leave blank to keep)' : '(set a PIN)'}"></div>
-            <div class="field"><label>Guest PIN (optional — limited remote access: maps, modes &amp; workshop downloads only. Blank = off)</label>
-              <input class="input" id="cfg-guest-pin" type="password"
-                     value="" maxlength="8"
-                     placeholder="${cfg.guest_pin ? '(unchanged — leave blank to keep, type DISABLE to remove)' : '(disabled)'}"></div>
-            <div class="field"><label>RCON Password (auto-generated, change if needed)</label>
-              <input class="input" id="cfg-rcon-pw" type="password"
-                     value=""
-                     placeholder="${cfg.rcon_password ? '(unchanged — leave blank to keep)' : '(none set)'}"></div>
-          </div>
-          <button class="btn btn-accent btn-full mt-16" id="cfg-security-save">Save Security Settings</button>
-        </div>
-        ` : ''}
-
-        <div class="config-label">Bots</div>
-        <div class="card mb-16">
           <div class="toggle-row">
             <div class="toggle-info">
               <strong>Use bots</strong>
@@ -4611,58 +4996,246 @@ pages['config'] = async function() {
                 `<option ${d===cfg.bot_difficulty?'selected':''}>${d}</option>`).join('')}
             </select>
           </div>
-          <button class="btn btn-accent btn-full mt-16" id="cfg-bot-save">Save</button>
-        </div>
-      </div>
 
-      <!-- Right column -->
-      <div>
-
-        ${isLocal ? `
-        <div class="config-label">Steam Account</div>
-        <div class="card mb-16">
-          <div class="flex-col gap-8">
-            <div class="field"><label>Username</label>
-              <input class="input" id="cfg-steam-user" value="${esc(cfg.steam_username||'')}"></div>
-            <div class="field"><label>Password</label>
-              <input class="input" id="cfg-steam-pw" type="password" placeholder="Stored securely"></div>
-            <div class="text-sub text-sm">
-              Use a dedicated Steam account, not your personal one.
-              ${cfg.steam_session_active ? '<span class="text-green">✓ Active session</span>' : ''}
-            </div>
-          </div>
-          <div class="flex gap-8 mt-16">
-            <button class="btn btn-ghost flex-1" id="cfg-steam-save">Save Credentials</button>
-            <button class="btn btn-accent flex-1" id="cfg-steam-login">Login (Interactive)</button>
-          </div>
+          <button class="btn btn-accent btn-full" id="cfg-server-save">Save Server Settings</button>
         </div>
+      </section>
 
-        <div class="config-label">Server Installation</div>
-        <div class="card mb-16">
-          <div class="field mb-16">
-            <label>Server Directory</label>
-            <div class="flex gap-8">
-              <input class="input flex-1" id="cfg-server-dir" value="${esc(cfg.server_dir||'')}">
-              <button class="btn btn-ghost btn-sm" id="cfg-browse-btn">Browse…</button>
-            </div>
-          </div>
-          <div class="flex gap-8">
-            <button class="btn btn-ghost flex-1" id="cfg-dir-save">Set Directory</button>
-            <button class="btn btn-accent flex-1" id="cfg-install-btn">Install / Reinstall</button>
-          </div>
-          <button class="btn btn-ghost btn-full mt-12" id="cfg-update-btn">↻ Update / Validate CS2 (steamcmd)</button>
-          <div class="text-xs" style="color:var(--text-4);margin-top:6px">Forces a steamcmd <code>app_update 730 validate</code> in place — use this when you need to update even if no update badge is showing (the badge relies on a mirror that can lag Valve). Stop the server first.</div>
-        </div>
-        <div class="config-label">RCON Console</div>
+      <!-- ── Match Flow ────────────────────────────────────────────── -->
+      <section class="cfg-section">
+        <h2 class="cfg-section-title">Match Flow</h2>
+        <p class="cfg-section-sub">
+          Veto and MatchZy match-controller settings.
+        </p>
+
         <div class="card">
-          <div class="rcon-output" id="rcon-output">Ready. Type a command below.</div>
-          <div class="rcon-row">
-            <input class="input" id="rcon-cmd" placeholder="e.g. status" spellcheck="false">
-            <button class="btn btn-accent" id="rcon-send">Send</button>
+          <div class="field">
+            <label>Public Share URL <span class="text-sub">(for captain links on the internet)</span></label>
+            <input class="input" id="cfg-public-share-url" type="text"
+                   value="${esc(cfg.public_share_url || '')}"
+                   placeholder="https://random-words.trycloudflare.com">
+            <small class="text-sub text-sm" style="display:block;margin-top:6px;line-height:1.5">
+              When set, captain join URLs use this base instead of <code>http://&lt;public_ip&gt;:&lt;port&gt;</code>.
+              Paste your Cloudflare tunnel URL here (see <a href="https://github.com/jacquesvniekerk-eng/OblivionServerTool/blob/master/TONIGHT.md">TONIGHT.md</a> for the tunnel setup).
+              Leave blank to fall back to <code>public_ip + port</code> (which requires a port-forward).
+            </small>
+          </div>
+          <div class="toggle-row">
+            <div class="toggle-info">
+              <strong>Auto-launch when both captains ready</strong>
+              <small>Fire <code>matchzy_loadmatch</code> automatically when both captains tick Ready on the finale page. Off by default — operator clicks GO manually so they can verify mode/server first.</small>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="cfg-veto-auto-launch" ${cfg.veto_auto_launch_on_ready?'checked':''}>
+              <span class="toggle-track"></span><span class="toggle-thumb"></span>
+            </label>
+          </div>
+          ${isLocal ? `
+          <div class="field">
+            <label>MatchZy cvars <span class="text-sub">(override the defaults baked into the match-config)</span></label>
+            <div id="cfg-matchzy-cvars-list" class="cfg-cvar-list">
+              <!-- rendered below via _renderMatchzyCvars() -->
+            </div>
+            <button class="btn btn-ghost btn-sm" id="cfg-matchzy-cvar-add" type="button" style="margin-top:6px">
+              + Add cvar
+            </button>
+            <small class="text-sub text-sm" style="display:block;margin-top:6px;line-height:1.5">
+              Merged on top of the built-in defaults
+              (<code>mp_warmup_pausetimer=0</code>, <code>matchzy_minimum_ready_required=2</code>)
+              when the finale writes the MatchZy config. Your row wins on conflicts. Leave the
+              <em>value</em> blank to actively suppress a default cvar.
+              Examples: <code>matchzy_knife_enabled_default 1</code>,
+              <code>matchzy_pause_after_warmup 1</code>.
+            </small>
+          </div>
+          ` : ''}
+          <button class="btn btn-accent btn-full" id="cfg-veto-save">Save Match Settings</button>
+        </div>
+      </section>
+
+      ${isLocal ? `
+      <!-- ── Discord ───────────────────────────────────────────────── -->
+      <section class="cfg-section">
+        <h2 class="cfg-section-title">Discord</h2>
+        <p class="cfg-section-sub">
+          Bot integration: DM captain links, voice-channel roster pull, live veto embed, auto-move
+          to team VCs, round summaries. See
+          <a href="https://github.com/jacquesvniekerk-eng/OblivionServerTool/blob/master/DISCORD.md">DISCORD.md</a>
+          for the 5-minute setup guide.
+        </p>
+
+        <div class="card">
+          <div class="cfg-card-title">Connection</div>
+          <div class="field">
+            <label>Bot Token <span class="text-sub">(local-only — never sent to remote sessions)</span></label>
+            <input class="input" id="cfg-discord-bot-token" type="password"
+                   value=""
+                   placeholder="${cfg.discord_bot_token ? '(unchanged — leave blank to keep, type CLEAR to remove)' : 'MTAxxxxxx.xxxxxxx.xxxxxxx...'}">
+          </div>
+          <div class="field">
+            <label>Server (Guild) ID</label>
+            <input class="input" id="cfg-discord-guild-id" type="text" inputmode="numeric"
+                   value="${esc(cfg.discord_guild_id||'')}"
+                   placeholder="123456789012345678">
+          </div>
+
+          <hr class="cfg-card-divider">
+          <div class="cfg-card-title">Channels</div>
+          <div class="field">
+            <label>Veto Embed Channel ID <span class="text-sub">(optional — blank skips live embeds)</span></label>
+            <div class="flex gap-8">
+              <input class="input flex-1" id="cfg-discord-channel-id" type="text" inputmode="numeric"
+                     value="${esc(cfg.discord_veto_channel_id||'')}"
+                     placeholder="234567890123456789">
+              <button class="btn btn-ghost" id="cfg-discord-channel-browse"
+                      title="Browse the bot's text channels and pick one">
+                🔍 Browse
+              </button>
+            </div>
+          </div>
+          <div class="field">
+            <label>Default Voice Channel ID <span class="text-sub">(optional — blank shows picker each session)</span></label>
+            <div class="flex gap-8">
+              <input class="input flex-1" id="cfg-discord-voice-channel-id" type="text" inputmode="numeric"
+                     value="${esc(cfg.discord_voice_channel_id||'')}"
+                     placeholder="345678901234567890">
+              <button class="btn btn-ghost" id="cfg-discord-voice-browse"
+                      title="Browse the bot's voice channels and pick one">
+                🔍 Browse
+              </button>
+            </div>
+            <div id="cfg-discord-voice-status" class="text-sm text-sub" style="margin-top:6px;min-height:18px"></div>
+          </div>
+          <div class="field">
+            <label>Team A Voice Channel ID <span class="text-sub">(optional — needed for /move-teams)</span></label>
+            <div class="flex gap-8">
+              <input class="input flex-1" id="cfg-discord-team-a-vc-id" type="text" inputmode="numeric"
+                     value="${esc(cfg.discord_team_a_voice_channel_id||'')}"
+                     placeholder="456789012345678901">
+              <button class="btn btn-ghost" id="cfg-discord-team-a-vc-browse"
+                      title="Browse the bot's voice channels and pick one">
+                🔍 Browse
+              </button>
+            </div>
+          </div>
+          <div class="field">
+            <label>Team B Voice Channel ID <span class="text-sub">(optional — needed for /move-teams)</span></label>
+            <div class="flex gap-8">
+              <input class="input flex-1" id="cfg-discord-team-b-vc-id" type="text" inputmode="numeric"
+                     value="${esc(cfg.discord_team_b_voice_channel_id||'')}"
+                     placeholder="567890123456789012">
+              <button class="btn btn-ghost" id="cfg-discord-team-b-vc-browse"
+                      title="Browse the bot's voice channels and pick one">
+                🔍 Browse
+              </button>
+            </div>
+          </div>
+
+          <hr class="cfg-card-divider">
+          <div class="cfg-card-title">Behaviour</div>
+          <div class="field">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" id="cfg-discord-auto-move"
+                     ${cfg.discord_auto_move_on_distribute_enabled ? 'checked' : ''}>
+              <span>Auto-move teams to their VCs after Distribute</span>
+            </label>
+            <small class="text-sub text-sm" style="display:block;margin-top:6px;line-height:1.5">
+              Requires both team VCs above to be set. Bot needs the
+              <strong>Move Members</strong> permission. Default OFF.
+            </small>
+          </div>
+          <div class="field">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" id="cfg-discord-round-summaries"
+                     ${cfg.discord_round_summaries_enabled ? 'checked' : ''}>
+              <span>Post round summaries to the veto channel during a live match</span>
+            </label>
+            <small class="text-sub text-sm" style="display:block;margin-top:6px;line-height:1.5">
+              Polls the server every 3s and posts an embed after each round. Can also
+              be toggled from Discord via <code>/round-summaries on|off</code>. Default OFF.
+            </small>
+          </div>
+          <div class="field">
+            <label>Discord Webhook URL <span class="text-sub">(post finale results to a channel)</span></label>
+            <input class="input" id="cfg-discord-webhook" type="password"
+                   value=""
+                   placeholder="${cfg.discord_webhook_url ? '(unchanged — leave blank to keep, type CLEAR to remove)' : 'https://discord.com/api/webhooks/...'}">
+            <small class="text-sub text-sm" style="display:block;margin-top:6px;line-height:1.5">
+              When set, the tool POSTs an embed (teams + maplist + decider + connect string)
+              to this Discord channel when a finale completes. Captures most of the bot's value
+              without the gateway setup. <strong>Create one:</strong> Discord channel → ⚙ → Integrations → Webhooks → New Webhook → Copy URL.
+            </small>
+          </div>
+          <div id="cfg-discord-status" class="text-sub text-sm" style="margin-top:8px"></div>
+
+          <button class="btn btn-accent btn-full" id="cfg-discord-save">Save Discord Settings</button>
+
+          <!-- Connection check -->
+          <div class="cfg-conn-check">
+            <div class="cfg-conn-check-label">Connection check</div>
+            <div class="flex gap-8">
+              <button class="btn btn-ghost flex-1" id="cfg-discord-test-embed"
+                      title="Post a sample embed to your configured veto channel">
+                📤 Send test embed
+              </button>
+              <button class="btn btn-ghost flex-1" id="cfg-discord-test-dm"
+                      title="DM a sample message to a Discord user (paste your own ID for a self-test)">
+                📨 Send test DM
+              </button>
+            </div>
+            <small class="text-sub text-sm" style="display:block;margin-top:8px">
+              Verifies the bot can post to your channel + DM you, without walking a full veto.
+            </small>
           </div>
         </div>
-        ` : ''}
-      </div>
+      </section>
+
+      <!-- ── Tools (3-card row) ────────────────────────────────────── -->
+      <section class="cfg-section">
+        <h2 class="cfg-section-title">Tools</h2>
+        <p class="cfg-section-sub">
+          Operator utilities — Windows performance, in-game RCON, and the diagnostic snapshot.
+        </p>
+
+        <div class="cfg-tools-row">
+          <div class="card">
+            <div class="cfg-card-title">Gaming Mode</div>
+            <small class="text-sub text-sm" style="display:block;margin-bottom:12px;line-height:1.5">
+              Flips Power Plan + Game Mode/DVR + pins cs2.exe to cores 0-3 so the server keeps a
+              stable tickrate while you play. Runs <code>scripts\\gaming-mode.ps1</code>.
+            </small>
+            <div class="flex gap-8" style="flex-wrap:wrap">
+              <button class="btn btn-accent" id="cfg-gaming-on" title="Switch to High Performance + pin cs2.exe to cores 0-3">⚡ ON</button>
+              <button class="btn btn-ghost" id="cfg-gaming-off" title="Restore Balanced power plan, drop core pinning">💤 OFF</button>
+              <button class="btn btn-ghost" id="cfg-gaming-status" title="Show current Power Plan / Game Mode / affinity">📊 Status</button>
+            </div>
+            <pre id="cfg-gaming-output" class="text-mono text-sm"
+                 style="margin-top:12px;max-height:240px;overflow:auto;background:var(--bg-1);padding:10px;display:none"></pre>
+          </div>
+
+          <div class="card">
+            <div class="cfg-card-title">Diagnostic Snapshot</div>
+            <small class="text-sub text-sm" style="display:block;margin-bottom:12px;line-height:1.5">
+              Single text snapshot covering app state, active veto session, plugin manifest, Discord bot
+              status, and the last 80 log lines. Secrets masked. Copy + paste into your support channel
+              when something breaks.
+            </small>
+            <button class="btn btn-accent btn-full" id="cfg-diag-snapshot">
+              🔧 Copy to clipboard
+            </button>
+          </div>
+
+          <div class="card">
+            <div class="cfg-card-title">RCON Console</div>
+            <div class="rcon-output" id="rcon-output">Ready. Type a command below.</div>
+            <div class="rcon-row" style="margin-top:10px">
+              <input class="input" id="rcon-cmd" placeholder="e.g. status" spellcheck="false">
+              <button class="btn btn-accent" id="rcon-send">Send</button>
+            </div>
+          </div>
+        </div>
+      </section>
+      ` : ''}
 
     </div>`;
 
@@ -4747,18 +5320,10 @@ pages['config'] = async function() {
       }
       data.matchzy_cvars = obj;
     }
-    // Discord webhook only present for local sessions.  "CLEAR" magic
-    // word lets the operator empty the field; blank = leave existing.
-    const discordEl = el('cfg-discord-webhook');
-    if (discordEl) {
-      const dv = discordEl.value.trim();
-      if (dv === 'CLEAR') data.discord_webhook_url = '';
-      else if (dv) data.discord_webhook_url = dv;
-      // else leave unset → server keeps existing value
-    }
+    // v0.14.2 — Discord webhook moved to the Discord card's save handler.
     try {
       await api.setConfig(data);
-      toast('Veto settings saved');
+      toast('Match settings saved');
     } catch (e) { toast(e.message, 'var(--bad)'); }
   });
 
@@ -4783,6 +5348,15 @@ pages['config'] = async function() {
     if (tokenVal === 'CLEAR') data.discord_bot_token = '';
     else if (tokenVal) data.discord_bot_token = tokenVal;
     // else leave undefined → server keeps existing value
+    // v0.14.2 — webhook moved from cfg-veto-save into this handler so all
+    // Discord-flavoured settings save together.  "CLEAR" magic word empties
+    // the field; blank keeps the existing value.
+    const webhookEl = el('cfg-discord-webhook');
+    if (webhookEl) {
+      const wv = webhookEl.value.trim();
+      if (wv === 'CLEAR') data.discord_webhook_url = '';
+      else if (wv) data.discord_webhook_url = wv;
+    }
     try {
       await api.setConfig(data);
       toast('Discord settings saved — bot will connect in a moment if a token is set');
@@ -4948,6 +5522,8 @@ pages['config'] = async function() {
     }
   });
 
+  // v0.14.2 — Bots merged into Server card.  Server save now also handles
+  // bots_enabled + bot_difficulty (drops the standalone cfg-bot-save button).
   el('cfg-server-save').addEventListener('click', async () => {
     const data = {
       hostname:              el('cfg-hostname').value,
@@ -4955,6 +5531,8 @@ pages['config'] = async function() {
       tickrate_128:          el('cfg-tickrate').checked,
       auto_start:            el('cfg-autostart').checked,
       auto_restart_on_crash: el('cfg-autorestart').checked,
+      bots_enabled:          el('cfg-bots-enabled').checked,
+      bot_difficulty:        el('cfg-bot-diff').value,
     };
     if (isLocal) {
       data.gslt_token        = el('cfg-gslt').value;
@@ -5022,15 +5600,7 @@ pages['config'] = async function() {
     }
   });
 
-  el('cfg-bot-save').addEventListener('click', async () => {
-    try {
-      await api.setConfig({
-        bot_difficulty: el('cfg-bot-diff').value,
-        bots_enabled:   el('cfg-bots-enabled').checked,
-      });
-      toast('Bot settings saved');
-    } catch (e) { toast(e.message, 'var(--red)'); }
-  });
+  // v0.14.2 — cfg-bot-save removed; Bots are now part of cfg-server-save above.
 
   if (isLocal) {
     el('cfg-steam-save').addEventListener('click', async () => {

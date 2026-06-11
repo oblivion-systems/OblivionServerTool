@@ -202,6 +202,21 @@ const api = (() => {
     // (Power Plan / Game Mode / Game DVR / cs2.exe core affinity).  Local-only.
     gamingMode:    (mode) => post('/api/system/gaming_mode', { mode }),
 
+    // ── Plugin Manager (v0.13.2 + v0.14.0) ────────────────────────────────
+    plugins: {
+      list:     ()              => get('/api/plugins'),
+      // Activate a plugin by switching to a mode that uses it.  Pass mode=null
+      // for single-mode plugins (backend picks); pass mode for multi-mode
+      // plugins like MatchZy (Practice/3v3/4v4/5v5) or K4-Arenas (1v1/2v2).
+      activate: (slug, mode = null) => post('/api/plugins/activate',
+                                            mode ? { slug, mode } : { slug }),
+      // Switch to vanilla Competitive — undeploys all managed plugins.
+      vanilla:  ()              => post('/api/plugins/vanilla', {}),
+      // v0.14.0: curated packs — one-click recipes (mode + map + plugins).
+      packs:     ()             => get('/api/plugins/packs'),
+      applyPack: (packId)       => post('/api/plugins/apply_pack', { pack_id: packId }),
+    },
+
     // ── Game data ─────────────────────────────────────────────────────────
     modes:            ()  => get('/api/data/modes'),
     maps:             ()  => get('/api/data/maps'),

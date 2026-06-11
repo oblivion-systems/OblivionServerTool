@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "source": "bundled",
+  "generated_at": "2026-06-10",
+  "comment": "Plugin Manager catalog — display metadata for plugins shipped inside the .exe and (eventually) plugins fetched from OblivionPluginRegistry. Edit this file to surface new plugin descriptions without an app release; the loader reads it at startup.  Schema_version is bumped only on breaking field changes — additive changes are allowed without bumping.",
+  "plugins": [
+    {
+      "slug": "warcraft",
+      "display_name": "Warcraft",
+      "summary": "RPG overlay — 9 classes, XP system, purchasable abilities.",
+      "author": "NightFuryPrime (Oblivion patched build)",
+      "source": "bundled",
+      "versions": []
+    },
+    {
+      "slug": "retakes_b3none",
+      "display_name": "Retakes (B3none)",
+      "summary": "Bombsite retakes — curated spawns + RetakesAllocator loadouts.",
+      "author": "B3none + yonilerner",
+      "source": "bundled",
+      "versions": []
+    },
+    {
+      "slug": "deathmatch",
+      "display_name": "Deathmatch",
+      "summary": "Instant respawn deathmatch with spawn protection.",
+      "author": "shobhit-pathak",
+      "source": "bundled",
+      "versions": []
+    },
+    {
+      "slug": "jailbreak",
+      "display_name": "Jailbreak",
+      "summary": "T vs CT prison-style roleplay gamemode.",
+      "author": "CSS-Jailbreak community",
+      "source": "bundled",
+      "versions": []
+    },
+    {
+      "slug": "practice",
+      "display_name": "MatchZy",
+      "summary": "Competitive match controller — knife round, pauses, demos, stats.",
+      "author": "shobhit-pathak",
+      "source": "bundled",
+      "versions": []
+    },
+    {
+      "slug": "arenas",
+      "display_name": "K4-Arenas",
+      "summary": "1v1 / 2v2 duel ladder with elo + queue.",
+      "author": "K4ryuu",
+      "source": "bundled",
+      "versions": []
+    },
+    {
+      "slug": "zombie",
+      "display_name": "CS2Fixes (zombie base)",
+      "summary": "Engine-level fixes that unlock ZombieMod-style gameplay.",
+      "author": "Source2ZE",
+      "source": "bundled",
+      "versions": []
+    },
+    {
+      "slug": "zombie_ze",
+      "display_name": "Zombie Escape",
+      "summary": "ZE layer — activates zm_enable + loads ZombieReborn workshop pack.",
+      "author": "Source2ZE + Oblivion config",
+      "source": "bundled",
+      "versions": []
+    }
+  ]
+}

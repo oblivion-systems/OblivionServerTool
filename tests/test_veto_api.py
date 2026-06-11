@@ -2549,6 +2549,473 @@ t('match_events: start/stop are idempotent',
   t_match_events_start_stop_idempotent)
 
 
+# ─── v0.13.2 / task #92 — Plugin Manager API ─────────────────────────────
+
+def t_api_plugins_shape():
+    """/api/plugins returns runtime + manifest + bundled sections; the
+    bundled list covers every slug referenced in _MODE_PLUGIN_NAMES."""
+    ac, app, c = _new_app()
+    _login(c)
+    # /api/plugins GET is @require_local (audit fix #1 — csgo_dir is a
+    # filesystem path; don't leak it to remote captain/voter sessions).
+    from cs2servergui import web as _web
+    for tok in list(_web._sessions.keys()):
+        _web._sessions[tok]['is_local'] = True
+    r = c.get('/api/plugins')
+    if r.status_code != 200:
+        return False, f'status={r.status_code}'
+    body = r.get_json()
+    if not isinstance(body, dict):
+        return False, 'body not dict'
+    if not all(k in body for k in ('runtime', 'manifest', 'bundled', 'current_mode')):
+        return False, f'missing keys: {list(body.keys())}'
+    rt = body['runtime']
+    rt_keys = {'csgo_dir', 'csgo_dir_exists', 'css_present', 'metamod_patched'}
+    if not rt_keys.issubset(rt.keys()):
+        return False, f'runtime missing: {rt_keys - set(rt.keys())}'
+    from cs2servergui.core import _MODE_PLUGIN_NAMES
+    referenced = {s for ss in _MODE_PLUGIN_NAMES.values() for s in ss}
+    bundled_slugs = {b['slug'] for b in body['bundled']}
+    if not referenced.issubset(bundled_slugs):
+        return False, f'bundled missing referenced slugs: {referenced - bundled_slugs}'
+    return True, f'{len(body["bundled"])} bundled, runtime keys ok'
+t('plugins (v0.13.2): /api/plugins returns runtime + manifest + bundled',
+  t_api_plugins_shape)
+
+
+def t_api_plugins_catalog_descriptions_present():
+    """Every bundled slug that has a catalog entry surfaces display_name +
+    summary + author in the API response — the SPA's library grid would
+    look bald without them."""
+    ac, app, c = _new_app()
+    _login(c)
+    # /api/plugins GET is @require_local (audit fix #1 — csgo_dir is a
+    # filesystem path; don't leak it to remote captain/voter sessions).
+    from cs2servergui import web as _web
+    for tok in list(_web._sessions.keys()):
+        _web._sessions[tok]['is_local'] = True
+    r = c.get('/api/plugins')
+    if r.status_code != 200:
+        return False, f'status={r.status_code}'
+    body = r.get_json()
+    from cs2servergui.core import _PLUGIN_CATALOG
+    cataloged = [b for b in body['bundled'] if b['slug'] in _PLUGIN_CATALOG]
+    if not cataloged:
+        return False, 'no cataloged bundled entries surfaced'
+    missing = [b['slug'] for b in cataloged
+               if not (b.get('display_name') and b.get('summary'))]
+    if missing:
+        return False, f'no display_name/summary for: {missing}'
+    return True, f'{len(cataloged)} cataloged entries surfaced fully'
+t('plugins (v0.13.2): cataloged bundled entries surface display fields',
+  t_api_plugins_catalog_descriptions_present)
+
+
+def t_api_plugins_modes_reverse_map():
+    """Each bundled plugin reports the modes that use it via the reverse
+    map of _MODE_PLUGIN_NAMES — so the SPA card can say
+    'Used by: Practice, 3v3, 4v4, 5v5' for the practice slug."""
+    ac, app, c = _new_app()
+    _login(c)
+    # /api/plugins GET is @require_local (audit fix #1 — csgo_dir is a
+    # filesystem path; don't leak it to remote captain/voter sessions).
+    from cs2servergui import web as _web
+    for tok in list(_web._sessions.keys()):
+        _web._sessions[tok]['is_local'] = True
+    r = c.get('/api/plugins')
+    body = r.get_json()
+    from cs2servergui.core import _MODE_PLUGIN_NAMES
+    by_slug = {b['slug']: b for b in body['bundled']}
+    # 'practice' is used by 4 modes; sanity-check it.
+    expected = sorted(m for m, ss in _MODE_PLUGIN_NAMES.items() if 'practice' in ss)
+    actual = by_slug.get('practice', {}).get('modes', [])
+    return (sorted(actual) == expected), \
+           f'practice modes expected={expected} actual={actual}'
+t('plugins (v0.13.2): bundled entries report reverse mode mapping',
+  t_api_plugins_modes_reverse_map)
+
+
+# ─── v0.13.2 slice 2 — Activate / Switch-to-vanilla actions ──────────────
+
+def t_plugins_vanilla_happy_path():
+    """POST /api/plugins/vanilla with server stopped + csgo/ ready
+    succeeds, sets current_mode to Competitive, leaves manifest empty.
+    Local-only — forge is_local on the test session."""
+    ac, app, c = _new_app()
+    _login(c)
+    from cs2servergui import web as _web
+    for tok in list(_web._sessions.keys()):
+        _web._sessions[tok]['is_local'] = True
+    r = c.post('/api/plugins/vanilla')
+    if r.status_code != 200:
+        return False, f'status={r.status_code} body={r.get_data(as_text=True)[:120]!r}'
+    body = r.get_json() or {}
+    if body.get('mode') != 'Competitive':
+        return False, f'mode={body.get("mode")!r} expected=Competitive'
+    if ac.current_mode != 'Competitive':
+        return False, f'ac.current_mode={ac.current_mode!r}'
+    return True, f'mode={body["mode"]} plugins={body.get("plugins")}'
+t('plugins (v0.13.2): /api/plugins/vanilla switches to Competitive',
+  t_plugins_vanilla_happy_path)
+
+
+def t_plugins_vanilla_remote_403():
+    """Plugin actions are local-only — a non-local session gets 403.
+    Operators on a Cloudflare-tunnelled remote tab shouldn't be able to
+    silently swap plugins on the host."""
+    ac, app, c = _new_app()
+    _login(c)
+    # Don't forge is_local — test_client is naturally non-local.
+    r = c.post('/api/plugins/vanilla')
+    return r.status_code == 403, f'status={r.status_code} (want 403)'
+t('plugins (v0.13.2): /api/plugins/vanilla 403 for non-local sessions',
+  t_plugins_vanilla_remote_403)
+
+
+def t_plugins_activate_routes_to_restart_when_running():
+    """v0.14.1: activate while server running no longer 409s.  Backend
+    routes through change_map (async stop-deploy-restart) and returns 202
+    with restarting=True.  The mode picker has used this exact code path
+    since v0.10.x — there's no reason to be more restrictive here.
+
+    We stub change_map so the test doesn't actually try to bind a socket;
+    we only assert the endpoint chose the right branch."""
+    ac, app, c = _new_app()
+    _login(c)
+    from cs2servergui import web as _web
+    for tok in list(_web._sessions.keys()):
+        _web._sessions[tok]['is_local'] = True
+    calls = []
+    ac.change_map = lambda *a, **kw: calls.append((a, kw))  # type: ignore[method-assign]
+    ac.running = True
+    try:
+        r = c.post('/api/plugins/activate', json={'slug': 'warcraft'})
+    finally:
+        ac.running = False
+    if r.status_code != 202:
+        return False, f'status={r.status_code} body={r.get_data(as_text=True)[:120]!r}'
+    body = r.get_json() or {}
+    if not body.get('restarting'):
+        return False, f'restarting flag missing: {body}'
+    if not calls:
+        return False, 'change_map was not invoked'
+    # change_map(map_name, mode, is_workshop=..., caller=...) — mode must be
+    # Warcraft (the slug → mode auto-pick), and map must be from MODE_MAPS.
+    args, kwargs = calls[0]
+    if len(args) < 2 or args[1] != 'Warcraft':
+        return False, f'change_map called with wrong mode: {args!r}'
+    return True, f'restart routed; change_map({args[0]!r}, {args[1]!r})'
+t('plugins (v0.14.1): activate while running → 202 + change_map restart',
+  t_plugins_activate_routes_to_restart_when_running)
+
+
+def t_plugins_activate_rejects_unknown_slug():
+    ac, app, c = _new_app()
+    _login(c)
+    from cs2servergui import web as _web
+    for tok in list(_web._sessions.keys()):
+        _web._sessions[tok]['is_local'] = True
+    r = c.post('/api/plugins/activate', json={'slug': 'totally-not-a-real-plugin'})
+    return r.status_code == 400, f'status={r.status_code}'
+t('plugins (v0.13.2): activate rejects unknown slug with 400',
+  t_plugins_activate_rejects_unknown_slug)
+
+
+def t_plugins_activate_requires_mode_for_multimode():
+    """MatchZy (slug 'practice') is used by Practice/3v3/4v4/5v5.  Calling
+    activate without `mode` is ambiguous — backend must refuse and list
+    the valid modes so the SPA can prompt the operator."""
+    ac, app, c = _new_app()
+    _login(c)
+    from cs2servergui import web as _web
+    for tok in list(_web._sessions.keys()):
+        _web._sessions[tok]['is_local'] = True
+    r = c.post('/api/plugins/activate', json={'slug': 'practice'})
+    if r.status_code != 400:
+        return False, f'status={r.status_code}'
+    body = r.get_json() or {}
+    modes = body.get('modes', [])
+    expected = {'Practice', '3v3', '4v4', '5v5'}
+    return set(modes) == expected, f'modes={modes} expected={sorted(expected)}'
+t('plugins (v0.13.2): activate refuses ambiguous multi-mode slug',
+  t_plugins_activate_requires_mode_for_multimode)
+
+
+def t_plugins_activate_rejects_slug_mode_mismatch():
+    """If the operator passes `mode` that doesn't include the slug, refuse
+    rather than silently activating the wrong thing.  warcraft is used by
+    mode 'Warcraft' only — pairing it with '5v5' is operator error."""
+    ac, app, c = _new_app()
+    _login(c)
+    from cs2servergui import web as _web
+    for tok in list(_web._sessions.keys()):
+        _web._sessions[tok]['is_local'] = True
+    r = c.post('/api/plugins/activate', json={'slug': 'warcraft', 'mode': '5v5'})
+    return r.status_code == 400, f'status={r.status_code}'
+t('plugins (v0.13.2): activate refuses slug/mode mismatch',
+  t_plugins_activate_rejects_slug_mode_mismatch)
+
+
+def t_plugins_activate_warcraft_happy_path():
+    """Single-mode happy path: activating 'warcraft' (no mode arg needed)
+    sets current_mode='Warcraft' and reports the deployed plugin slug.
+    Confirms the slug→mode auto-pick branch works.
+
+    _verify_deployment is stubbed because it checks for an installed
+    MetaMod base under csgo/addons/metamod/, which the test temp dir
+    doesn't have.  We're verifying the endpoint contract here, not the
+    file-layout correctness of a real CS2 install."""
+    ac, app, c = _new_app()
+    _login(c)
+    from cs2servergui import web as _web
+    for tok in list(_web._sessions.keys()):
+        _web._sessions[tok]['is_local'] = True
+    ac._verify_deployment = lambda new_plugins: True  # type: ignore[method-assign]
+    r = c.post('/api/plugins/activate', json={'slug': 'warcraft'})
+    if r.status_code != 200:
+        return False, f'status={r.status_code} body={r.get_data(as_text=True)[:160]!r}'
+    body = r.get_json() or {}
+    return (body.get('mode') == 'Warcraft'
+            and 'warcraft' in body.get('plugins', [])
+            and ac.current_mode == 'Warcraft'), \
+           f'body={body} current_mode={ac.current_mode!r}'
+t('plugins (v0.13.2): activate warcraft (single-mode auto-pick) deploys + sets mode',
+  t_plugins_activate_warcraft_happy_path)
+
+
+# ─── v0.14.0 slice 3 — Curated packs ──────────────────────────────────────
+
+def t_plugins_packs_listed():
+    """GET /api/plugins/packs returns the 5 seed packs with derived plugin
+    lists.  Schema check — each pack has id/name/mode/summary, and the
+    plugins list is non-empty for every non-vanilla pack."""
+    ac, app, c = _new_app()
+    _login(c)
+    r = c.get('/api/plugins/packs')
+    if r.status_code != 200:
+        return False, f'status={r.status_code}'
+    body = r.get_json() or {}
+    packs = body.get('packs') or []
+    if len(packs) < 4:
+        return False, f'only {len(packs)} packs listed'
+    required = {'id', 'name', 'mode', 'summary', 'plugins'}
+    for p in packs:
+        if not required.issubset(p.keys()):
+            return False, f'pack {p.get("id")} missing keys: {required - set(p.keys())}'
+    # The vanilla pack should have empty plugins; all others non-empty.
+    for p in packs:
+        is_vanilla = p['id'].startswith('vanilla')
+        if is_vanilla and p['plugins']:
+            return False, f'vanilla pack {p["id"]} has plugins {p["plugins"]}'
+        if not is_vanilla and not p['plugins']:
+            return False, f'non-vanilla pack {p["id"]} has empty plugins'
+    return True, f'{len(packs)} packs OK'
+t('plugins (v0.14.0): /api/plugins/packs returns seed packs',
+  t_plugins_packs_listed)
+
+
+def t_plugins_apply_pack_vanilla_happy_path():
+    """Applying the vanilla pack switches mode to Competitive and stages
+    the pack's default map.  No deploy verification stub needed — vanilla
+    has zero plugins so deploy_plugins skips the verify path entirely."""
+    ac, app, c = _new_app()
+    _login(c)
+    from cs2servergui import web as _web
+    for tok in list(_web._sessions.keys()):
+        _web._sessions[tok]['is_local'] = True
+    r = c.post('/api/plugins/apply_pack', json={'pack_id': 'vanilla_competitive'})
+    if r.status_code != 200:
+        return False, f'status={r.status_code} body={r.get_data(as_text=True)[:160]!r}'
+    body = r.get_json() or {}
+    return (body.get('mode') == 'Competitive'
+            and body.get('map')  == 'de_dust2'
+            and ac.current_mode == 'Competitive'
+            and ac.current_map  == 'de_dust2'), \
+           f'body={body} cur_mode={ac.current_mode!r} cur_map={ac.current_map!r}'
+t('plugins (v0.14.0): apply_pack vanilla switches mode + stages map',
+  t_plugins_apply_pack_vanilla_happy_path)
+
+
+def t_plugins_apply_pack_rejects_unknown():
+    ac, app, c = _new_app()
+    _login(c)
+    from cs2servergui import web as _web
+    for tok in list(_web._sessions.keys()):
+        _web._sessions[tok]['is_local'] = True
+    r = c.post('/api/plugins/apply_pack', json={'pack_id': 'totally-fake-pack'})
+    return r.status_code == 400, f'status={r.status_code}'
+t('plugins (v0.14.0): apply_pack rejects unknown pack with 400',
+  t_plugins_apply_pack_rejects_unknown)
+
+
+def t_plugins_apply_pack_routes_to_restart_when_running():
+    """v0.14.1: apply_pack on a running server routes through change_map
+    (async restart) rather than 409ing the operator.  Pack's default_map
+    becomes the restart target."""
+    ac, app, c = _new_app()
+    _login(c)
+    from cs2servergui import web as _web
+    for tok in list(_web._sessions.keys()):
+        _web._sessions[tok]['is_local'] = True
+    calls = []
+    ac.change_map = lambda *a, **kw: calls.append((a, kw))  # type: ignore[method-assign]
+    ac.running = True
+    try:
+        r = c.post('/api/plugins/apply_pack', json={'pack_id': 'competitive_5v5'})
+    finally:
+        ac.running = False
+    if r.status_code != 202:
+        return False, f'status={r.status_code}'
+    body = r.get_json() or {}
+    if not body.get('restarting'):
+        return False, f'restarting flag missing: {body}'
+    if not calls:
+        return False, 'change_map was not invoked'
+    args, _kwargs = calls[0]
+    # Competitive 5v5 pack stages de_dust2 + mode 5v5.
+    if args[0] != 'de_dust2' or args[1] != '5v5':
+        return False, f'change_map args wrong: {args!r}'
+    return True, f'restart routed; change_map({args[0]!r}, {args[1]!r})'
+t('plugins (v0.14.1): apply_pack while running → 202 + change_map restart',
+  t_plugins_apply_pack_routes_to_restart_when_running)
+
+
+def t_plugins_apply_pack_remote_403():
+    ac, app, c = _new_app()
+    _login(c)
+    # Naturally non-local — apply_pack is @require_local.
+    r = c.post('/api/plugins/apply_pack', json={'pack_id': 'vanilla_competitive'})
+    return r.status_code == 403, f'status={r.status_code} (want 403)'
+t('plugins (v0.14.0): apply_pack 403 for non-local sessions',
+  t_plugins_apply_pack_remote_403)
+
+
+def t_plugins_pack_default_map_is_in_mode_pool():
+    """Sanity check: every pack's default_map must be in MODE_MAPS[mode]
+    (or the pool must be None — Jailbreak's workshop-only).  Stops a typo
+    in _PLUGIN_PACKS from silently 500-ing on apply."""
+    from cs2servergui.core import _PLUGIN_PACKS
+    from cs2servergui.config import MODE_MAPS
+    bad = []
+    for p in _PLUGIN_PACKS:
+        m = p.get('default_map')
+        if not m:
+            continue
+        pool = MODE_MAPS.get(p['mode'])
+        if pool is not None and m not in pool:
+            bad.append(f'{p["id"]}: {m} not in MODE_MAPS[{p["mode"]!r}]')
+    return not bad, '; '.join(bad) or 'all pack maps valid'
+t('plugins (v0.14.0): every pack default_map is in its mode pool',
+  t_plugins_pack_default_map_is_in_mode_pool)
+
+
+# ─── v0.14.0 slice 4 — File-based catalog ─────────────────────────────────
+
+def t_plugin_catalog_loaded_from_json_file():
+    """registry/catalog.json must exist + load cleanly + cover every slug
+    referenced by _MODE_PLUGIN_NAMES.  The JSON is now the sole source of
+    truth (audit fix #4 dropped the inline fallback dict to eliminate
+    drift), so a missing/broken file = immediate visible failure."""
+    import os as _os, json as _json
+    from cs2servergui.core import (
+        _PLUGIN_CATALOG, _MODE_PLUGIN_NAMES, _resolve_catalog_path,
+    )
+    path = _resolve_catalog_path()
+    if not _os.path.isfile(path):
+        return False, f'catalog.json missing at {path!r}'
+    with open(path, encoding='utf-8') as f:
+        doc = _json.load(f)
+    if doc.get('schema_version') != 1:
+        return False, f'schema_version={doc.get("schema_version")} expected 1'
+    json_slugs = {e['slug'] for e in (doc.get('plugins') or []) if 'slug' in e}
+    referenced = {s for ss in _MODE_PLUGIN_NAMES.values() for s in ss}
+    missing_in_json = referenced - json_slugs
+    if missing_in_json:
+        return False, f'catalog.json missing referenced slugs: {missing_in_json}'
+    # The LOADED catalog should agree with the file for every referenced slug.
+    for slug in referenced:
+        if slug not in _PLUGIN_CATALOG:
+            return False, f'loaded catalog missing {slug!r}'
+    return True, f'{len(json_slugs)} entries loaded from {_os.path.basename(path)}'
+t('plugins (v0.14.0): catalog loads from registry/catalog.json',
+  t_plugin_catalog_loaded_from_json_file)
+
+
+def t_plugin_catalog_load_failure_returns_empty_not_fallback():
+    """Audit fix #4: _load_plugin_catalog returns {} (not stale inline data)
+    when the JSON can't be parsed.  Operators see "unnamed" cards in the
+    SPA — a loud, fixable failure mode — rather than silently getting
+    outdated display strings."""
+    import io, sys as _sys
+    from cs2servergui.core import _load_plugin_catalog
+    from unittest import mock
+    # Point _resolve_catalog_path at a nonexistent file.
+    with mock.patch('cs2servergui.core._resolve_catalog_path',
+                    return_value='/nope/does-not-exist.json'):
+        # Capture stderr so the test output stays clean.
+        old_err = _sys.stderr
+        _sys.stderr = io.StringIO()
+        try:
+            result = _load_plugin_catalog()
+            err = _sys.stderr.getvalue()
+        finally:
+            _sys.stderr = old_err
+    if result != {}:
+        return False, f'expected empty dict, got {len(result)} entries'
+    if '[catalog]' not in err:
+        return False, f'expected stderr to include [catalog] tag; got {err!r}'
+    return True, 'empty dict + loud stderr log on missing catalog.json'
+t('plugins (v0.14.0): catalog load failure is loud, returns {}',
+  t_plugin_catalog_load_failure_returns_empty_not_fallback)
+
+
+def t_api_plugins_remote_403():
+    """Audit fix #1: /api/plugins GET is local-only.  A non-local session
+    (test_client is naturally non-local) gets 403 — proves the decorator
+    is in place and prevents future regressions that would re-leak
+    csgo_dir to remote captain/voter sessions."""
+    ac, app, c = _new_app()
+    _login(c)
+    r = c.get('/api/plugins')
+    return r.status_code == 403, f'status={r.status_code} (want 403)'
+t('plugins (v0.14.0 audit fix #1): /api/plugins 403 for non-local sessions',
+  t_api_plugins_remote_403)
+
+
+# ─── v0.14.0 slice 5 — Runtime bootstrap detection ───────────────────────
+
+def t_plugins_runtime_install_state_surfaced():
+    """/api/plugins runtime block must surface metamod_installed +
+    css_installed booleans separately from the looser csgo_dir_exists.
+    The SPA's bootstrap button toggles on these — if they go missing,
+    operators get no way to discover they need MetaMod/CSS."""
+    ac, app, c = _new_app()
+    _login(c)
+    # /api/plugins GET is @require_local (audit fix #1 — csgo_dir is a
+    # filesystem path; don't leak it to remote captain/voter sessions).
+    from cs2servergui import web as _web
+    for tok in list(_web._sessions.keys()):
+        _web._sessions[tok]['is_local'] = True
+    r = c.get('/api/plugins')
+    if r.status_code != 200:
+        return False, f'status={r.status_code}'
+    body = r.get_json() or {}
+    rt = body.get('runtime') or {}
+    required = {'metamod_installed', 'css_installed', 'metamod_patched',
+                'csgo_dir_exists', 'css_present'}
+    missing = required - set(rt.keys())
+    if missing:
+        return False, f'runtime missing keys: {missing}'
+    # In test temp dir there is no metamod/css install — both must be False.
+    if rt['metamod_installed'] is not False:
+        return False, f'metamod_installed={rt["metamod_installed"]!r} in clean tempdir'
+    if rt['css_installed'] is not False:
+        return False, f'css_installed={rt["css_installed"]!r} in clean tempdir'
+    return True, 'runtime install booleans present + correct in clean tempdir'
+t('plugins (v0.14.0): runtime block surfaces metamod_installed + css_installed',
+  t_plugins_runtime_install_state_surfaced)
+
+
 # ─── Auto-generated pytest cases ──────────────────────────────────────────
 def _slug(name):
     out = ''.join(c if c.isalnum() else '_' for c in name).strip('_').lower()

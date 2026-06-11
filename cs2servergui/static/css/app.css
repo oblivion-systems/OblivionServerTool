@@ -461,10 +461,18 @@ input[type="text"], input[type="password"], input[type="number"], select, textar
   font-family: var(--font-mono);
   font-size: 12px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase;
   border: 1px solid var(--line-1); background: var(--bg-2); color: var(--text-2);
-  transition: background .12s, color .12s, border-color .12s;
+  transition: background .12s, color .12s, border-color .12s, box-shadow .12s;
 }
-.btn:hover  { background: var(--bg-3); color: var(--text-1); }
-.btn:active { background: var(--bg-3); }
+/* v0.14.2 polish — accent-tinted border + soft glow on hover so buttons
+   without the bright purple fill (.btn / .btn-ghost / .btn-neutral) still
+   read as obviously hoverable.  Matches the brand colour at low intensity
+   instead of the previous one-shade background nudge that was easy to miss. */
+.btn:hover  {
+  background: var(--bg-3); color: var(--text-1);
+  border-color: var(--accent);
+  box-shadow: 0 0 16px -8px var(--glow-1);
+}
+.btn:active { background: var(--bg-3); box-shadow: none; }
 .btn:disabled { opacity: .35; pointer-events: none; }
 .btn svg { width: 12px; height: 12px; stroke: currentColor; fill: none;
            stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
@@ -501,12 +509,23 @@ input[type="text"], input[type="password"], input[type="number"], select, textar
 .btn-ghost {
   background: transparent; color: var(--text-3); border-color: var(--line-1);
 }
-.btn-ghost:hover { background: var(--bg-2); color: var(--text-1); border-color: var(--line-2); }
+/* v0.14.2 polish — ghost is the most-used non-accent variant (Browse buttons,
+   Maps actions, Discord test, RCON Send, Tools row).  Same accent-tinted
+   hover recipe as base .btn so the affordance is consistent. */
+.btn-ghost:hover {
+  background: var(--bg-2); color: var(--text-1);
+  border-color: var(--accent);
+  box-shadow: 0 0 16px -8px var(--glow-1);
+}
 
 .btn-neutral {
   background: var(--bg-2); color: var(--text-1); border-color: var(--line-2);
 }
-.btn-neutral:hover { background: var(--bg-3); }
+.btn-neutral:hover {
+  background: var(--bg-3);
+  border-color: var(--accent);
+  box-shadow: 0 0 16px -8px var(--glow-1);
+}
 
 .btn-sm   { padding: 7px 12px; font-size: 11px; letter-spacing: 0.12em; }
 .btn-full { width: 100%; }
@@ -1097,6 +1116,80 @@ kbd {
   letter-spacing: 0.22em; color: var(--text-2); margin-bottom: 12px;
   padding-bottom: 8px;
   border-bottom: 1px solid var(--line-1);
+}
+
+/* v0.14.2 — single-column Config restructure.  Each functional area is a
+   <section class="cfg-section"> with a strong top divider + accent-bar
+   title so the eye can chunk the page into Setup → Security → Server →
+   Match → Discord → Tools without reading every label. */
+.cfg-section {
+  margin-top: 40px;
+  padding-top: 28px;
+  border-top: 2px solid var(--line-1);
+}
+.cfg-section:first-of-type {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+.cfg-section-title {
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-1);
+  margin: 0 0 6px 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.cfg-section-title::before {
+  content: "";
+  display: inline-block;
+  width: 4px; height: 22px;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+.cfg-section-sub {
+  font-size: 12px;
+  color: var(--text-3);
+  margin: 0 0 18px 16px;   /* 16px = accent-bar width + gap, keeps text aligned */
+  line-height: 1.5;
+}
+.cfg-card-title {
+  font-size: 11px; font-weight: 600;
+  letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--text-2);
+  margin-bottom: 14px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line-1);
+}
+.cfg-card-divider {
+  border: none;
+  border-top: 1px solid var(--line-1);
+  margin: 22px 0 18px 0;
+}
+.cfg-tools-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 14px;
+}
+/* Each card stacks its fields with consistent spacing — replaces ad-hoc
+   inline `margin-top:14px` that crept into the old layout. */
+.cfg-section .card .field + .field,
+.cfg-section .card .toggle-row + .toggle-row,
+.cfg-section .card .field + .toggle-row,
+.cfg-section .card .toggle-row + .field { margin-top: 14px; }
+.cfg-section .card .btn-full { margin-top: 18px; }
+.cfg-conn-check {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line-1);
+}
+.cfg-conn-check-label {
+  font-family: var(--font-mono);
+  font-size: 10px; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--text-3);
+  margin-bottom: 10px;
 }
 .presets-row { display: flex; gap: 8px; align-items: flex-end; }
 .preset-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
@@ -3556,3 +3649,159 @@ body.compact #content        { padding: 14px 16px; }
     animation: none !important;
   }
 }
+
+/* ═══════════════════════════════════════════════════════ PLUGIN MANAGER TAB */
+/* v0.13.2 / task #92 — slice 1: read-only Plugins tab.
+   Three sections: runtime status grid, deployed summary, library card grid. */
+
+.plugins-runtime-grid { display: flex; flex-direction: column; gap: 10px; }
+.plugins-runtime-row  {
+  display: grid;
+  grid-template-columns: 28px 240px 1fr;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+}
+.plugins-runtime-label { color: var(--text-2); }
+.plugins-runtime-value { color: var(--text-3); font-family: var(--font-mono); }
+.plugins-runtime-dot {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  border: 1px solid var(--line-1);
+  font-weight: 700; font-size: 12px;
+}
+.plugins-runtime-dot.ok  { color: var(--ok);  border-color: oklch(0.74 0.16 145 / 0.4); background: oklch(0.74 0.16 145 / 0.08); }
+.plugins-runtime-dot.off { color: var(--bad); border-color: oklch(0.65 0.18 25 / 0.4);  background: oklch(0.65 0.18 25 / 0.08); }
+.plugins-runtime-dot.unk { color: var(--text-3); }
+
+.plugins-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+.plugin-card {
+  background: var(--bg-2);
+  border: 1px solid var(--line-1);
+  padding: 14px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.plugin-card-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px;
+}
+.plugin-card-title {
+  font-size: 13px; font-weight: 600; color: var(--text-1);
+  letter-spacing: 0.04em;
+}
+
+/* Reusable pill — shared with Currently Deployed chips */
+.pill {
+  display: inline-flex; align-items: center;
+  padding: 2px 8px;
+  font-size: 10px; font-weight: 600; letter-spacing: 0.14em;
+  text-transform: uppercase;
+  border: 1px solid var(--line-1);
+  color: var(--text-3);
+  background: var(--bg-1);
+}
+.pill-ok   { color: var(--ok);   border-color: oklch(0.74 0.16 145 / 0.4); background: oklch(0.74 0.16 145 / 0.08); }
+.pill-warn { color: var(--warn); border-color: oklch(0.80 0.14 80 / 0.4);  background: oklch(0.80 0.14 80 / 0.08); }
+.pill-mute { color: var(--text-3); }
+
+.chip {
+  display: inline-flex; align-items: center;
+  padding: 4px 10px;
+  margin-right: 4px;
+  font-size: 11px;
+  border: 1px solid var(--line-1);
+  background: var(--bg-2);
+  color: var(--text-2);
+}
+
+/* Multi-mode plugin cards (MatchZy → 4 modes; arenas → 2 modes) get a
+   sibling <select> + button so the operator picks which mode to activate. */
+.plugin-card-actions {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 6px;
+}
+.plugin-card-actions .select {
+  flex: 1; min-width: 0;
+  font-size: 12px;
+}
+.plugin-card .btn {
+  margin-top: 6px;
+  align-self: flex-start;
+}
+.plugin-card-actions .btn { margin-top: 0; }
+
+/* Curated packs strip — denser than the library grid, slightly accented to
+   read as "the recommended path" before operators dig into the library. */
+.plugins-packs-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px;
+}
+.plugin-pack-card {
+  background: var(--bg-2);
+  border: 1px solid var(--line-1);
+  padding: 12px;
+  display: flex; flex-direction: column; gap: 4px;
+  position: relative;
+}
+.plugin-pack-card.is-active {
+  border-color: oklch(0.74 0.16 145 / 0.45);
+  background: oklch(0.74 0.16 145 / 0.05);
+}
+.plugin-pack-card .btn { align-self: flex-start; margin-top: 6px; }
+
+/* v0.14.0 slice 5 — Runtime bootstrap modal.
+   Full-screen overlay because the install instructions don't fit in a
+   toast.  Uses the existing card/section conventions inside the modal so
+   it reads as "another card" not a foreign dialog. */
+.plugins-bootstrap-overlay {
+  position: fixed; inset: 0;
+  background: oklch(0.15 0 0 / 0.78);
+  z-index: 100;
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 50px 20px;
+  overflow-y: auto;
+}
+.plugins-bootstrap-modal {
+  background: var(--bg-1);
+  border: 1px solid var(--line-1);
+  padding: 24px;
+  max-width: 720px;
+  width: 100%;
+  box-shadow: 0 30px 80px -20px oklch(0 0 0 / 0.6);
+}
+.plugins-bootstrap-step {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line-1);
+}
+.plugins-bootstrap-step h4 {
+  font-size: 13px; font-weight: 600; letter-spacing: 0.04em;
+  color: var(--text-1); margin: 0 0 6px 0;
+}
+.plugins-bootstrap-step.plugins-bootstrap-done h4 {
+  color: var(--ok);
+}
+.plugins-bootstrap-step p,
+.plugins-bootstrap-step ol {
+  color: var(--text-2); line-height: 1.5; margin: 6px 0;
+}
+.plugins-bootstrap-step ol { padding-left: 22px; }
+.plugins-bootstrap-step li { margin: 3px 0; }
+.plugins-bootstrap-step code {
+  background: var(--bg-2);
+  padding: 1px 5px;
+  border: 1px solid var(--line-1);
+  font-family: var(--font-mono); font-size: 11px;
+  word-break: break-all;
+}
+.plugins-bootstrap-link {
+  color: var(--accent); text-decoration: none;
+  font-weight: 600;
+}
+.plugins-bootstrap-link:hover { text-decoration: underline; }
