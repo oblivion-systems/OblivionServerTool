@@ -681,12 +681,345 @@ def create_flask(core: AppCore) -> Flask:
                 "workshop.update", "workshop.scan", "workshop.override",
                 "log.save",
                 "system.pick_directory",
+                # v0.14.0 — Plugin Manager (read + write).  Read is local-only
+                # because it exposes csgo_dir (filesystem path).  Write covers
+                # activate / vanilla / apply_pack — same lifecycle_lock.
+                "plugins.read", "plugins.write",
             })
 
         return jsonify({
             "role":     role,
             "is_local": is_local,
             "can":      sorted(cap),
+        })
+
+    # ── Plugin Manager (v0.13.2 — task #92) ────────────────────────────────────
+    # Read-only inventory endpoint backing the Plugins tab.  Returns:
+    #   - runtime: MetaMod patched? CSS host present? csgo/ resolved?
+    #   - manifest: what was last deployed + when
+    #   - bundled: every plugin we ship inside the .exe, with display
+    #     metadata and which modes use it.  The "registry plugins" key
+    #     is intentionally absent in this slice — task #90 introduces
+    #     OblivionPluginRegistry and the merge happens then.
+
+    @app.route("/api/plugins")
+    @require_auth
+    @require_local
+    def api_plugins():
+        # v0.14.0 audit fix #1: gated to local sessions.  Returns the
+        # absolute csgo_dir path, which would otherwise leak the host
+        # operator's Windows filesystem layout (and username on standard
+        # installs) to remote captain/voter sessions.
+        from .core import _MODE_PLUGIN_NAMES, _PLUGIN_CATALOG, _PLUGINS_BASE
+
+        csgo_dir = core._csgo_dir() if core.server_dir else None
+        csgo_exists = bool(csgo_dir and os.path.isdir(csgo_dir))
+
+        # v0.14.0 slice 5: use the proper install detectors instead of mere
+        # directory existence — addons/counterstrikesharp/ can exist while
+        # being completely empty after a failed install or aggressive cleanup.
+        try:
+            metamod_installed = core._metamod_installed() if csgo_exists else False
+        except Exception:
+            metamod_installed = False
+        try:
+            css_installed = core._css_installed() if csgo_exists else False
+        except Exception:
+            css_installed = False
+
+        # css_present kept for SPA backward-compat (slice 1 used the looser
+        # "directory exists" semantic).  Maps onto css_installed now so older
+        # SPA cache reads don't flip-flop the UI.
+        css_present = css_installed
+
+        try:
+            metamod_patched = core._gameinfo_has_metamod()
+        except Exception:
+            metamod_patched = None
+
+        manifest = core._load_plugin_manifest() or {}
+        deployed_slugs = set(manifest.get("plugins", []) or [])
+
+        # Reverse-map slug → modes that use it, so each card can say
+        # "Used by: Warcraft" / "Used by: 3v3, 4v4, 5v5, Practice".
+        modes_for_slug: dict[str, list[str]] = {}
+        for mode, slugs in _MODE_PLUGIN_NAMES.items():
+            for slug in slugs:
+                modes_for_slug.setdefault(slug, []).append(mode)
+
+        bundled: list[dict] = []
+        all_slugs = sorted(set(_PLUGIN_CATALOG.keys())
+                           | {s for ss in _MODE_PLUGIN_NAMES.values() for s in ss})
+        for slug in all_slugs:
+            meta = _PLUGIN_CATALOG.get(slug, {})
+            src_dir = os.path.join(_PLUGINS_BASE, slug)
+            bundled.append({
+                "slug":            slug,
+                "display_name":    meta.get("display_name") or slug,
+                "summary":         meta.get("summary") or "",
+                "author":          meta.get("author") or "",
+                "source":          "bundled",
+                "source_present":  os.path.isdir(src_dir),
+                "modes":           sorted(modes_for_slug.get(slug, [])),
+                "deployed":        slug in deployed_slugs,
+            })
+
+        return jsonify({
+            "runtime": {
+                "csgo_dir":          csgo_dir or "",
+                "csgo_dir_exists":   csgo_exists,
+                "css_present":       css_present,
+                "css_installed":     css_installed,
+                "metamod_installed": metamod_installed,
+                # None means gameinfo.gi couldn't be read (server not installed
+                # yet, or file missing) — distinct from "definitely off".
+                "metamod_patched":   metamod_patched,
+            },
+            "current_mode": core.current_mode or "",
+            "manifest": {
+                "mode":        manifest.get("mode", "") or "",
+                "plugins":     list(manifest.get("plugins", []) or []),
+                "deployed_at": manifest.get("deployed_at", "") or "",
+            },
+            "bundled": bundled,
+        })
+
+    # Preflight helper shared by activate + vanilla + apply_pack.  Returns
+    # (ok, http_status, error_dict_or_None).
+    #
+    # v0.14.1 — running-server is NO LONGER a hard 409.  The maps/mode picker
+    # has supported live mode swaps (via _restart_into) since v0.10.x and the
+    # plugin tab was being artificially restrictive.  Callers branch on
+    # core.running themselves to pick the right path:
+    #   - running → change_map (async; stops server, redeploys, restarts)
+    #   - offline → set_offline_mode_and_deploy (sync)
+    # Refusals that remain are state where the operation simply can't
+    # complete safely:
+    #   - workshop download in flight (modifying csgo/ races SteamCMD)
+    #   - veto mid-flow (operator wants their roster intact through the swap)
+    #   - csgo/ missing (nowhere to deploy into)
+    def _plugin_action_preflight() -> tuple[bool, int, dict | None]:
+        if getattr(core, "_active_dl_proc", None) is not None:
+            return False, 409, {"error": "A workshop download is in progress. Wait for it to finish."}
+        sess = getattr(core, "_veto_session", None)
+        if sess is not None and getattr(sess, "state", "idle") not in ("idle", "complete"):
+            return False, 409, {"error": f"A veto session is active (state={sess.state}). Reset or complete it first."}
+        # csgo/ existence is what actually matters for deploy_plugins() —
+        # don't gate on server_dir separately since drivers compute csgo/
+        # differently per game (PLATFORM.md § driver.install_root).
+        if not os.path.isdir(core._csgo_dir() or ""):
+            return False, 503, {"error": "CS2 install not found. Set the server directory in Config first."}
+        return True, 200, None
+
+    # v0.14.1 helper — pick a safe map for a live mode swap.
+    # change_map() requires a map_name.  When operator hasn't supplied one
+    # (activate has no map arg; vanilla just changes mode), we prefer the
+    # current map if it's valid for the new mode, else fall through to the
+    # mode's first map in MODE_MAPS.  Workshop maps (digit IDs) carry their
+    # is_workshop flag so the restart launches with -disable_workshop_command_filtering
+    # when needed.
+    def _resolve_live_swap_map(new_mode: str, preferred: str = "") -> tuple[str, bool]:
+        from .config import MODE_MAPS, OFFICIAL_MAPS
+        cur = (preferred or core.current_map or "").strip()
+        pool = MODE_MAPS.get(new_mode)
+        is_workshop = bool(cur and _DIGITS_RE.match(cur))
+        # Workshop maps work on most modes — keep the operator's pick if set.
+        if is_workshop and cur:
+            return cur, True
+        if cur and (pool is None or cur in pool):
+            return cur, False
+        if pool:
+            return pool[0], False
+        return (OFFICIAL_MAPS[0] if OFFICIAL_MAPS else "de_dust2"), False
+
+    @app.route("/api/plugins/activate", methods=["POST"])
+    @require_auth
+    @require_local
+    def api_plugins_activate():
+        """Stage a mode and deploy its plugins for the next server start.
+
+        Body: ``{"slug": "<plugin>", "mode": "<optional explicit mode>"}``.
+        If ``mode`` is omitted, the catalog's reverse map picks the single
+        mode that uses this slug; for multi-mode slugs (MatchZy → Practice/
+        3v3/4v4/5v5; arenas → 1v1/2v2) the caller MUST supply ``mode`` so
+        the operator's intent is explicit, not guessed.
+        """
+        from .core import _MODE_PLUGIN_NAMES, _PLUGIN_CATALOG
+
+        d    = request.get_json(silent=True) or {}
+        slug = (d.get("slug") or "").strip()
+        mode = (d.get("mode") or "").strip()
+
+        if not slug:
+            return jsonify({"error": "slug is required"}), 400
+
+        # Discover which modes use this slug.
+        modes_using = sorted(m for m, ss in _MODE_PLUGIN_NAMES.items() if slug in ss)
+        if not modes_using:
+            return jsonify({
+                "error": f"Plugin {slug!r} is not bound to any mode. "
+                         "No-op modes (Competitive, Casual, etc.) cannot host plugins.",
+            }), 400
+
+        if mode:
+            if mode not in modes_using:
+                return jsonify({
+                    "error": f"Plugin {slug!r} is not used by mode {mode!r}. "
+                             f"Valid modes for this plugin: {', '.join(modes_using)}",
+                }), 400
+        else:
+            if len(modes_using) > 1:
+                return jsonify({
+                    "error": f"Plugin {slug!r} is used by multiple modes "
+                             f"({', '.join(modes_using)}). "
+                             "Pass 'mode' to disambiguate.",
+                    "modes": modes_using,
+                }), 400
+            mode = modes_using[0]
+
+        ok, status, err = _plugin_action_preflight()
+        if not ok:
+            return jsonify(err), status
+
+        # v0.14.1: branch on running.  If online → reuse change_map's proven
+        # stop-deploy-restart cycle.  If offline → stage and let next start
+        # pick it up.
+        if core.running:
+            target_map, is_workshop = _resolve_live_swap_map(mode)
+            core.change_map(target_map, mode, is_workshop=is_workshop,
+                            caller="plugin-tab/activate")
+            return jsonify({
+                "ok":          True,
+                "slug":        slug,
+                "mode":        mode,
+                "restarting":  True,
+                "target_map":  target_map,
+            }), 202
+
+        result = core.set_offline_mode_and_deploy(mode, caller="plugin-tab/activate")
+        if not result.get("ok"):
+            return jsonify({"error": result.get("error") or "deploy failed"}), 500
+        return jsonify({
+            "ok":         True,
+            "slug":       slug,
+            "mode":       result["mode"],
+            "plugins":    result["plugins"],
+            "restarting": False,
+        })
+
+    @app.route("/api/plugins/packs")
+    @require_auth
+    def api_plugins_packs():
+        """Curated packs strip — one-click recipes (mode + map + plugins).
+        Read-only; the apply endpoint actually mutates state."""
+        from .core import _PLUGIN_PACKS, _MODE_PLUGIN_NAMES
+        out = []
+        for p in _PLUGIN_PACKS:
+            out.append({
+                "id":           p["id"],
+                "name":         p["name"],
+                "mode":         p["mode"],
+                "default_map":  p.get("default_map") or "",
+                "summary":      p.get("summary") or "",
+                "tags":         list(p.get("tags") or []),
+                # Derived — saves the SPA a join against the mode table.
+                "plugins":      list(_MODE_PLUGIN_NAMES.get(p["mode"], [])),
+            })
+        return jsonify({"packs": out})
+
+    @app.route("/api/plugins/apply_pack", methods=["POST"])
+    @require_auth
+    @require_local
+    def api_plugins_apply_pack():
+        """Apply a curated pack: switch to its mode, deploy plugins, stage map.
+
+        Single transaction under ``_lifecycle_lock`` (via set_offline_mode_and_deploy)
+        — a half-applied pack would be worse than nothing.
+        """
+        from .core import _PLUGIN_PACKS
+
+        d       = request.get_json(silent=True) or {}
+        pack_id = (d.get("pack_id") or "").strip()
+        if not pack_id:
+            return jsonify({"error": "pack_id is required"}), 400
+
+        pack = next((p for p in _PLUGIN_PACKS if p["id"] == pack_id), None)
+        if not pack:
+            return jsonify({"error": f"unknown pack {pack_id!r}"}), 400
+
+        ok, status, err = _plugin_action_preflight()
+        if not ok:
+            return jsonify(err), status
+
+        # v0.14.1: packs that have a default_map use it as the swap target;
+        # otherwise we resolve via _resolve_live_swap_map.
+        if core.running:
+            target_map, is_workshop = _resolve_live_swap_map(
+                pack["mode"], preferred=pack.get("default_map", ""))
+            core.change_map(target_map, pack["mode"], is_workshop=is_workshop,
+                            caller=f"plugin-tab/pack:{pack_id}")
+            return jsonify({
+                "ok":         True,
+                "pack_id":    pack_id,
+                "name":       pack["name"],
+                "mode":       pack["mode"],
+                "map":        target_map,
+                "restarting": True,
+            }), 202
+
+        result = core.set_offline_mode_and_deploy(
+            pack["mode"],
+            caller=f"plugin-tab/pack:{pack_id}",
+            map_name=pack.get("default_map") or None,
+        )
+        if not result.get("ok"):
+            return jsonify({"error": result.get("error") or "deploy failed"}), 500
+        return jsonify({
+            "ok":         True,
+            "pack_id":    pack_id,
+            "name":       pack["name"],
+            "mode":       result["mode"],
+            "map":        result["map"],
+            "plugins":    result["plugins"],
+            "restarting": False,
+        })
+
+    @app.route("/api/plugins/vanilla", methods=["POST"])
+    @require_auth
+    @require_local
+    def api_plugins_vanilla():
+        """Switch to a vanilla mode and undeploy all managed plugins.
+
+        Uses ``Competitive`` as the canonical vanilla target — it's
+        guaranteed to be in MODE_SETTINGS, has no plugins in
+        ``_MODE_PLUGIN_NAMES``, and is the closest to a "stock CS2"
+        configuration the operator can recognise.
+        """
+        ok, status, err = _plugin_action_preflight()
+        if not ok:
+            return jsonify(err), status
+
+        # v0.14.1: live restart if running, offline stage otherwise.
+        if core.running:
+            target_map, is_workshop = _resolve_live_swap_map("Competitive")
+            core.change_map(target_map, "Competitive", is_workshop=is_workshop,
+                            caller="plugin-tab/vanilla")
+            return jsonify({
+                "ok":         True,
+                "mode":       "Competitive",
+                "restarting": True,
+                "target_map": target_map,
+            }), 202
+
+        result = core.set_offline_mode_and_deploy("Competitive",
+                                                   caller="plugin-tab/vanilla")
+        if not result.get("ok"):
+            return jsonify({"error": result.get("error") or "deploy failed"}), 500
+        return jsonify({
+            "ok":         True,
+            "mode":       result["mode"],
+            "plugins":    result["plugins"],
+            "restarting": False,
         })
 
     # ── Server control ─────────────────────────────────────────────────────────

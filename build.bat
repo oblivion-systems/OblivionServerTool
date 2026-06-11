@@ -119,6 +119,7 @@ echo [2/3] Building executable...
   --hidden-import cs2servergui.discord_bot ^
   --add-data "emblem.ico;." ^
   --add-data "cs2servergui/plugins;cs2servergui/plugins" ^
+  --add-data "cs2servergui/registry;cs2servergui/registry" ^
   --add-data "cs2servergui/templates;cs2servergui/templates" ^
   --add-data "cs2servergui/static;cs2servergui/static" ^
   main.py
