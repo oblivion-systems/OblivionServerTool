@@ -301,6 +301,171 @@ def _safe_extract_zip(zip_bytes: bytes, dest_dir: str) -> None:
     zf.close()
 
 
+# ─── Version comparison (semver-lite) ──────────────────────────────────────
+# Used by /api/plugins to mark a card "Update available" when the registry's
+# latest version is newer than the installed version.  Full semver is
+# overkill — major.minor.patch[-prerelease] covers every plugin author's
+# realistic versioning.  Missing/garbage strings are treated as 0.0.0, so a
+# bundled plugin with no version field never produces a false "update".
+
+def parse_version(v: str | None) -> tuple:
+    """Return a comparable tuple for `v`.  Empty/garbage = (0, 0, 0, '~').
+    The `~` sentinel makes a release version sort AFTER any prerelease at
+    the same (major, minor, patch).
+    """
+    s = (v or "").strip().lstrip("vV")
+    if not s:
+        return (0, 0, 0, "~")
+    main, _, pre = s.partition("-")
+    parts = main.split(".")
+    try:
+        major = int(parts[0]) if len(parts) > 0 else 0
+        minor = int(parts[1]) if len(parts) > 1 else 0
+        patch = int(parts[2]) if len(parts) > 2 else 0
+    except ValueError:
+        return (0, 0, 0, "~")
+    return (major, minor, patch, pre or "~")
+
+
+def has_update(installed: str | None, available: str | None) -> bool:
+    """True if `available` is a STRICTLY higher version than `installed`.
+    Both can be missing/empty — returns False unless we can confidently
+    say the available version is newer (avoids false-positive update
+    pills on versionless bundled plugins)."""
+    if not (installed and available):
+        return False
+    return parse_version(available) > parse_version(installed)
+
+
+# ─── HTTPS + size-cap fetch (shared between registry + custom URL) ─────────
+
+def _fetch_zip_from_url(url: str, *, allow_http: bool = False) -> bytes:
+    """Wrap _http_fetch with an HTTPS guard.  Custom-URL install rejects
+    plain http:// because operators copy-pasting from forums shouldn't
+    accidentally download over a downgradable transport.  Localhost is
+    the only http exception (used by tests + power users running their
+    own staging registry)."""
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    if parsed.scheme not in ("https", "http"):
+        raise RegistryError(f"URL scheme {parsed.scheme!r} not supported "
+                            f"(expected https://)")
+    if parsed.scheme == "http" and not allow_http:
+        host = (parsed.hostname or "").lower()
+        if host not in ("localhost", "127.0.0.1", "::1"):
+            raise RegistryError(
+                f"plain http:// is not allowed for plugin downloads "
+                f"(host={host!r}); use https:// or accept localhost only")
+    return _http_fetch(
+        url,
+        max_bytes=_config.REGISTRY_MAX_DOWNLOAD_BYTES,
+        timeout=_config.REGISTRY_FETCH_TIMEOUT_SECONDS,
+    )
+
+
+# ─── Custom URL install ────────────────────────────────────────────────────
+
+def install_from_url(url: str, expected_sha256: str | None = None,
+                      expected_slug: str | None = None) -> dict:
+    """Download + extract a plugin zip from an arbitrary URL.
+
+    Use cases:
+        * Author-published GitHub release zip — operator pastes the URL
+          before the plugin reaches the curated registry.
+        * Internal/private registry mirror (operator's own LAN).
+
+    The safety guarantees mirror install_plugin():
+        * HTTPS-only (plain http:// rejected unless host is localhost).
+        * Size cap + timeout enforced by _fetch_zip_from_url.
+        * Optional sha256: when provided, mismatch is fatal.  When NOT
+          provided, the install proceeds but result['sha256_provided']
+          is False so the SPA can surface a "unverified source" badge.
+        * Zip Slip protection.
+        * The extracted plugin.json's slug becomes the install slug.  If
+          `expected_slug` is provided AND differs from the manifest, the
+          install is rejected (defends against an operator pasting a URL
+          they thought was for slug A but actually serves slug B).
+        * Atomic install via tempdir + move.
+
+    Returns the same shape as install_plugin().
+    """
+    data = _fetch_zip_from_url(url)
+
+    if expected_sha256:
+        _verify_sha256(data, expected_sha256)
+    sha_actual = hashlib.sha256(data).hexdigest()
+
+    # Stage + validate manifest BEFORE the atomic move so we can read the
+    # slug out of plugin.json — same flow as install_plugin but without
+    # a catalog entry to cross-reference.
+    staging = tempfile.mkdtemp(prefix="oblivion_url_install_")
+    try:
+        _safe_extract_zip(data, staging)
+
+        # Try both layouts: <slug>/plugin.json OR ./plugin.json at root.
+        # We don't know the slug yet — walk one level and find a plugin.json.
+        candidates = []
+        if os.path.isfile(os.path.join(staging, "plugin.json")):
+            candidates.append(("", staging))
+        for entry in os.listdir(staging):
+            sub = os.path.join(staging, entry)
+            if os.path.isdir(sub) and os.path.isfile(os.path.join(sub, "plugin.json")):
+                candidates.append((entry, sub))
+        if not candidates:
+            raise RegistryError(
+                "zip does not contain a plugin.json (looked at root and "
+                "one-level-deep folders)")
+        if len(candidates) > 1:
+            raise RegistryError(
+                f"zip contains multiple plugin.json files at {len(candidates)} "
+                f"locations; expected exactly one")
+
+        _root_label, extracted_root = candidates[0]
+        with open(os.path.join(extracted_root, "plugin.json"), encoding="utf-8") as f:
+            manifest = json.load(f)
+        declared_slug = (manifest.get("slug") or "").strip()
+        if not declared_slug:
+            raise RegistryError("plugin.json missing or empty slug")
+        if expected_slug and expected_slug != declared_slug:
+            raise RegistryError(
+                f"plugin.json declares slug={declared_slug!r} but "
+                f"caller expected {expected_slug!r}")
+
+        # Enforce baseline schema sanity (mirrors slice 1's loader).
+        if manifest.get("schema_version") != 1:
+            raise RegistryError(
+                f"plugin.json schema_version={manifest.get('schema_version')!r} "
+                f"(want 1)")
+        for required in ("display_name", "kind", "modes", "copy_rules"):
+            if required not in manifest:
+                raise RegistryError(
+                    f"plugin.json missing required field {required!r}")
+
+        from .core import _resolve_user_plugins_dir
+        user_dir = _resolve_user_plugins_dir()
+        os.makedirs(user_dir, exist_ok=True)
+        final_dir = os.path.join(user_dir, declared_slug)
+        if os.path.isdir(final_dir):
+            shutil.rmtree(final_dir, ignore_errors=False)
+        shutil.move(extracted_root, final_dir)
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+
+    files_written = sum(
+        len(files) for _root, _dirs, files in os.walk(final_dir)
+    )
+    return {
+        "slug":             declared_slug,
+        "version":          manifest.get("version") or "",
+        "installed_at":     int(time.time()),
+        "dest_dir":         final_dir,
+        "files_written":    files_written,
+        "source_url":       url,
+        "sha256":           sha_actual,
+        "sha256_provided":  bool(expected_sha256),
+    }
+
+
 def install_plugin(slug: str, version: str | None = None) -> dict:
     """Download + verify + extract a registry-listed plugin into
     ``%APPDATA%/.../plugins/<slug>/``.

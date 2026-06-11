@@ -221,6 +221,15 @@ const api = (() => {
       installFromRegistry: (slug, version = null) =>
         post('/api/plugins/install_from_registry',
              version ? { slug, version } : { slug }),
+      // v0.15.2 slice 3: uninstall + reload + custom URL install.
+      uninstall:       (slug)                => post('/api/plugins/uninstall', { slug }),
+      reload:          ()                    => post('/api/plugins/reload', {}),
+      installFromUrl:  (url, sha256 = null, expectedSlug = null) => {
+        const body = { url };
+        if (sha256)       body.sha256        = sha256;
+        if (expectedSlug) body.expected_slug = expectedSlug;
+        return post('/api/plugins/install_from_url', body);
+      },
     },
 
     // ── Game data ─────────────────────────────────────────────────────────
