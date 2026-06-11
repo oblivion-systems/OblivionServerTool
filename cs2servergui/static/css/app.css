@@ -3708,6 +3708,8 @@ body.compact #content        { padding: 14px 16px; }
 .pill-ok   { color: var(--ok);   border-color: oklch(0.74 0.16 145 / 0.4); background: oklch(0.74 0.16 145 / 0.08); }
 .pill-warn { color: var(--warn); border-color: oklch(0.80 0.14 80 / 0.4);  background: oklch(0.80 0.14 80 / 0.08); }
 .pill-mute { color: var(--text-3); }
+/* v0.15.0 slice 1 — Local-source plugin badge. */
+.pill-blue { color: var(--blue, oklch(0.72 0.16 240)); border-color: oklch(0.72 0.16 240 / 0.45); background: oklch(0.72 0.16 240 / 0.10); }
 
 .chip {
   display: inline-flex; align-items: center;

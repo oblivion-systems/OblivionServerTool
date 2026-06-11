@@ -2982,6 +2982,177 @@ t('plugins (v0.14.0 audit fix #1): /api/plugins 403 for non-local sessions',
   t_api_plugins_remote_403)
 
 
+# ─── v0.15.0 slice 1 — Self-describing plugins (plugin.json) ────────────
+
+def t_v15_every_bundled_plugin_has_manifest():
+    """Every bundled plugin folder must ship a plugin.json with the
+    minimum required fields.  Catches the case where a plugin author
+    forgets the manifest and silently disappears from the SPA Library."""
+    import os as _os
+    from cs2servergui.core import _PLUGINS_BASE, _DISCOVERED_PLUGINS
+    folder_slugs = sorted(
+        d for d in _os.listdir(_PLUGINS_BASE)
+        if _os.path.isdir(_os.path.join(_PLUGINS_BASE, d))
+    )
+    discovered_slugs = sorted(_DISCOVERED_PLUGINS.keys())
+    missing = set(folder_slugs) - set(discovered_slugs)
+    if missing:
+        return False, f'plugin folders without plugin.json: {sorted(missing)}'
+    return True, f'{len(discovered_slugs)} bundled plugins all have manifests'
+t('plugins (v0.15.0): every bundled plugin ships a plugin.json',
+  t_v15_every_bundled_plugin_has_manifest)
+
+
+def t_v15_derived_tables_match_expected_data():
+    """The refactor moved the 5 hardcoded constants into derived tables
+    built from plugin.json.  This test pins the expected derived values
+    so a typo in any bundled plugin.json gets caught immediately rather
+    than at deploy time when the operator notices files in the wrong
+    place."""
+    from cs2servergui.core import (
+        _PLUGIN_KIND, _MODE_PLUGIN_NAMES, _PLUGIN_VERIFY_FILES,
+    )
+    # Spot-check kind for each bundled plugin.
+    expected_kinds = {
+        'zombie': 'metamod', 'zombie_ze': 'metamod',
+        'deathmatch': 'css', 'arenas': 'css', 'practice': 'css',
+        'jailbreak': 'css', 'warcraft': 'css', 'retakes_b3none': 'css',
+    }
+    for slug, want in expected_kinds.items():
+        got = _PLUGIN_KIND.get(slug)
+        if got != want:
+            return False, f'kind drift {slug}: want {want!r} got {got!r}'
+
+    # Spot-check mode mapping for the trickiest cases.
+    if 'practice' not in _MODE_PLUGIN_NAMES.get('5v5', []):
+        return False, "5v5 mode lost its practice plugin"
+    if 'zombie' not in _MODE_PLUGIN_NAMES.get('Zombie Escape', []):
+        return False, "Zombie Escape lost its zombie plugin"
+    if 'zombie_ze' not in _MODE_PLUGIN_NAMES.get('Zombie Escape', []):
+        return False, "Zombie Escape lost its zombie_ze plugin"
+
+    # Load order: zombie (metamod, load_order 10) must come BEFORE zombie_ze
+    # (metamod, load_order 15) in Zombie Escape's plugin list — that's the
+    # whole point of the load_order field.
+    ze_plugins = _MODE_PLUGIN_NAMES['Zombie Escape']
+    if ze_plugins.index('zombie') > ze_plugins.index('zombie_ze'):
+        return False, f'load_order broken for ZE: {ze_plugins}'
+
+    # Verify file paths — one canonical check per plugin to catch path drift.
+    if 'addons/metamod/cs2fixes.vdf' not in _PLUGIN_VERIFY_FILES.get('zombie', [''])[0].replace('\\', '/'):
+        return False, "zombie verify path drift"
+
+    return True, 'derived tables match the pre-refactor constants'
+t('plugins (v0.15.0): derived tables match pre-refactor constants',
+  t_v15_derived_tables_match_expected_data)
+
+
+def t_v15_user_plugin_discovery():
+    """Drop a fake plugin into a tempdir, point _resolve_user_plugins_dir
+    at it, re-run discovery — the local plugin appears in the result
+    with source='local' and overrides any same-slug bundled entry if
+    present."""
+    import os as _os, json as _json, tempfile, shutil
+    from cs2servergui import core as _core
+    user_dir = tempfile.mkdtemp(prefix='oblivion_user_plugins_')
+    try:
+        slug = 'my-fake-test-plugin'
+        plugin_dir = _os.path.join(user_dir, slug)
+        _os.makedirs(plugin_dir)
+        with open(_os.path.join(plugin_dir, 'plugin.json'), 'w', encoding='utf-8') as f:
+            _json.dump({
+                'schema_version': 1,
+                'slug': slug,
+                'display_name': 'Fake Test Plugin',
+                'summary': 'For testing the user-plugin discovery path.',
+                'author': 'pytest',
+                'kind': 'css',
+                'modes': ['Practice'],
+                'copy_rules': [{'src': 'addons', 'dst': 'addons'}],
+            }, f)
+        # Temporarily redirect the user plugins dir.
+        original = _core._resolve_user_plugins_dir
+        _core._resolve_user_plugins_dir = lambda: user_dir  # type: ignore[assignment]
+        try:
+            discovered = _core._discover_plugins()
+        finally:
+            _core._resolve_user_plugins_dir = original  # type: ignore[assignment]
+        if slug not in discovered:
+            return False, f'user plugin {slug!r} not discovered'
+        m = discovered[slug]
+        if m.get('_source') != 'local':
+            return False, f'_source={m.get("_source")!r} expected local'
+        return True, f'user plugin discovered with source=local'
+    finally:
+        shutil.rmtree(user_dir, ignore_errors=True)
+t('plugins (v0.15.0): user plugin discovered from %APPDATA% folder',
+  t_v15_user_plugin_discovery)
+
+
+def t_v15_manifest_rejects_slug_mismatch():
+    """A plugin.json whose declared slug doesn't match its folder name
+    must be rejected — prevents an operator-supplied plugin from
+    masquerading as a different one (e.g. dropping a folder named
+    'helpful-plugin' whose manifest declares slug='warcraft')."""
+    import os as _os, json as _json, tempfile, shutil, io, sys as _sys
+    from cs2servergui import core as _core
+    user_dir = tempfile.mkdtemp(prefix='oblivion_user_plugins_')
+    try:
+        folder_slug = 'innocent-folder'
+        plugin_dir = _os.path.join(user_dir, folder_slug)
+        _os.makedirs(plugin_dir)
+        with open(_os.path.join(plugin_dir, 'plugin.json'), 'w', encoding='utf-8') as f:
+            _json.dump({
+                'schema_version': 1,
+                'slug': 'warcraft',   # mismatch — folder says innocent-folder
+                'display_name': 'fake',
+                'kind': 'css',
+                'modes': [],
+                'copy_rules': [],
+            }, f)
+        # Capture stderr so the test output stays clean while still
+        # confirming the rejection logged a [plugins] line.
+        old_err = _sys.stderr
+        _sys.stderr = io.StringIO()
+        try:
+            m = _core._load_plugin_manifest_file(plugin_dir, folder_slug,
+                                                  source='local')
+            err = _sys.stderr.getvalue()
+        finally:
+            _sys.stderr = old_err
+        if m is not None:
+            return False, 'slug mismatch should have been rejected'
+        if '[plugins]' not in err or 'mismatch' not in err.lower():
+            return False, f'expected loud rejection log; got {err!r}'
+        return True, 'slug/folder mismatch rejected with loud log'
+    finally:
+        shutil.rmtree(user_dir, ignore_errors=True)
+t('plugins (v0.15.0): manifest rejects slug/folder mismatch',
+  t_v15_manifest_rejects_slug_mismatch)
+
+
+def t_v15_api_plugins_surfaces_source():
+    """/api/plugins bundled entries must include source ('bundled' or
+    'local') so the SPA can badge user-installed plugins distinctly."""
+    ac, app, c = _new_app()
+    _login(c)
+    from cs2servergui import web as _web
+    for tok in list(_web._sessions.keys()):
+        _web._sessions[tok]['is_local'] = True
+    r = c.get('/api/plugins')
+    if r.status_code != 200:
+        return False, f'status={r.status_code}'
+    body = r.get_json() or {}
+    for entry in (body.get('bundled') or []):
+        if 'source' not in entry:
+            return False, f"entry {entry.get('slug')!r} missing source"
+        if entry['source'] not in ('bundled', 'local'):
+            return False, f"unexpected source value {entry['source']!r}"
+    return True, 'every bundled entry carries source'
+t('plugins (v0.15.0): /api/plugins surfaces source per entry',
+  t_v15_api_plugins_surfaces_source)
+
+
 # ─── v0.14.0 slice 5 — Runtime bootstrap detection ───────────────────────
 
 def t_plugins_runtime_install_state_surfaced():

@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "slug": "warcraft",
+  "display_name": "Warcraft",
+  "summary": "RPG overlay — 9 classes, XP system, purchasable abilities.",
+  "author": "NightFuryPrime (Oblivion patched build)",
+  "kind": "css",
+  "load_order": 20,
+  "modes": ["Warcraft"],
+  "copy_rules": [
+    { "src": "addons", "dst": "addons" }
+  ],
+  "verify_files": [
+    "addons/counterstrikesharp/plugins/WarcraftPlugin/WarcraftPlugin.dll",
+    "addons/counterstrikesharp/plugins/ModelPrecacher/ModelPrecacher.dll"
+  ],
+  "cleanup": [
+    "addons/counterstrikesharp/plugins/WarcraftPlugin",
+    "addons/counterstrikesharp/plugins/ModelPrecacher",
+    "addons/counterstrikesharp/configs/plugins/WarcraftPlugin"
+  ]
+}

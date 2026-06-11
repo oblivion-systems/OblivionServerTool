@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "slug": "retakes_b3none",
+  "display_name": "Retakes (B3none)",
+  "summary": "Bombsite retakes — curated spawns + RetakesAllocator loadouts.",
+  "author": "B3none + yonilerner",
+  "kind": "css",
+  "load_order": 20,
+  "modes": ["Retakes"],
+  "copy_rules": [
+    { "src": "addons", "dst": "addons" },
+    { "src": "cfg",    "dst": "cfg" }
+  ],
+  "verify_files": [
+    "addons/counterstrikesharp/plugins/RetakesPlugin/RetakesPlugin.dll",
+    "addons/counterstrikesharp/plugins/RetakesAllocator/RetakesAllocator.dll"
+  ],
+  "cleanup": [
+    "addons/counterstrikesharp/plugins/RetakesPlugin",
+    "addons/counterstrikesharp/plugins/RetakesAllocator",
+    "addons/counterstrikesharp/shared/RetakesPluginShared",
+    "addons/counterstrikesharp/configs/plugins/RetakesPlugin",
+    "addons/counterstrikesharp/configs/plugins/RetakesAllocator",
+    "cfg/cs2-retakes"
+  ]
+}

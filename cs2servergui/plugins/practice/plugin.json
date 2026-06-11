@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "slug": "practice",
+  "display_name": "MatchZy",
+  "summary": "Competitive match controller — knife round, pauses, demos, stats.",
+  "author": "shobhit-pathak",
+  "kind": "css",
+  "load_order": 20,
+  "modes": ["3v3", "4v4", "5v5", "Practice"],
+  "copy_rules": [
+    { "src": "addons", "dst": "addons" },
+    { "src": "cfg",    "dst": "cfg" }
+  ],
+  "verify_files": [
+    "addons/counterstrikesharp/plugins/MatchZy/MatchZy.dll"
+  ],
+  "cleanup": [
+    "addons/counterstrikesharp/plugins/MatchZy",
+    "cfg/MatchZy"
+  ]
+}

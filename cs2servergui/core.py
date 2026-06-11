@@ -168,63 +168,168 @@ _CSS_HOST_DLLS: frozenset[str] = frozenset({
     # FileNotFoundException when WarcraftPlugin tries to load.
 })
 
-# How each plugin loads into CS2.
-#   "metamod" — loaded at engine init, can ONLY activate after a server restart
-#   "css"     — CounterStrikeSharp; can be hot-reloaded via `css_plugins reload`
-_PLUGIN_KIND: dict[str, str] = {
-    "zombie":    "metamod",   # ZombieMod (CS2Fixes fork) — engine-level ZE/ZM fixes, zm_enable 0
-    "zombie_ze": "metamod",   # ZE layer: MultiAddonManager + zm_enable 1 override cfg
-    "deathmatch":"css",
-    "arenas":    "css",
-    "practice":  "css",
-    "jailbreak": "css",
-    "warcraft":  "css",       # RPG classes, XP, items overlay
-    "retakes_b3none": "css",  # Retakes: B3none RetakesPlugin + yonilerner allocator
-}
+# v0.15.0 slice 1 — Self-describing plugins.
+#
+# Each plugin folder ships a `plugin.json` (schema_version 1) that declares
+# everything the host needs: kind, modes, load_order, copy_rules, verify
+# files, and cleanup paths.  The five tables below (_PLUGIN_KIND, etc.) are
+# now BUILT from those manifests at module-load time — no per-plugin code
+# edits required to add a new one.
+#
+# Discovery scans:
+#   1. cs2servergui/plugins/<slug>/plugin.json    (bundled)
+#   2. %APPDATA%/Oblivion Server Tool/plugins/<slug>/plugin.json   (user-installed)
+#
+# Local plugins override bundled ones if they share a slug — operators can
+# patch a built-in plugin without recompiling the .exe.  A plugin folder
+# without a plugin.json is skipped with a loud stderr warning so corrupted
+# drops don't silently disappear.
 
-# Canonical post-deploy markers: files that MUST exist relative to csgo/ for
-# the plugin to actually be loadable.  Used to verify the deploy was real and
-# not just "files copied to nowhere".
-_PLUGIN_VERIFY_FILES: dict[str, list[str]] = {
-    "zombie": [
-        os.path.join("addons", "metamod", "cs2fixes.vdf"),
-        os.path.join("addons", "cs2fixes", "bin", "win64", "cs2fixes.dll"),
-    ],
-    "zombie_ze": [
-        os.path.join("addons", "metamod", "multiaddonmanager.vdf"),
-        os.path.join("addons", "multiaddonmanager", "bin", "multiaddonmanager.dll"),
-    ],
-    "deathmatch": [
-        os.path.join("addons", "counterstrikesharp", "plugins",
-                     "Deathmatch", "Deathmatch.dll"),
-    ],
-    "arenas": [
-        os.path.join("addons", "counterstrikesharp", "plugins",
-                     "K4-Arenas", "K4-Arenas.dll"),
-        os.path.join("addons", "counterstrikesharp", "plugins",
-                     "K4-Arenas-Bots", "K4-Arenas-Bots.dll"),
-    ],
-    "practice": [
-        os.path.join("addons", "counterstrikesharp", "plugins",
-                     "MatchZy", "MatchZy.dll"),
-    ],
-    "jailbreak": [
-        os.path.join("addons", "counterstrikesharp", "plugins",
-                     "Jailbreak", "Jailbreak.dll"),
-    ],
-    "warcraft": [
-        os.path.join("addons", "counterstrikesharp", "plugins",
-                     "WarcraftPlugin", "WarcraftPlugin.dll"),
-        os.path.join("addons", "counterstrikesharp", "plugins",
-                     "ModelPrecacher", "ModelPrecacher.dll"),
-    ],
-    "retakes_b3none": [
-        os.path.join("addons", "counterstrikesharp", "plugins",
-                     "RetakesPlugin", "RetakesPlugin.dll"),
-        os.path.join("addons", "counterstrikesharp", "plugins",
-                     "RetakesAllocator", "RetakesAllocator.dll"),
-    ],
-}
+
+def _resolve_user_plugins_dir() -> str:
+    """Where operators drop their own plugin folders.  Same APPDATA root as
+    the config file.  Stable across reinstalls (per the uninstaller policy
+    in installer.iss — config dir is preserved on uninstall)."""
+    return os.path.join(os.path.dirname(_CONFIG_FILE), "plugins")
+
+
+def _load_plugin_manifest_file(plugin_dir: str, slug: str, source: str) -> dict | None:
+    """Read a single plugin's plugin.json.  Returns None + logs to stderr
+    on any failure (missing file, bad JSON, schema mismatch, missing required
+    fields).  Required fields: slug, display_name, kind, modes, copy_rules.
+    Optional with sensible defaults: summary, author, load_order, verify_files,
+    cleanup."""
+    manifest_path = os.path.join(plugin_dir, "plugin.json")
+    if not os.path.isfile(manifest_path):
+        # Silent skip — bundled plugin folders without manifests just don't
+        # show up.  This is the migration safety net; once every bundled
+        # plugin has a manifest, _MIGRATION_SNAPSHOT enforces full coverage.
+        return None
+    try:
+        with open(manifest_path, encoding="utf-8") as f:
+            m = json.load(f)
+    except Exception as exc:
+        print(f"[plugins] Failed to load {manifest_path!r}: {exc!r} — "
+              f"plugin {slug!r} will be ignored.",
+              file=sys.stderr)
+        return None
+    if m.get("schema_version") != 1:
+        print(f"[plugins] {manifest_path!r} schema_version={m.get('schema_version')!r} "
+              f"(want 1) — plugin {slug!r} will be ignored.",
+              file=sys.stderr)
+        return None
+    declared_slug = m.get("slug") or ""
+    if declared_slug != slug:
+        print(f"[plugins] {manifest_path!r} declares slug={declared_slug!r} but lives "
+              f"in folder {slug!r} — mismatch, plugin ignored.",
+              file=sys.stderr)
+        return None
+    required = ("display_name", "kind", "modes", "copy_rules")
+    missing = [f for f in required if f not in m]
+    if missing:
+        print(f"[plugins] {manifest_path!r} missing required fields {missing!r} — "
+              f"plugin {slug!r} will be ignored.",
+              file=sys.stderr)
+        return None
+    # Attach source + filesystem location for downstream consumers
+    # (API surfaces this; deploy_plugins uses plugin_dir as the copy root).
+    m["_plugin_dir"] = plugin_dir
+    m["_source"]    = source
+    return m
+
+
+def _discover_plugins() -> dict[str, dict]:
+    """Scan bundled + user plugin folders.  Returns slug -> manifest dict.
+
+    Local plugins OVERRIDE bundled ones if slugs collide — explicit log
+    line so the operator notices when they've shadowed a built-in.
+    Called once at module load.  A future Plugin tab "Reload" button will
+    re-run this and replace the derived tables in place.
+    """
+    discovered: dict[str, dict] = {}
+
+    # 1. Bundled plugins (cs2servergui/plugins/<slug>/)
+    if os.path.isdir(_PLUGINS_BASE):
+        for entry in sorted(os.listdir(_PLUGINS_BASE)):
+            plugin_dir = os.path.join(_PLUGINS_BASE, entry)
+            if not os.path.isdir(plugin_dir):
+                continue
+            m = _load_plugin_manifest_file(plugin_dir, entry, source="bundled")
+            if m:
+                discovered[entry] = m
+
+    # 2. User plugins (%APPDATA%/.../plugins/<slug>/)
+    user_dir = _resolve_user_plugins_dir()
+    if os.path.isdir(user_dir):
+        for entry in sorted(os.listdir(user_dir)):
+            plugin_dir = os.path.join(user_dir, entry)
+            if not os.path.isdir(plugin_dir):
+                continue
+            m = _load_plugin_manifest_file(plugin_dir, entry, source="local")
+            if m:
+                if entry in discovered:
+                    print(f"[plugins] Local plugin {entry!r} overrides bundled version.",
+                          file=sys.stderr)
+                discovered[entry] = m
+
+    return discovered
+
+
+def _populate_plugin_tables(plugins: dict[str, dict]) -> tuple[
+        dict[str, str],           # kind
+        dict[str, list[str]],     # verify_files
+        dict[str, list[tuple]],   # copy_rules
+        dict[str, list[str]],     # cleanup_items
+        dict[str, list[str]],     # mode_plugin_names
+]:
+    """Derive the five plugin tables from the discovered manifests.
+
+    mode_plugin_names is sorted by each plugin's load_order so MetaMod
+    plugins (load_order 10) deploy before CSS plugins (load_order 20) —
+    matters because metamod plugins overlay cfg files that later metamod
+    plugins (like zombie_ze, load_order 15) can override.  Within the
+    same load_order, sort is stable (slug order)."""
+    kind: dict[str, str]                  = {}
+    verify_files: dict[str, list[str]]    = {}
+    copy_rules: dict[str, list[tuple]]    = {}
+    cleanup_items: dict[str, list[str]]   = {}
+    mode_plugin_names: dict[str, list[str]] = {}
+
+    for slug, m in plugins.items():
+        kind[slug] = m.get("kind", "css")
+        # Normalise path separators — manifests use forward slashes for
+        # cross-platform readability; convert to OS-native here.
+        verify_files[slug] = [os.path.normpath(p) for p in m.get("verify_files", [])]
+        cleanup_items[slug] = [os.path.normpath(p) for p in m.get("cleanup", [])]
+        rules: list[tuple] = []
+        for r in m.get("copy_rules", []):
+            src = r.get("src", "")
+            dst = r.get("dst", "")
+            exclude = r.get("exclude")
+            if exclude:
+                rules.append((src, dst, frozenset(exclude)))
+            else:
+                rules.append((src, dst))
+        copy_rules[slug] = rules
+        for mode in m.get("modes", []):
+            mode_plugin_names.setdefault(mode, []).append(slug)
+
+    # Stable sort by load_order so metamod loads before css.
+    for mode, slugs in mode_plugin_names.items():
+        slugs.sort(key=lambda s: plugins[s].get("load_order", 20))
+
+    return kind, verify_files, copy_rules, cleanup_items, mode_plugin_names
+
+
+# Discover at module load (mirrors _PLUGIN_CATALOG's pattern).  A future
+# slice may add a "Reload plugins" button that re-runs discovery and swaps
+# the derived tables; for now, restart-app-to-pick-up-changes is fine.
+_DISCOVERED_PLUGINS: dict[str, dict] = _discover_plugins()
+(_PLUGIN_KIND,
+ _PLUGIN_VERIFY_FILES,
+ _PLUGIN_COPY_RULES,
+ _PLUGIN_CLEANUP_ITEMS,
+ _MODE_PLUGIN_NAMES) = _populate_plugin_tables(_DISCOVERED_PLUGINS)
 
 # Plugin catalog — display metadata for the Plugin Manager tab.
 #
@@ -360,42 +465,12 @@ _PLUGIN_PACKS: list[dict] = [
     },
 ]
 
-# Modes that need managed plugins; modes not listed → vanilla server.
-_MODE_PLUGIN_NAMES: dict[str, list[str]] = {
-    # Retakes: B3none's dedicated RetakesPlugin (curated per-map spawns +
-    # in-game spawn editor) with yonilerner's RetakesAllocator.  (MatchZy has no
-    # retakes feature, so the earlier MatchZy-based Retakes mode was dropped.)
-    "Retakes":             ["retakes_b3none"],
-    "Deathmatch":          ["zombie", "deathmatch"],
-    # Arena duels (K4-Arenas ladder) — capped at 2-per-side by choice. 1v1 uses
-    # the plugin's default rounds (already pure 1v1: its 2vs2/3vs3 rounds ship
-    # EnabledByDefault=false); 2v2 gets a generated round-settings config forcing
-    # TeamSize 2 (see _apply_arena_size).
-    "1v1":                 ["arenas"],
-    "2v2":                 ["arenas"],
-    # Team matches (MatchZy-managed) — one team vs one team. Same plugin as
-    # Practice; the team size is bounded by MODE_SETTINGS maxplayers (6/8/10).
-    "3v3":                 ["practice"],
-    "4v4":                 ["practice"],
-    "5v5":                 ["practice"],
-    # Jailbreak runs the self-contained CSS Jailbreak plugin ALONE.  It used to
-    # also deploy "zombie" (CS2Fixes), but loading that heavy native MetaMod
-    # plugin alongside Jailbreak crashed the server with a native access
-    # violation ~1-2s after the plugin loaded — reliably, on every jb start
-    # (3/3 crash dumps on 2026-05-28), while no other mode ever crashed.  The
-    # Jailbreak plugin needs nothing from CS2Fixes, so it's dropped.
-    "Jailbreak":           ["jailbreak"],
-    "Practice":            ["practice"],   # MatchZy controls match flow
-    # Warcraft: RPG overlay — 9 classes, XP system, purchasable items.
-    "Warcraft":            ["warcraft"],
-    # Zombie Escape: ZombieMod engine fixes (zm_enable 0 from base zombie plugin)
-    # + zombie_ze layer that activates zm_enable 1 and loads ZombieReborn workshop
-    # content pack (ID 3157463861) via MultiAddonManager.
-    "Zombie Escape":       ["zombie", "zombie_ze"],
-    # All other modes (Competitive, Casual, Wingman, Arms Race, Demolition, …)
-    # are not listed here — _MODE_PLUGIN_NAMES.get(mode, []) returns [] for them,
-    # meaning deploy_plugins() runs a vanilla server with no managed plugins.
-}
+# NOTE: _MODE_PLUGIN_NAMES is now DERIVED from each plugin's plugin.json
+# "modes" field (see _populate_plugin_tables above).  Per-mode comments
+# previously inlined here are now embedded in their plugin's plugin.json
+# manifest or in the plugin folder's README.  All modes not declared by
+# any plugin (Competitive, Casual, Wingman, Arms Race, Demolition, ...) =
+# vanilla server (deploy_plugins runs the empty-plugin branch).
 
 # Modes that MUST launch with -disable_workshop_command_filtering regardless of map.
 # Mounting a workshop content addon (MultiAddonManager) turns CS2's workshop command
@@ -404,120 +479,12 @@ _MODE_PLUGIN_NAMES: dict[str, list[str]] = {
 # zm_enable + cs2f_*/zr_*/zm_* CVars, so without the flag ZM silently never enables.
 _CMDFILTER_REQUIRED_MODES: frozenset[str] = frozenset({"Zombie Escape"})
 
-# Copy rules per plugin: list of (src_subdir, dst_subdir_relative_to_csgo[, exclude_subdirs]).
-# The CONTENTS of src_subdir are merged into dst_subdir.
-# Optional third element: frozenset of immediate subdirectory names to skip during the walk.
-_PLUGIN_COPY_RULES: dict[str, list[tuple]] = {
-    "zombie": [
-        # zombie/ root mirrors csgo/ layout — metamod-only, no CSS needed
-        ("addons",      "addons"),
-        ("cfg",         "cfg"),
-        ("materials",   "materials"),
-        ("particles",   "particles"),
-        ("soundevents", "soundevents"),
-        ("sounds",      "sounds"),
-    ],
-    "deathmatch": [
-        ("addons", "addons"),
-    ],
-    "arenas": [
-        ("addons", "addons"),
-    ],
-    "practice": [
-        ("addons", "addons"),
-        ("cfg", "cfg"),
-    ],
-    "jailbreak": [
-        ("addons", "addons"),
-    ],
-    # WarcraftPlugin's Barbarian class assigns the non-default player models
-    # tm_phoenix_heavy (T) / ctm_heavy (CT).  They live in pak01.vpk but the
-    # engine only auto-precaches the DEFAULT team models, so SetModel on them
-    # logged "requested but is not in the system (Missing from a manifest?)" and
-    # Barbarian rendered the error model.  Loose .vmdl_c copies do NOT help — CS2
-    # only loads models listed in the precache manifest — so the bundled
-    # ModelPrecacher plugin (under addons/) AddResource()s both models in
-    # OnServerPrecacheResources instead.  Hence addons/ only; no characters/.
-    "warcraft": [
-        ("addons", "addons"),
-    ],
-    # zombie_ze: MultiAddonManager MetaMod plugin + cfg overrides.
-    # Mirrors csgo/ layout exactly (addons/ and cfg/).  Deployed AFTER zombie so
-    # the cs2fixes.cfg override (zm_enable 1) wins over zombie's default (zm_enable 0).
-    "zombie_ze": [
-        ("addons", "addons"),
-        ("cfg",    "cfg"),
-    ],
-    # Retakes (B3none) — addons/ (RetakesPlugin + RetakesAllocator +
-    # RetakesPluginShared + retakes_config.json that disables fallback allocation
-    # so the allocator owns weapons) and cfg/ (our cs2-retakes/retakes.cfg that
-    # auto-fills bots instead of B3none's default bot_kick / bot_quota 0, so
-    # retake rounds form on a low-population server; RetakesPlugin execs it).
-    "retakes_b3none": [
-        ("addons", "addons"),
-        ("cfg",    "cfg"),
-    ],
-}
-
-# Items relative to csgo/ that are fully owned by each plugin.
-# Directories are rmtree'd, files are unlinked on undeploy.
-_PLUGIN_CLEANUP_ITEMS: dict[str, list[str]] = {
-    "zombie": [
-        os.path.join("addons", "cs2fixes"),
-        os.path.join("addons", "metamod", "cs2fixes.vdf"),
-        os.path.join("cfg", "cs2fixes"),
-        os.path.join("materials", "cs2fixes"),
-        os.path.join("particles", "cs2fixes"),
-        os.path.join("soundevents", "cs2fixes"),
-        os.path.join("sounds", "cs2fixes"),      # zombie deploys sounds/ too
-    ],
-    "deathmatch": [
-        os.path.join("addons", "counterstrikesharp", "plugins", "Deathmatch"),
-        os.path.join("addons", "counterstrikesharp", "shared", "DeathmatchAPI"),
-    ],
-    "arenas": [
-        os.path.join("addons", "counterstrikesharp", "plugins", "K4-Arenas"),
-        os.path.join("addons", "counterstrikesharp", "plugins", "K4-Arenas-Bots"),
-        os.path.join("addons", "counterstrikesharp", "shared", "K4-ArenaSharedApi"),
-        os.path.join("addons", "counterstrikesharp", "shared", "KitsuneMenu"),
-        # Generated round config (_apply_arena_size writes 2v2 here) — scrub it so
-        # a stale 2v2 config can't linger after switching to a non-arena mode.
-        os.path.join("addons", "counterstrikesharp", "configs", "plugins", "K4-Arenas"),
-    ],
-    "practice": [
-        os.path.join("addons", "counterstrikesharp", "plugins", "MatchZy"),
-        os.path.join("cfg", "MatchZy"),
-    ],
-    "jailbreak": [
-        os.path.join("addons", "counterstrikesharp", "plugins", "Jailbreak"),
-    ],
-    "warcraft": [
-        os.path.join("addons", "counterstrikesharp", "plugins", "WarcraftPlugin"),
-        os.path.join("addons", "counterstrikesharp", "plugins", "ModelPrecacher"),
-        os.path.join("addons", "counterstrikesharp", "configs", "plugins", "WarcraftPlugin"),
-    ],
-    "zombie_ze": [
-        os.path.join("addons", "multiaddonmanager"),
-        os.path.join("addons", "metamod", "multiaddonmanager.vdf"),
-        os.path.join("cfg", "multiaddonmanager"),
-        # Remove zm_enable 1 override so DM/JB don't run in ZE mode after switching.
-        # If zombie stays in new_plugins (e.g. switch to Deathmatch), it re-deploys
-        # its own cs2fixes.cfg (zm_enable 0), restoring the correct default.
-        # If switching to vanilla (zombie also unneeded), the whole cfg/cs2fixes/
-        # folder is wiped by zombie's cleanup items anyway.
-        os.path.join("cfg", "cs2fixes", "cs2fixes.cfg"),
-    ],
-    # EXPERIMENTAL B3none retakes — remove every piece so switching back to the
-    # MatchZy "Retakes" mode (or anything else) leaves no cross-contamination.
-    "retakes_b3none": [
-        os.path.join("addons", "counterstrikesharp", "plugins", "RetakesPlugin"),
-        os.path.join("addons", "counterstrikesharp", "plugins", "RetakesAllocator"),
-        os.path.join("addons", "counterstrikesharp", "shared", "RetakesPluginShared"),
-        os.path.join("addons", "counterstrikesharp", "configs", "plugins", "RetakesPlugin"),
-        os.path.join("addons", "counterstrikesharp", "configs", "plugins", "RetakesAllocator"),
-        os.path.join("cfg", "cs2-retakes"),
-    ],
-}
+# NOTE: _PLUGIN_COPY_RULES and _PLUGIN_CLEANUP_ITEMS are now DERIVED from
+# each plugin's plugin.json (copy_rules / cleanup fields), see
+# _populate_plugin_tables above.  Per-plugin operational comments
+# previously inlined here have moved into the respective plugin.json or
+# its sibling README.txt (warcraft's ModelPrecacher rationale is in
+# cs2servergui/plugins/warcraft/README.txt).
 
 
 class AppCore:

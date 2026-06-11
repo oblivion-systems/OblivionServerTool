@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "slug": "zombie_ze",
+  "display_name": "Zombie Escape",
+  "summary": "ZE layer — activates zm_enable + loads ZombieReborn workshop pack.",
+  "author": "Source2ZE + Oblivion config",
+  "kind": "metamod",
+  "load_order": 15,
+  "modes": ["Zombie Escape"],
+  "copy_rules": [
+    { "src": "addons", "dst": "addons" },
+    { "src": "cfg",    "dst": "cfg" }
+  ],
+  "verify_files": [
+    "addons/metamod/multiaddonmanager.vdf",
+    "addons/multiaddonmanager/bin/multiaddonmanager.dll"
+  ],
+  "cleanup": [
+    "addons/multiaddonmanager",
+    "addons/metamod/multiaddonmanager.vdf",
+    "cfg/multiaddonmanager",
+    "cfg/cs2fixes/cs2fixes.cfg"
+  ]
+}

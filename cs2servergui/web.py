@@ -747,19 +747,34 @@ def create_flask(core: AppCore) -> Flask:
             for slug in slugs:
                 modes_for_slug.setdefault(slug, []).append(mode)
 
+        # v0.15.0 slice 1 — use the discovered manifests so the SPA sees
+        # local-installed plugins, and so the "source" badge reflects the
+        # real folder (bundled vs %APPDATA%/.../plugins/).  Falls back to
+        # the catalog entry for slugs that aren't in _DISCOVERED_PLUGINS
+        # (defensive: shouldn't happen for bundled plugins now they all
+        # have manifests, but keeps the endpoint working if one is removed).
+        from .core import _DISCOVERED_PLUGINS
         bundled: list[dict] = []
-        all_slugs = sorted(set(_PLUGIN_CATALOG.keys())
+        all_slugs = sorted(set(_DISCOVERED_PLUGINS.keys())
+                           | set(_PLUGIN_CATALOG.keys())
                            | {s for ss in _MODE_PLUGIN_NAMES.values() for s in ss})
         for slug in all_slugs:
+            manifest = _DISCOVERED_PLUGINS.get(slug) or {}
             meta = _PLUGIN_CATALOG.get(slug, {})
-            src_dir = os.path.join(_PLUGINS_BASE, slug)
+            # Prefer manifest's display fields (v0.15.0); catalog.json
+            # entries are now an artifact for the future remote registry.
+            display_name = manifest.get("display_name") or meta.get("display_name") or slug
+            summary      = manifest.get("summary")      or meta.get("summary") or ""
+            author       = manifest.get("author")       or meta.get("author") or ""
+            source       = manifest.get("_source")      or "bundled"
+            plugin_dir   = manifest.get("_plugin_dir")  or os.path.join(_PLUGINS_BASE, slug)
             bundled.append({
                 "slug":            slug,
-                "display_name":    meta.get("display_name") or slug,
-                "summary":         meta.get("summary") or "",
-                "author":          meta.get("author") or "",
-                "source":          "bundled",
-                "source_present":  os.path.isdir(src_dir),
+                "display_name":    display_name,
+                "summary":         summary,
+                "author":          author,
+                "source":          source,    # "bundled" | "local"
+                "source_present":  os.path.isdir(plugin_dir),
                 "modes":           sorted(modes_for_slug.get(slug, [])),
                 "deployed":        slug in deployed_slugs,
             })
