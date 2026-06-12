@@ -15,29 +15,30 @@
 | Phase | Title | Status |
 |-------|-------|--------|
 | 0 | Groundwork | ✅ done |
-| 1 | Stabilise the foundation | 🟢 mostly done (1.2 complete; 1.1 last bullet + 1.3 hygiene open) |
-| 2 | Verify every mode | 🟡 in flight (1/14 confirmed in-game — needs Friday session) |
-| 3 | Harden & secure | 🟢 mostly done (3.0 audit complete bar **C4b**, **H4**; 3.1/3.2/3.3 partial) |
-| 4 | Test & release engineering | 🟢 mostly done (smoke battery 161/161; build pipeline + signing still open) |
-| 5 | Polish & 1.0 launch | 🟡 in flight (mobile + role pill + capabilities done; final docs + 1.0 ship pending) |
+| 1 | Stabilise the foundation | ✅ done |
+| 2 | Verify every mode | 🟡 in flight — most modes proven in real sessions; **#29 stress test** still pending |
+| 3 | Harden & secure | 🟢 mostly done (Plugin Manager hardening added v0.14 + v0.15 audit fixes) |
+| 4 | Test & release engineering | 🟢 mostly done (276/276 tests; build pipeline + signing still open) |
+| 5 | Polish & 1.0 launch | 🟡 in flight — config restructure done; **#89 v1.0 posture** (BSL + donations + flip repo public) remains |
 
-**Current release:** v0.11.19 (2026-06-05) — **200/200 tests green**.
-Nineteen releases; v0.11.x is Friday-ready with recurring-tournament UX
-nailed, self-review hotfixes locked in, Friday-eve adversarial sweep
-findings landed, the Discord Config card fully browse-able, and the
-diagnostic snapshot now sees the plugin layer.  v0.11.19 fills the
-visibility gap when MatchZy redirects CS2's console.log — the new
-Plugin logs section tails CSS host + MatchZy match logs with anomaly
-prefixing, plus a TL;DR `plugin_log` health indicator.
+**Current release:** v0.15.2 (2026-06-12) — **276/276 tests green**.
+Forty-one releases.  v0.15.x closes the **"easy for anyone to add new
+plugins"** thread — self-describing manifests (`plugin.json`), community
+registry fetch + one-click install, uninstall + reload + URL install +
+update notifications + search.  The
+[OblivionPluginRegistry](https://github.com/jacquesvniekerk-eng/OblivionPluginRegistry)
+repo is live; every running .exe trusts its `catalog.json` over a 24h
+cache with HTTPS + SHA-256 + Zip-Slip protection.  The Plugin Manager
+itself is complete pending operator feedback.
 
 The path to v1.0 is now:
-1. Run Friday's session, collect real-user feedback
-2. Phase 2 v0.12 — driver abstraction + plugin registry + in-app
-   Gaming Mode toggle (bake the scripts into Oblivion's Config tab)
-3. v0.13 — TF2 driver (proof point)
-4. v0.14 — Linux + headless + Docker
-5. v0.15 — first non-Source game driver
-6. v1.0 — BSL license, donations live, repo public, 2-3 games supported
+1. **#29 — stress test** (opportunistic, needs a real lobby).
+2. **#89 — v1.0 launch posture** — BSL license file, donations link in
+   README, flip repo public.
+3. **#93/#94 — Linux + `platform.py` seam** for cross-OS support.
+4. **#87/#88 — TF2 / FiveM drivers** to prove the strangler-fig template
+   beyond CS2.
+5. **v1.0** — BSL license, donations live, repo public, 2-3 games supported.
 
 ---
 

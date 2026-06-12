@@ -2,6 +2,228 @@
 
 ---
 
+## v0.15.2 — 2026-06-12 (Plugin Manager slice 3: uninstall + reload + URL install + updates + search)
+
+Closes the "easy for anyone to add new plugins" thread. Five Plugin-tab
+completeness wins, gated by the same safety patterns from v0.15.1.
+Reviewed via 5-dimension adversarial workflow (security / correctness /
+UX-edges / test-gaps / integration) before commit; 2 confirmed findings
+folded in.
+
+### Endpoints (all `@require_local`)
+- **`POST /api/plugins/uninstall {slug}`** — `rmtree`s `%APPDATA%/.../plugins/<slug>/`
+  and re-runs discovery. Refuses bundled plugins (live in the .exe).
+  Refuses when the slug is bound to the active mode (returns 409 — protects
+  the operator from booting into a mode whose plugins were just deleted).
+- **`POST /api/plugins/reload`** — re-runs `_discover_plugins` +
+  `_populate_plugin_tables` in place. Operator can drop a folder into
+  `%APPDATA%/.../plugins/` and pick it up without an app restart.
+- **`POST /api/plugins/install_from_url {url, sha256?, expected_slug?}`** —
+  download a zip from any URL. Same safety pipeline as
+  `install_from_registry`. Plain `http://` rejected except for localhost.
+  Registry URL itself is refused — the dedicated endpoint must be used.
+
+### Version + update notifications
+- `plugin.json` gains an optional `version` field.
+- `/api/plugins` entries now carry `installed_version` + `latest_version` +
+  `update_available`. `has_update` is conservative — returns False unless
+  available > installed can be proven. Garbage strings parse to `(0,0,0)`;
+  prerelease ordering correct (`1.0.0-beta < 1.0.0`).
+- SPA Library shows orange **Update v…** pill. Registry grid surfaces
+  installed-but-updatable entries with button copy flipped Install→Update.
+
+### SPA polish
+- Single search input filters BOTH the Library and Registry grids by
+  display_name / summary / author / slug. Survives re-renders.
+- **↻ Reload** button next to the search input.
+- **📥 Install from URL** modal with URL + SHA-256 + expected_slug inputs.
+  Live-warns when SHA-256 is missing/malformed. Confirm required for
+  unverified installs.
+- **Remove** button on Local-source library cards. Bundled cards have no
+  button (can't remove from disk).
+
+### Adversarial review fixes
+- **Medium**: registry card's Install button correctly flipped to Update
+  but the click handler's confirm dialog hardcoded Install copy. Fixed via
+  `data-action` attribute + conditional confirm + toast text.
+- **High**: end-to-end wiring of `web.py`'s `reg_index` + `has_update` arg
+  order + JSON propagation had zero coverage. Added integration test that
+  catches a flipped `has_update(installed, latest)` regression.
+
+**276/276 tests green** (+12 new).
+
+---
+
+## v0.15.1 — 2026-06-11 (Plugin Manager slice 2: OblivionPluginRegistry remote fetch + in-SPA install)
+
+App-side machinery for community plugin discovery + one-click install.
+
+### New module `cs2servergui/registry_client.py`
+- `fetch_catalog(force=False)` — 24h TTL, atomic cache write
+  (`%APPDATA%/.../registry_cache.json`), graceful fallback to stale cache
+  on network failure, graceful empty-with-`_offline` catalog when the
+  registry repo doesn't exist yet.
+- `install_plugin(slug, version)` — download → SHA-256 verify → safe-extract
+  → atomic move into `%APPDATA%/.../plugins/<slug>/`.
+- `RegistryError` — public exception class for typed 4xx mapping.
+
+### Three new endpoints
+- `GET /api/plugins/registry` — catalog + freshness + installed-slug set
+- `POST /api/plugins/registry/refresh` — cache-busting re-fetch
+- `POST /api/plugins/install_from_registry {slug, version?}` — runs install
+  + re-discovers in-place so the new plugin shows up without an app restart
+
+### SPA — "Available to Install (Community)" card
+States handled: offline / empty registry / all-installed / cached-but-stale
+/ one-or-more-available. Each card shows version pill + summary + modes +
+author + Install button. Header has ↻ Refresh + "refreshed Nh ago" label.
+
+### Safety
+HTTPS-only with 12s timeout + 50 MB content-length cap. SHA-256 verified
+BEFORE the zip is opened. Zip Slip protection. Slug confusion protection
+(extracted `plugin.json` slug must match catalog entry). Atomic install
+via tempdir + `shutil.move`. Registry URL hardcoded in `config.py`.
+
+**264/264 tests green** (+6 new).
+
+---
+
+## v0.15.0 — 2026-06-11 (Plugin Manager slice 1: self-describing plugins via plugin.json)
+
+Each plugin folder now ships a `plugin.json` manifest declaring everything
+the host needs: `kind`, `modes`, `load_order`, `copy_rules`, `verify_files`,
+`cleanup`. The five hardcoded plugin tables in `core.py`
+(`_PLUGIN_KIND` / `_MODE_PLUGIN_NAMES` / `_PLUGIN_COPY_RULES` /
+`_PLUGIN_VERIFY_FILES` / `_PLUGIN_CLEANUP_ITEMS`) are now **derived** at
+module load — ~150 lines of hardcoded constants replaced by ~80 lines of
+discovery + 8 self-describing JSON files.
+
+### Discovery scans two locations
+- **Bundled** — `cs2servergui/plugins/<slug>/` (ships inside the .exe)
+- **Local** — `%APPDATA%/Oblivion Server Tool/plugins/<slug>/`
+
+Local plugins **override** bundled ones if slugs collide. Mismatched
+folder/slug declarations rejected loudly to stderr.
+
+### API + SPA
+- `/api/plugins` entries carry a `source` field (`"bundled"` | `"local"`).
+- SPA Library cards from `%APPDATA%/plugins/` get a blue **Local** pill.
+
+### New top-level `PLUGINS.md`
+Plugin author guide — schema, layout, required + optional fields, minimal
+example, debugging tips, how to share.
+
+Smoke-tested against live `%APPDATA%`: dropped a sample plugin in the real
+APPDATA folder, ran discovery, confirmed it appears with `source=local` +
+correct manifest + mode binding.
+
+**258/258 tests green** (+5 new).
+
+---
+
+## v0.14.2 — 2026-06-10 (Config tab restructure + button hover polish)
+
+### Single-column Config layout
+Six clearly-separated sections in operator-mental-model order:
+**Setup → Security → Server (+ Bots merged) → Match Flow → Discord
+(+ webhook moved here) → Tools row** (Gaming Mode | Diagnostic | RCON).
+
+Strong section separators: 2 px top border + accent-bar title + caption.
+Inline `margin-top:14px` purged in favour of consistent CSS rules.
+
+- **Bots** folded into **Server** (one Save button covers both).
+- **Discord webhook URL** moved from Match Flow into the Discord card.
+- **Tools row** at the bottom: three small cards side-by-side instead of
+  pretending to be full sections.
+
+### Button hover polish (whole app)
+Non-purple buttons (`.btn` / `.btn-ghost` / `.btn-neutral`) get an
+accent-tinted border + soft glow on hover. Active state drops the glow.
+
+**253/253 tests still green.**
+
+---
+
+## v0.14.1 — 2026-06-10 (plugin actions auto-restart when server is running)
+
+Plugin tab actions (Activate, Switch to vanilla, Apply Pack) **no longer
+409 when the server is running**. They route through `change_map`'s
+proven stop-deploy-restart cycle — the same path the Maps/Mode picker has
+used since v0.10.x. Return `202 Accepted` with `restarting: true`.
+
+- New `_resolve_live_swap_map` helper picks a sensible map (operator's
+  preference → current_map if valid for new mode → `MODE_MAPS[mode][0]`).
+  Workshop IDs detected via `_DIGITS_RE`.
+- SPA banner now warns instead of disabling. Confirm prompts mention STOP
+  and RESTART when running. Toasts switch to "Restarting into X — watch
+  Status tab".
+
+**253/253 tests green** (+2 swapping the "blocks when running → 409" tests
+for "routes to restart → 202").
+
+---
+
+## v0.14.0 — 2026-06-10 (Plugin Manager: packs + JSON catalog + runtime bootstrap + audit fixes)
+
+### Quick-Apply Packs (slice 3, task #91)
+New strip at the top of the Plugins tab — five one-click recipes:
+**Competitive 5v5** / **Warcraft Night** / **Casual Deathmatch** /
+**Retakes** / **Vanilla Competitive**. Each click stages mode + map +
+plugins under one `_lifecycle_lock` so half-applied state is impossible.
+
+### File-based catalog (slice 4, task #90 partial)
+Plugin display metadata moved out of code into
+`cs2servergui/registry/catalog.json` (schema_version 1, registry-compatible
+shape with `versions[]`). Bundled into the .exe via PyInstaller.
+
+### Runtime bootstrap dialog (slice 5)
+**🔧 Set up plugin runtime** button on Server Readiness card when MetaMod
+or CSS is missing. Opens a modal with direct download links to sourcemm.net
++ CSS GitHub releases, step-by-step extract instructions targeting the
+operator's actual `csgo/` path, and **✓ I've installed them — verify now**
+button.
+
+### Audit fixes (4 hardening passes)
+- **#1**: `/api/plugins` is now `@require_local` — was leaking absolute
+  `csgo_dir` path (and Windows username) to remote captain/voter sessions.
+- **#2**: every operator-supplied string in the Plugins tab is now
+  `esc()`'d. Defuses the v0.15 remote-registry XSS surface ahead of time.
+- **#3**: `_load_plugin_catalog` logs loudly to stderr on parse failure.
+- **#4**: inline `_PLUGIN_CATALOG_FALLBACK` dropped — JSON is the single
+  source of truth.
+
+**251/251 tests green** (+18 new).
+
+---
+
+## v0.13.2 — 2026-06-09 (Plugin Manager: tab + Activate/Vanilla actions)
+
+### Slice 1 — Plugins tab (read-only)
+New admin-only **Plugins** entry in the sidebar between Maps and Veto.
+Three sections:
+- **Server Readiness** — csgo/ resolved? MetaMod patched? CSS host present?
+- **Currently Deployed** — manifest readout (mode + plugins + deployed_at)
+- **Plugin Library** — eight cards (Warcraft, MatchZy, Retakes, Jailbreak,
+  Deathmatch, Arenas, CS2Fixes, ZE) with display name, summary, author,
+  modes used. Plugin tied to current mode shows Active pill.
+
+`/api/plugins` GET endpoint backs the tab. `_PLUGIN_CATALOG` dict in
+`core.py` is the seed of what becomes `catalog.json` in slice 4.
+
+### Slice 2 — Activate / Switch-to-vanilla
+- **Activate** button on Library cards (single-mode plugins) or dropdown
+  picker (multi-mode like MatchZy → Practice/3v3/4v4/5v5).
+- **Switch to vanilla** button on Currently Deployed card with confirm.
+- Backend preflight (server stopped + no dl + veto idle + csgo/ exists)
+  returns specific 409/503. Activate routes through
+  `set_offline_mode_and_deploy` under `_lifecycle_lock` for atomicity.
+- Yellow banner when server running or csgo/ missing — buttons disabled
+  with the explanation.
+
+**243/243 tests green** (+10 new).
+
+---
+
 ## v0.13.1 — 2026-06-06 (PLATFORM.md + first method migration)
 
 Two things land together: the design doc that informs every future

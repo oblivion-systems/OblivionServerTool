@@ -7,18 +7,29 @@
 
 ---
 
-## Where We Are — v0.13.0 (released 2026-06-06)
+## Where We Are — v0.15.2 (released 2026-06-12)
 
-**Thirty-four releases**, with the **driver-abstraction seam now
-open**.  v0.12 backlog drained the day before (all 3 Discord features
-shipped, all 10 audit findings closed, Gaming Mode in-app, scripts/
-bundled).  v0.13.0 lands the `GameDriver` ABC + `CS2Driver` subclass
-+ `AppCore.driver` attribute — the strangler-fig seam that v0.13.x
-TF2 driver and v0.15 FiveM driver plug into.  Existing CS2-specific
-code in `core.py` still works untouched; new code uses
-`core.driver.X` instead of hardcoded `"cs2.exe"` literals.  Closes
-task #86.  See `RETROSPECTIVE_2026_06_05.md` for the tournament
-post-mortem.
+**Forty-one releases.**  The **"easy for anyone to add new plugins"**
+thread is complete (closes tasks #90 + #91 + #92).  The Plugin Manager
+now covers the whole arc:
+- **Self-describing plugins** via `plugin.json` (v0.15.0) — drop a folder
+  into `%APPDATA%`, restart, plugin appears in the Library.
+- **Community registry** (v0.15.1) — every running .exe fetches
+  [`OblivionPluginRegistry`](https://github.com/jacquesvniekerk-eng/OblivionPluginRegistry)'s
+  `catalog.json` on a 24h TTL; one-click install with SHA-256 + Zip-Slip
+  + atomic move.
+- **Uninstall + reload + URL install + update notifications + search**
+  (v0.15.2) — every operator action symmetric, registered authors can
+  publish without registry curation via the **📥 Install from URL** modal.
+
+Plus the **Config tab restructure** (v0.14.2) — single-column layout with
+six clearly-separated sections in operator-mental-model order, big visual
+dividers, button-hover polish across the whole app.
+
+Driver-abstraction seam from v0.13.0 still holds; v0.13.x method
+migrations are paused while the Plugin Manager arc lands.  `PLATFORM.md`
+documents the migration template.  See `RETROSPECTIVE_2026_06_05.md` for
+the tournament post-mortem that informed the v0.12 work.
 
 Highlights since v0.11.0:
 
@@ -59,8 +70,15 @@ Highlights since v0.11.0:
 | v0.12.5  | Gaming Mode toggle in Config card + scripts/ bundled into installer (closes #95 + #97) |
 | v0.13.0  | **Driver abstraction seam** — `GameDriver` ABC + `CS2Driver` + `AppCore.driver` + diagnostic snapshot "Driver" section (closes #86) |
 | v0.13.1  | **PLATFORM.md design doc** + worked-example migration: `install_root()` from `_csgo_dir()` (closes #84) |
+| v0.13.2  | **Plugins tab** (read-only) + **Activate/Switch-to-vanilla** actions (closes #92 design phase) |
+| v0.14.0  | **Plugin Manager**: Quick-Apply Packs + JSON catalog + runtime bootstrap modal + 4 audit fixes (closes #91) |
+| v0.14.1  | **Live mode swap on running server** — plugin actions route through `change_map`'s restart cycle |
+| v0.14.2  | **Config tab restructure** (single-column, 6 sections) + whole-app button hover polish |
+| v0.15.0  | **Self-describing plugins** via `plugin.json` — derived plugin tables, bundled + local discovery |
+| v0.15.1  | **OblivionPluginRegistry** fetch + in-SPA install with SHA-256 + Zip-Slip + atomic move |
+| v0.15.2  | **Uninstall + Reload + URL install + Updates + Search** (closes Plugin Manager arc) |
 
-**233/233 backend tests green** through v0.13.1.
+**276/276 backend tests green** through v0.15.2.
 
 Full prose in [CHANGELOG.md](CHANGELOG.md).
 
