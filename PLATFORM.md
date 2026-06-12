@@ -433,5 +433,6 @@ or its own git repo.
 ---
 
 *Filed by Claude Sonnet 4.6 (1M context), under operator direction.*
-*Last updated: 2026-06-06 (v0.13.0).*
-*Related: RETROSPECTIVE_2026_06_05.md, ROADMAP.md, BIBLE.md, AUDIT.md.*
+*Last updated: 2026-06-12 (v0.15.2 — driver method migration paused while
+the Plugin Manager arc lands; resumes when the v1.0 wishlist clears).*
+*Related: RETROSPECTIVE_2026_06_05.md, ROADMAP.md, BIBLE.md, AUDIT.md, PLUGINS.md.*

@@ -3015,7 +3015,7 @@ pages['plugins'] = async function() {
                  autocomplete="off" spellcheck="false">
           <button class="btn btn-sm" id="plugins-reload-btn"
                   title="Re-scan bundled + %APPDATA%/plugins/ — picks up dropped folders without restarting">
-            ↻ Reload
+            ↻ Rescan local plugins
           </button>
           <button class="btn btn-sm" id="plugins-install-url-btn"
                   title="Install a plugin from any zip URL (advanced)">
@@ -3032,8 +3032,8 @@ pages['plugins'] = async function() {
       <div class="section-hdr">
         <span class="card-title" style="margin-bottom:0">Available to Install (Community)</span>
         <button class="btn btn-sm" id="plugins-registry-refresh"
-                title="Re-fetch the registry catalog (24h cache)">
-          ↻ Refresh Registry
+                title="Re-fetch OblivionPluginRegistry's catalog.json (24h cache otherwise)">
+          ↻ Re-fetch catalog
         </button>
       </div>
       <div id="plugins-registry-body">
@@ -5624,6 +5624,22 @@ pages['config'] = async function() {
               <button class="btn btn-accent" id="rcon-send">Send</button>
             </div>
           </div>
+
+          <!-- v0.16.0 / task #158 — Config Backup / Restore -->
+          <div class="card">
+            <div class="cfg-card-title">Config Backup</div>
+            <small class="text-sub text-sm" style="display:block;margin-bottom:12px;line-height:1.5">
+              Snapshots <code>oblivion_config.json</code> to <code>backups/</code>.
+              Auto-runs before plugin install / uninstall / vanilla switch.
+              Keeps the most recent 10.
+            </small>
+            <button class="btn btn-accent btn-full" id="cfg-backup-now">
+              💾 Backup config now
+            </button>
+            <button class="btn btn-ghost btn-full" id="cfg-backup-list" style="margin-top:8px">
+              📂 Browse + restore backups
+            </button>
+          </div>
         </div>
       </section>
       ` : ''}
@@ -5991,6 +6007,82 @@ pages['config'] = async function() {
     }
   });
 
+  // v0.16.0 / task #158 — Backup + Restore (local-only)
+  const backupBtn = el('cfg-backup-now');
+  if (backupBtn) backupBtn.addEventListener('click', async () => {
+    backupBtn.disabled = true; const orig = backupBtn.textContent;
+    backupBtn.textContent = 'Backing up…';
+    try {
+      const r = await api.config_backup('manual');
+      toast(`✓ Saved ${r.result.filename} (${r.result.bytes} B)`, 'var(--ok)');
+    } catch (e) {
+      toast(`Backup failed: ${e.message}`, 'var(--bad)');
+    } finally {
+      backupBtn.disabled = false; backupBtn.textContent = orig;
+    }
+  });
+  const backupListBtn = el('cfg-backup-list');
+  if (backupListBtn) backupListBtn.addEventListener('click', async () => {
+    let r;
+    try { r = await api.config_backups(); }
+    catch (e) { toast(`List failed: ${e.message}`, 'var(--bad)'); return; }
+    const backups = r.backups || [];
+    const overlay = document.createElement('div');
+    overlay.className = 'plugins-bootstrap-overlay';
+    const rows = backups.length
+      ? backups.map(b => `
+          <div class="plugin-card" style="margin-bottom:8px">
+            <div class="plugin-card-head">
+              <span class="plugin-card-title">${esc(b.mtime_iso)}</span>
+              <span class="pill pill-mute">${esc(b.reason || 'manual')}</span>
+            </div>
+            <div class="text-sm text-sub">${esc(b.filename)} (${b.bytes} B)</div>
+            <button class="btn btn-sm cfg-restore-pick" data-name="${esc(b.filename)}"
+                    style="margin-top:6px">
+              Restore this backup
+            </button>
+          </div>`).join('')
+      : '<div class="text-sm text-sub">No backups yet.</div>';
+    overlay.innerHTML = `
+      <div class="plugins-bootstrap-modal" style="max-width:560px">
+        <div class="section-hdr">
+          <span class="card-title" style="margin-bottom:0">Config Backups</span>
+          <button class="btn btn-sm" id="cfg-backup-close">Close</button>
+        </div>
+        <p class="text-sm text-sub" style="margin-top:10px">
+          Restoring writes the picked snapshot into <code>oblivion_config.json</code>
+          (your current config is auto-snapshotted as a pre-restore backup first).
+          Restart the app to pick up the restored config.
+        </p>
+        <div style="margin-top:14px">${rows}</div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const close = () => overlay.remove();
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+    el('cfg-backup-close').addEventListener('click', close);
+    overlay.querySelectorAll('.cfg-restore-pick').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const name = btn.dataset.name;
+        if (!window.confirm(
+          `Restore config from ${name}?\n\n`
+          + `This overwrites your current oblivion_config.json. `
+          + `Your current config will be saved as a pre-restore backup first, `
+          + `so this is reversible.\n\nThe app will need a restart to load the restored config.`
+        )) return;
+        btn.disabled = true;
+        try {
+          const out = await api.config_restore(name);
+          toast(`✓ Restored. Pre-restore backup: ${out.pre_restore_backup}. Restart the app.`,
+                'var(--ok)');
+          close();
+        } catch (e) {
+          toast(`Restore failed: ${e.message}`, 'var(--bad)');
+          btn.disabled = false;
+        }
+      });
+    });
+  });
+
   // v0.14.2 — cfg-bot-save removed; Bots are now part of cfg-server-save above.
 
   if (isLocal) {
@@ -6225,15 +6317,39 @@ function showSetupWizard(status) {
     });
   }
 
-  /* ── Step 3: All done ──────────────────────────────────────────────── */
+  /* ── Step 3: All done — with operator guided next-steps (v0.16.0 / task #167) ── */
   function renderStep3(body, footer) {
     body.innerHTML = `
       <div class="setup-done-icon">✓</div>
       <div class="setup-section-title" style="text-align:center;margin-top:12px">You're all set!</div>
       <p class="setup-hint" style="text-align:center">
-        Your server directory and PIN have been saved.<br>
-        Head to the <strong>Config</strong> page to install CS2 via steamcmd,
-        or jump straight to <strong>Status</strong> to explore the panel.
+        Your server directory and PIN are saved.<br>
+        Here's the typical path to your first tournament — three clicks:
+      </p>
+      <ol class="setup-next-steps">
+        <li>
+          <strong>Install CS2 server</strong>
+          <small>Open the <em>Config</em> tab → <strong>Install / Reinstall</strong>.
+          ~15 GB via steamcmd. Walk away for 10 minutes.</small>
+        </li>
+        <li>
+          <strong>Pick a Quick-Apply Pack</strong>
+          <small>Open the <em>Plugins</em> tab → choose
+          <strong>Competitive 5v5</strong> (MatchZy + de_dust2), or
+          <strong>Warcraft Night</strong>, or any of the 5 packs.
+          One click stages mode + map + plugins.</small>
+        </li>
+        <li>
+          <strong>Start the server + roll out captain links</strong>
+          <small>Open the <em>Status</em> tab → <strong>Start Server</strong>.
+          Then go to <em>Veto</em>, paste in your roster, hit
+          <strong>Distribute</strong>. Captain links DM out (if Discord configured) or
+          copy-paste to share.</small>
+        </li>
+      </ol>
+      <p class="setup-hint" style="text-align:center;margin-top:14px">
+        Discord integration is optional — set it up from
+        <em>Config</em> → <strong>Discord</strong> when you're ready.
       </p>`;
 
     footer.innerHTML = `
