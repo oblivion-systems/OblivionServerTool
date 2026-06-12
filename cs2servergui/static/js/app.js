@@ -2629,6 +2629,49 @@ async function _renderPluginsTab() {
     }
   }
 
+  // ─── Templates strip (v0.16.3 / task #169) ───────────────────────────
+  // Fetched lazily — failure is non-fatal (registry-style empty state).
+  const tplBody = el('plugins-templates-body');
+  if (tplBody) {
+    let tplResp;
+    try { tplResp = await api.plugins.templates ? null : null; } catch (_) {}
+    try { tplResp = await api.templates.list(); }
+    catch (_) { tplResp = { templates: [] }; }
+    const tpls = (tplResp && tplResp.templates) || [];
+    if (!tpls.length) {
+      tplBody.innerHTML = `
+        <div class="text-sm text-sub">
+          No templates yet. Click <strong>📋 Manage Templates</strong> to save a
+          tournament format (mode + pack + Discord channels) under a name.
+        </div>`;
+    } else {
+      tplBody.innerHTML = `
+        <div class="plugins-grid">
+          ${tpls.map(t => {
+            const p = t.payload || {};
+            const bits = [];
+            if (p.mode)    bits.push(`Mode: ${esc(p.mode)}`);
+            if (p.map)     bits.push(`Map: ${esc(p.map)}`);
+            if (p.pack_id) bits.push(`Pack: ${esc(p.pack_id)}`);
+            return `
+              <div class="plugin-card" data-id="${esc(t.id)}">
+                <div class="plugin-card-head">
+                  <span class="plugin-card-title">${esc(t.name)}</span>
+                  <span class="pill pill-mute">${tpls.length === 1 ? 'template' : 'tpl'}</span>
+                </div>
+                <div class="text-sm text-sub">${bits.join(' · ') || '(empty payload)'}</div>
+                <button class="btn btn-sm plugins-tpl-apply"
+                        data-id="${esc(t.id)}" data-name="${esc(t.name)}"
+                        ${actionsBlocked ? 'disabled' : ''}
+                        style="margin-top:6px">
+                  Apply
+                </button>
+              </div>`;
+          }).join('')}
+        </div>`;
+    }
+  }
+
   // ─── Wire button handlers (delegated on the freshly-rendered DOM) ──
   document.querySelectorAll('.plugins-activate-btn').forEach(btn => {
     btn.addEventListener('click', () => _pluginActivate(btn));
@@ -2636,6 +2679,11 @@ async function _renderPluginsTab() {
   document.querySelectorAll('.plugins-pack-btn').forEach(btn => {
     btn.addEventListener('click', () => _pluginApplyPack(btn));
   });
+  document.querySelectorAll('.plugins-tpl-apply').forEach(btn => {
+    btn.addEventListener('click', () => _pluginApplyTemplate(btn));
+  });
+  const tplManageBtn = el('plugins-templates-manage');
+  if (tplManageBtn) tplManageBtn.addEventListener('click', _openTemplatesModal);
   document.querySelectorAll('.plugins-install-btn').forEach(btn => {
     btn.addEventListener('click', () => _pluginInstallFromRegistry(btn));
   });
@@ -2867,6 +2915,194 @@ function _pluginBootstrap(rt) {
   });
 }
 
+/* v0.16.3 / task #169 — Apply a tournament template.  Routes through
+ * /api/templates/apply which: backs up config, persists Discord fields,
+ * then runs the same plugin-pack apply path as /api/plugins/apply_pack.
+ * Server-running case auto-restarts (mirrors the pack flow). */
+async function _pluginApplyTemplate(btn) {
+  const id   = btn.dataset.id;
+  const name = btn.dataset.name || id;
+  const running = !!state.server.running;
+  if (!window.confirm(
+    `Apply template "${name}"?\n\n`
+    + `Discord channel + behaviour settings will be saved into your config.\n`
+    + `The plugin pack will deploy${running ? ' (and the server will STOP + RESTART)' : ''}.\n\n`
+    + `A pre-action config backup is taken so this is reversible via Tools → Restore.`
+  )) return;
+  const all = document.querySelectorAll(
+    '#plugins-templates-body button, .plugins-pack-btn, .plugins-tpl-apply'
+  );
+  all.forEach(b => b.disabled = true);
+  toast(running ? `Restarting into ${name}…` : `Applying ${name}…`);
+  try {
+    const r = await api.templates.apply(id);
+    toast(`✓ ${name} applied — ${(r.applied || []).join(', ') || 'no-op'}`, 'var(--ok)');
+  } catch (e) {
+    toast(`Apply failed: ${e.message}`, 'var(--bad)');
+  } finally {
+    await _renderPluginsTab();
+  }
+}
+
+/* v0.16.3 / task #169 — Templates manager modal.  Lists saved templates
+ * with Apply/Delete buttons, and a "save current setup" form pre-filled
+ * from AppCore's current Discord channel IDs + current_mode/current_map +
+ * a manual pack picker. */
+async function _openTemplatesModal() {
+  let tplResp, packsResp, teamsResp;
+  try {
+    [tplResp, packsResp, teamsResp] = await Promise.all([
+      api.templates.list(),
+      api.plugins.packs(),
+      api.teams.list().catch(() => ({ teams: [] })),
+    ]);
+  } catch (e) {
+    toast(`Templates load failed: ${e.message}`, 'var(--bad)');
+    return;
+  }
+  const tpls   = tplResp.templates || [];
+  const packs  = packsResp.packs   || [];
+  const teams  = teamsResp.teams   || [];
+
+  const overlay = document.createElement('div');
+  overlay.className = 'plugins-bootstrap-overlay';
+
+  const render = () => {
+    const list = tpls.length ? tpls.map(t => {
+      const p = t.payload || {};
+      const bits = [];
+      if (p.mode)     bits.push(`Mode: <strong>${esc(p.mode)}</strong>`);
+      if (p.map)      bits.push(`Map: <strong>${esc(p.map)}</strong>`);
+      if (p.pack_id)  bits.push(`Pack: <strong>${esc(p.pack_id)}</strong>`);
+      if (p.discord_veto_channel_id) bits.push(`Veto ch: ${esc(p.discord_veto_channel_id)}`);
+      return `
+        <div class="plugin-card" style="margin-bottom:8px">
+          <div class="plugin-card-head">
+            <span class="plugin-card-title">${esc(t.name)}</span>
+            <span class="pill pill-mute">${t.id.slice(0,8)}</span>
+          </div>
+          <div class="text-sm">${bits.join(' · ') || '(empty)'}</div>
+          ${p.description ? `<div class="text-sm text-sub">${esc(p.description)}</div>` : ''}
+          <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:8px">
+            <button class="btn btn-sm tpl-modal-apply" data-id="${esc(t.id)}" data-name="${esc(t.name)}">Apply</button>
+            <button class="btn btn-sm btn-ghost tpl-modal-delete" data-id="${esc(t.id)}" data-name="${esc(t.name)}">Delete</button>
+          </div>
+        </div>`;
+    }).join('') : '<div class="text-sm text-sub">No templates yet — fill the form below.</div>';
+
+    return `
+      <div class="plugins-bootstrap-modal" style="max-width:680px">
+        <div class="section-hdr">
+          <span class="card-title" style="margin-bottom:0">Tournament Templates</span>
+          <button class="btn btn-sm" id="tpl-close">Close</button>
+        </div>
+        <p class="text-sm text-sub" style="margin-top:8px">
+          Stored in <code>%APPDATA%\\Oblivion Server Tool\\oblivion_templates.json</code>.
+          Apply runs <em>config backup</em> → <em>Discord fields save</em> →
+          <em>plugin pack deploy</em> as one batch.
+        </p>
+
+        <div class="cfg-card-title" style="margin-top:18px">Saved templates (${tpls.length})</div>
+        <div id="tpl-list">${list}</div>
+
+        <hr class="cfg-card-divider">
+        <div class="cfg-card-title">Save current setup as a template</div>
+        <div class="field" style="margin-top:8px">
+          <label>Template name</label>
+          <input class="input" id="tpl-save-name" type="text" maxlength="40"
+                 placeholder="e.g. Cobras Wednesdays">
+        </div>
+        <div class="field">
+          <label>Description <span class="text-sub">(optional)</span></label>
+          <input class="input" id="tpl-save-desc" type="text" maxlength="120"
+                 placeholder="What this template is for">
+        </div>
+        <div class="field">
+          <label>Plugin pack</label>
+          <select class="select" id="tpl-save-pack">
+            <option value="">(none — mode only)</option>
+            ${packs.map(p => `<option value="${esc(p.id)}">${esc(p.name)} → ${esc(p.mode)}${p.default_map ? ' · ' + esc(p.default_map) : ''}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field">
+          <label>Map override <span class="text-sub">(optional — uses pack default if blank)</span></label>
+          <input class="input" id="tpl-save-map" type="text" maxlength="40"
+                 placeholder="e.g. de_dust2">
+        </div>
+        <div class="text-sm text-sub" style="margin-top:10px">
+          Discord channel IDs + auto-move + round-summaries toggles are read
+          from your <em>current</em> Config when you click Save — set them in
+          Config → Discord first.
+        </div>
+        <div class="flex gap-8" style="margin-top:12px">
+          <button class="btn btn-accent flex-1" id="tpl-save-btn">Save template</button>
+        </div>
+      </div>`;
+  };
+  overlay.innerHTML = render();
+  document.body.appendChild(overlay);
+
+  const close = () => overlay.remove();
+  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+
+  const rewire = () => {
+    el('tpl-close').addEventListener('click', close);
+    overlay.querySelectorAll('.tpl-modal-apply').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        close();
+        await _pluginApplyTemplate(btn);
+      });
+    });
+    overlay.querySelectorAll('.tpl-modal-delete').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (!window.confirm(`Delete template "${btn.dataset.name}"?`)) return;
+        try {
+          await api.templates.delete(btn.dataset.id);
+          toast('Template deleted');
+          close();
+          await _openTemplatesModal();
+        } catch (e) {
+          toast(`Delete failed: ${e.message}`, 'var(--bad)');
+        }
+      });
+    });
+    el('tpl-save-btn').addEventListener('click', async () => {
+      const name = el('tpl-save-name').value.trim();
+      const desc = el('tpl-save-desc').value.trim();
+      const pack = el('tpl-save-pack').value;
+      const map  = el('tpl-save-map').value.trim();
+      if (!name) { toast('Template name is required', 'var(--bad)'); return; }
+      // Pull current Discord fields off /api/config so the persisted
+      // payload reflects whatever's in Config right now.
+      let cfg;
+      try { cfg = await api.config(); }
+      catch (e) { toast(`Config read failed: ${e.message}`, 'var(--bad)'); return; }
+      const pickedPack = packs.find(p => p.id === pack);
+      const payload = {
+        description: desc,
+        mode: pickedPack ? pickedPack.mode : '',
+        map:  map,
+        pack_id: pack || '',
+        discord_veto_channel_id:           cfg.discord_veto_channel_id || '',
+        discord_team_a_voice_channel_id:   cfg.discord_team_a_voice_channel_id || '',
+        discord_team_b_voice_channel_id:   cfg.discord_team_b_voice_channel_id || '',
+        discord_auto_move_on_distribute_enabled: !!cfg.discord_auto_move_on_distribute_enabled,
+        discord_round_summaries_enabled:         !!cfg.discord_round_summaries_enabled,
+      };
+      try {
+        await api.templates.save({ name, payload });
+        toast(`✓ Saved ${name}`, 'var(--ok)');
+        close();
+        await _openTemplatesModal();
+        await _renderPluginsTab();
+      } catch (e) {
+        toast(`Save failed: ${e.message}`, 'var(--bad)');
+      }
+    });
+  };
+  rewire();
+}
+
 async function _pluginApplyPack(btn) {
   const packId = btn.dataset.packId;
   const name   = btn.dataset.name;
@@ -2990,6 +3226,23 @@ pages['plugins'] = async function() {
         </span>
       </div>
       <div id="plugins-packs-body">
+        <div class="text-sm text-sub">Loading…</div>
+      </div>
+    </div>
+
+    <!-- v0.16.3 / task #169 — Tournament Templates: named bundles of mode +
+         map + pack + Discord channels + team profile IDs.  Single Apply
+         stages everything for a recurring tournament format. -->
+    <div class="card" style="margin-top:14px">
+      <div class="section-hdr">
+        <span class="card-title" style="margin-bottom:0">Tournament Templates</span>
+        <button class="btn btn-sm" id="plugins-templates-manage">📋 Manage Templates</button>
+      </div>
+      <div class="text-sm text-sub" style="margin-bottom:10px">
+        Named bundles of mode + map + pack + Discord channels. Click a
+        template to stage everything for a recurring tournament format.
+      </div>
+      <div id="plugins-templates-body">
         <div class="text-sm text-sub">Loading…</div>
       </div>
     </div>
@@ -3584,6 +3837,24 @@ pages['history'] = async function() {
     <div id="hist-body">
       <div class="empty-state text-sm text-sub">Loading…</div>
     </div>
+
+    <!-- v0.16.3 / task #171 — Demo browser sub-section.
+         Lists every .dem file under csgo/ + MatchZy demo dir + CSS demo
+         output.  Click to download via /api/demos/download. -->
+    <div style="margin-top:32px">
+      <div class="section-hdr">
+        <span class="section-title">Demos</span>
+        <button class="btn btn-sm" id="demos-refresh">↻ Refresh</button>
+      </div>
+      <div class="text-sm text-sub" style="margin-bottom:14px">
+        Server-recorded <code>.dem</code> files found under
+        <code>csgo/</code>, <code>cfg/MatchZy/</code>, and the
+        CSS plugin demo dirs.  Click to download.
+      </div>
+      <div id="demos-body">
+        <div class="empty-state text-sm text-sub">Scanning…</div>
+      </div>
+    </div>
   `;
   let matches;
   try {
@@ -3635,6 +3906,51 @@ pages['history'] = async function() {
       debounce = setTimeout(renderList, 80);
     });
   }
+  // v0.16.3 / task #171 — Demo browser
+  const renderDemos = async () => {
+    const body = el('demos-body');
+    if (!body) return;
+    body.innerHTML = '<div class="empty-state text-sm text-sub">Scanning…</div>';
+    let demoResp;
+    try { demoResp = await api.demos.list(); }
+    catch (e) {
+      body.innerHTML = `<div class="text-sm text-red">Failed: ${esc(e.message)}</div>`;
+      return;
+    }
+    const demos = demoResp.demos || [];
+    if (!demos.length) {
+      body.innerHTML = `
+        <div class="empty-state text-sm text-sub">
+          No demos found. CS2 server records .dem files automatically when
+          configured; MatchZy stores them under
+          <code>cfg/MatchZy/</code> or its plugin demos dir.
+        </div>`;
+      return;
+    }
+    body.innerHTML = `
+      <div class="text-sm text-sub" style="margin-bottom:10px">
+        ${demos.length} demo${demos.length === 1 ? '' : 's'} found, newest first.
+      </div>
+      <div style="display:flex; flex-direction:column; gap:6px">
+        ${demos.map(d => `
+          <div class="card" style="display:flex; gap:14px; align-items:center; padding:10px 14px">
+            <div style="flex:1; min-width:0">
+              <div style="font-family:var(--font-mono); font-size:12px; color:var(--text-1); word-break:break-all">
+                ${esc(d.name)}
+              </div>
+              <div class="text-sm text-sub">
+                ${esc(d.mtime_iso)} · ${(d.size / 1024 / 1024).toFixed(2)} MB · source: ${esc(d.source)}
+              </div>
+            </div>
+            <a class="btn btn-sm" href="${esc(api.demos.downloadUrl(d.rel_path))}" download="${esc(d.name)}">
+              ⬇ Download
+            </a>
+          </div>`).join('')}
+      </div>`;
+  };
+  await renderDemos();
+  const demoBtn = el('demos-refresh');
+  if (demoBtn) demoBtn.addEventListener('click', renderDemos);
 };
 
 pages['veto'] = function() {
@@ -6046,8 +6362,18 @@ pages['config'] = async function() {
                 📨 Send test DM
               </button>
             </div>
+            <!-- v0.16.3 / task #165 — Full bot lifecycle smoke test -->
+            <button class="btn btn-ghost btn-full" id="cfg-discord-mock-veto"
+                    style="margin-top:8px"
+                    title="Walk the full embed lifecycle (post + 3 edits + final state) + VC reachability check. Catches wiring bugs before the first real veto.">
+              🎲 Run mock veto (full bot smoke test)
+            </button>
+            <pre id="cfg-discord-mock-out" class="text-mono text-sm"
+                 style="display:none; margin-top:10px; max-height:240px; overflow:auto; background:var(--bg-1); padding:10px; white-space:pre-wrap"></pre>
             <small class="text-sub text-sm" style="display:block;margin-top:8px">
-              Verifies the bot can post to your channel + DM you, without walking a full veto.
+              The first two buttons each verify ONE thing.  Mock veto walks the
+              full embed lifecycle so you spot wiring bugs before the first real
+              captain DM goes out.
             </small>
           </div>
         </div>
@@ -6398,6 +6724,31 @@ pages['config'] = async function() {
       toast(e.message, 'var(--bad)');
     } finally {
       testDmBtn.disabled = false; testDmBtn.textContent = '📨 Send test DM';
+    }
+  });
+
+  // v0.16.3 / task #165 — Run mock veto (full bot lifecycle smoke test)
+  const mockVetoBtn = el('cfg-discord-mock-veto');
+  if (mockVetoBtn) mockVetoBtn.addEventListener('click', async () => {
+    mockVetoBtn.disabled = true;
+    const orig = mockVetoBtn.textContent;
+    mockVetoBtn.textContent = 'Running smoke test (~3s)…';
+    const out = el('cfg-discord-mock-out');
+    if (out) { out.style.display = 'block'; out.textContent = 'Posting initial embed…\n'; }
+    try {
+      const r = await api.discord.mockVeto();
+      const lines = (r.steps || []).map(s =>
+        `${s.ok ? '✓' : '✗'} ${s.name}${s.detail ? ' — ' + s.detail : ''}`
+      );
+      if (out) out.textContent = (lines.join('\n') || '(no steps reported)')
+        + `\n\n${r.summary || ''}\n\n`
+        + `Channel: ${r.channel_id}\nMessage: ${r.message_id}\n(safe to delete)`;
+      toast(r.ok ? `✓ ${r.summary}` : `⚠ ${r.summary}`, r.ok ? 'var(--ok)' : 'var(--warn)');
+    } catch (e) {
+      if (out) out.textContent = `Mock veto failed: ${e.message}`;
+      toast(`Mock veto failed: ${e.message}`, 'var(--bad)');
+    } finally {
+      mockVetoBtn.disabled = false; mockVetoBtn.textContent = orig;
     }
   });
 

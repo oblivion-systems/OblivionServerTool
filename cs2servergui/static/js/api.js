@@ -138,6 +138,8 @@ const api = (() => {
       testEmbed:     (channelId)  => post('/api/discord/test_embed',
                                           channelId ? { channel_id: channelId } : {}),
       testDm:        (discordId)  => post('/api/discord/test_dm', { discord_id: discordId }),
+      // v0.16.3 / task #165 — Full bot lifecycle smoke test
+      mockVeto:      ()           => post('/api/discord/mock_veto', {}),
     },
 
     // ── Server control ────────────────────────────────────────────────────
@@ -210,11 +212,25 @@ const api = (() => {
     // ── Tournament readiness dashboard (v0.16.2 / task #168) ──────────────
     readiness:            ()                  => get('/api/readiness'),
 
+    // ── Demo browser (v0.16.3 / task #171) ────────────────────────────────
+    demos: {
+      list:        ()      => get('/api/demos'),
+      downloadUrl: (rel)   => `/api/demos/download?path=${encodeURIComponent(rel)}`,
+    },
+
     // ── Persistent team profiles (v0.16.1 / task #160) ────────────────────
     teams: {
       list:   ()        => get('/api/teams'),
       save:   (team)    => post('/api/teams/save',   team),
       delete: (id)      => post('/api/teams/delete', { id }),
+    },
+
+    // ── Tournament templates (v0.16.3 / task #169) ────────────────────────
+    templates: {
+      list:   ()                 => get('/api/templates'),
+      save:   (template)         => post('/api/templates/save',   template),
+      delete: (id)               => post('/api/templates/delete', { id }),
+      apply:  (id)               => post('/api/templates/apply',  { id }),
     },
 
     // ── Plugin Manager (v0.13.2 + v0.14.0) ────────────────────────────────

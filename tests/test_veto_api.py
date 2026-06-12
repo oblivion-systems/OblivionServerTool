@@ -3990,6 +3990,131 @@ t('readiness (v0.16.2): admin_pin=1234 triggers warn',
   t_v162_readiness_pin_default_warning)
 
 
+# ─── v0.16.3 — Tournament templates (task #169) + demos (#171) + mock-veto (#165) ─
+
+def t_v163_template_crud_happy_path():
+    """Save → list → update → delete a template.  Mirrors team_profiles
+    behaviour: stable UUID, atomic JSON write, allowlist-filtered payload."""
+    import os as _os, tempfile, shutil
+    from cs2servergui import template_store, config as _cfg
+    test_dir = tempfile.mkdtemp(prefix='oblivion_tpl_test_')
+    original = _cfg.TEMPLATES_FILE
+    _cfg.TEMPLATES_FILE = _os.path.join(test_dir, 'oblivion_templates.json')
+    try:
+        saved = template_store.save_template(
+            template_id=None, name='Cobras Wed',
+            payload={'mode': '5v5', 'map': 'de_dust2',
+                     'pack_id': 'competitive_5v5',
+                     'discord_veto_channel_id': '12345',
+                     'discord_auto_move_on_distribute_enabled': True,
+                     # Non-allowlist key should be stripped
+                     'malicious_key': 'should not survive'},
+        )
+        if 'id' not in saved or saved['payload'].get('mode') != '5v5':
+            return False, f'save shape wrong: {saved!r}'
+        if 'malicious_key' in saved['payload']:
+            return False, 'allowlist failed to strip non-allowlist key'
+        # Update path
+        updated = template_store.save_template(
+            template_id=saved['id'], name='Cobras Wed (renamed)',
+            payload={'mode': '3v3', 'pack_id': 'casual_deathmatch'},
+        )
+        if updated['id'] != saved['id'] or updated['name'] != 'Cobras Wed (renamed)':
+            return False, f'update mismatch: {updated!r}'
+        if updated['payload'].get('mode') != '3v3':
+            return False, f'update did not change mode: {updated!r}'
+        if not template_store.delete_template(saved['id']):
+            return False, 'delete returned False'
+        if template_store.list_templates():
+            return False, 'list non-empty after delete'
+        return True, 'CRUD + allowlist + UUID stable across update'
+    finally:
+        _cfg.TEMPLATES_FILE = original
+        shutil.rmtree(test_dir, ignore_errors=True)
+t('templates (v0.16.3): CRUD + allowlist filtering',
+  t_v163_template_crud_happy_path)
+
+
+def t_v163_templates_api_local_only():
+    """save / delete / apply all @require_local; list is @require_auth."""
+    ac, app, c = _new_app()
+    _login(c)
+    r_save  = c.post('/api/templates/save',
+                     json={'name': 'X', 'payload': {}})
+    r_del   = c.post('/api/templates/delete', json={'id': 'nope'})
+    r_apply = c.post('/api/templates/apply',  json={'id': 'nope'})
+    r_list  = c.get('/api/templates')
+    return (r_save.status_code == 403 and r_del.status_code == 403
+            and r_apply.status_code == 403 and r_list.status_code == 200), \
+           (f'save={r_save.status_code} delete={r_del.status_code} '
+            f'apply={r_apply.status_code} list={r_list.status_code}')
+t('templates (v0.16.3): save/delete/apply @require_local; list @require_auth',
+  t_v163_templates_api_local_only)
+
+
+def t_v163_demos_endpoint_returns_well_formed():
+    """/api/demos returns a list (possibly empty) + scanned_roots metadata.
+    Don't require any actual .dem files — operator may not have one yet."""
+    ac, app, c = _new_app()
+    _login(c)
+    from cs2servergui import web as _web
+    for tok in list(_web._sessions.keys()):
+        _web._sessions[tok]['is_local'] = True
+    r = c.get('/api/demos')
+    if r.status_code != 200:
+        return False, f'status={r.status_code}'
+    body = r.get_json() or {}
+    if 'demos' not in body or not isinstance(body['demos'], list):
+        return False, f'demos missing/wrong type: {body}'
+    if 'scanned_roots' not in body:
+        return False, 'scanned_roots missing'
+    return True, f'{len(body["demos"])} demos, {len(body["scanned_roots"])} roots scanned'
+t('demos (v0.16.3): /api/demos returns demos[] + scanned_roots[]',
+  t_v163_demos_endpoint_returns_well_formed)
+
+
+def t_v163_demos_download_rejects_path_traversal():
+    """Download endpoint must reject path-traversal attempts (e.g.
+    ?path=csgo/../../../oblivion_config.json) — defence-in-depth on top
+    of the .dem extension check."""
+    ac, app, c = _new_app()
+    _login(c)
+    from cs2servergui import web as _web
+    for tok in list(_web._sessions.keys()):
+        _web._sessions[tok]['is_local'] = True
+    # Missing path → 400
+    r = c.get('/api/demos/download')
+    if r.status_code != 400:
+        return False, f'no-path status={r.status_code}'
+    # Unknown label → 400
+    r = c.get('/api/demos/download?path=evil/file.dem')
+    if r.status_code != 400:
+        return False, f'unknown-label status={r.status_code}'
+    # Non-.dem extension → 400 (assuming csgo dir resolves)
+    r = c.get('/api/demos/download?path=csgo/../oblivion_config.json')
+    if r.status_code not in (400, 404):
+        return False, f'traversal status={r.status_code}'
+    return True, 'no-path/unknown-label/traversal all rejected'
+t('demos (v0.16.3): /api/demos/download rejects bad paths',
+  t_v163_demos_download_rejects_path_traversal)
+
+
+def t_v163_mock_veto_requires_bot_connection():
+    """Mock veto endpoint must 503 when bot isn't connected — and 400
+    when no veto channel is configured.  Operator should see a useful
+    error not a stack trace."""
+    ac, app, c = _new_app()
+    _login(c)
+    from cs2servergui import web as _web
+    for tok in list(_web._sessions.keys()):
+        _web._sessions[tok]['is_local'] = True
+    # Bot is not connected in tests → 503
+    r = c.post('/api/discord/mock_veto')
+    return r.status_code in (400, 503), f'status={r.status_code}'
+t('discord (v0.16.3): mock veto refuses when bot/channel not configured',
+  t_v163_mock_veto_requires_bot_connection)
+
+
 # ─── v0.14.0 slice 5 — Runtime bootstrap detection ───────────────────────
 
 def t_plugins_runtime_install_state_surfaced():

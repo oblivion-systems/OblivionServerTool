@@ -3008,6 +3008,112 @@ def create_flask(core: AppCore) -> Flask:
         core.log(f"[discord] test embed posted to channel {cid} (msg {msg_id})")
         return jsonify({"ok": True, "channel_id": cid, "message_id": msg_id})
 
+    # v0.16.3 / task #165 — Discord mock-veto smoke test.
+    # The existing test_embed + test_dm buttons each verify ONE bot
+    # capability.  This walks the FULL embed lifecycle (post → 3 edits
+    # → final "complete" state) plus a voice-channel reachability
+    # check, all against the configured channels — no real veto needed.
+    # Operator gets a list of "what worked / what didn't" so they can
+    # spot wiring issues before the first real captain DM goes out.
+    @app.route("/api/discord/mock_veto", methods=["POST"])
+    @require_auth
+    @require_local
+    def discord_mock_veto():
+        import time as _time
+        try:
+            from . import discord_bot
+        except Exception as exc:
+            return jsonify({"error": f"bot module unavailable: {exc}"}), 503
+        if not discord_bot.bot_status().get("connected"):
+            return jsonify({"error": "Discord bot is not connected"}), 503
+
+        cid = (core.discord_veto_channel_id or "").strip()
+        if not cid:
+            return jsonify({
+                "error": "discord_veto_channel_id is not set in Config → Discord",
+            }), 400
+
+        steps: list[dict] = []
+        def step(name: str, ok: bool, detail: str = ""):
+            steps.append({"name": name, "ok": ok, "detail": detail})
+
+        # 1. Post the initial "veto starting" embed.
+        embed = {
+            "title": "🧪 Mock veto — bot smoke test",
+            "description": ("Starting a simulated 5v5 veto.  This will edit itself "
+                            "through 3 stages over ~3s, then settle on a final "
+                            "state.  Safe to delete after."),
+            "color": 0x5865F2,
+            "fields": [{"name": "Stage", "value": "🟦 Initialising", "inline": False}],
+            "footer": {"text": "Oblivion mock-veto / safe to delete"},
+        }
+        msg_id = discord_bot.bot_post_embed(cid, embed)
+        if not msg_id:
+            step("post_initial", False,
+                 f"Failed to post initial embed to channel {cid}. "
+                 "Verify Send Messages + Embed Links perms.")
+            return jsonify({"ok": False, "steps": steps,
+                             "summary": "Bot cannot post; aborting."}), 502
+        step("post_initial", True, f"Posted message {msg_id}")
+
+        # 2. Edit through three simulated stages.  Embed edits use the
+        # same code path as Layer 1C live updates during real matches.
+        stages = [
+            ("Teams formed", "Cobras (5) vs Vipers (5)"),
+            ("Map veto in progress", "Cobras ban de_overpass · Vipers ban de_nuke · Cobras pick de_inferno"),
+            ("Veto complete",
+             "Final maps: de_inferno, de_mirage, de_anubis (decider)\n"
+             "Connect: connect 192.168.0.103:27015"),
+        ]
+        for i, (title, body) in enumerate(stages, start=1):
+            _time.sleep(1.0)
+            embed_i = {
+                "title": embed["title"],
+                "description": embed["description"],
+                "color":  0x5865F2 if i < 3 else 0x57F287,
+                "fields": [{"name": "Stage", "value": f"🟢 {title}", "inline": False},
+                           {"name": "Detail", "value": body, "inline": False}],
+                "footer": embed["footer"],
+            }
+            edit_ok = discord_bot.bot_edit_embed(cid, msg_id, embed_i)
+            step(f"edit_stage_{i}", bool(edit_ok),
+                 f"{title}" if edit_ok
+                 else "edit failed — bot may have lost Manage Messages perm")
+            if not edit_ok:
+                # Don't bail; report the failure but continue to give
+                # the operator the full picture.
+                pass
+
+        # 3. Voice channel reachability (if any VC configured).
+        gid = (core.discord_guild_id or "").strip()
+        vc  = (core.discord_voice_channel_id or "").strip()
+        if gid and vc:
+            try:
+                info = discord_bot.bot_voice_channel_info(gid, vc, timeout=2.0)
+            except Exception as exc:
+                info = None
+                step("vc_reach", False, f"voice channel lookup raised: {exc!r}")
+            if info and info.get("name"):
+                step("vc_reach", True,
+                     f"Default VC reachable: {info['name']} "
+                     f"({info.get('member_count', 0)} connected)")
+            elif info is None:
+                pass  # error step already added above
+            else:
+                step("vc_reach", False,
+                     "Default VC lookup returned nothing — bot may lack View Channels perm")
+        else:
+            step("vc_reach", True, "No default VC configured (optional)")
+
+        ok_count = sum(1 for s in steps if s["ok"])
+        return jsonify({
+            "ok":          ok_count == len(steps),
+            "steps":       steps,
+            "channel_id":  cid,
+            "message_id":  msg_id,
+            "summary":     f"{ok_count} of {len(steps)} checks passed",
+        })
+
     @app.route("/api/discord/test_dm", methods=["POST"])
     @require_auth
     def discord_test_dm():
@@ -4205,6 +4311,252 @@ def create_flask(core: AppCore) -> Flask:
     # operator would need to paste into a Discord support channel.  Local
     # admin only — contains IPs, deployed plugin names, redacted config.
     # SPA button copies the result to clipboard.
+
+    # ─── Demo browser (v0.16.3 / task #171) ──────────────────────────────────
+    # Scan the CS2 server's csgo/ + MatchZy demo dir + counterstrikesharp
+    # demo output for .dem files.  List with timestamps + sizes so the
+    # operator can see "last 10 matches' demos" without leaving the app.
+    # Download routes the file through Flask so the operator's browser
+    # gets a Save-As prompt instead of needing to know the on-disk path.
+
+    @app.route("/api/demos")
+    @require_auth
+    @require_local
+    def api_demos_list():
+        import time as _time
+        csgo = core._csgo_dir() if core.server_dir else None
+        roots: list[tuple[str, str]] = []   # (label, abs_path)
+        if csgo and os.path.isdir(csgo):
+            roots.append(("csgo",      csgo))
+            roots.append(("matchzy",
+                          os.path.join(csgo, "addons", "counterstrikesharp",
+                                       "plugins", "MatchZy", "demos")))
+            roots.append(("css_logs",  os.path.join(csgo, "addons",
+                                                    "counterstrikesharp", "demos")))
+            roots.append(("cfg_mz",    os.path.join(csgo, "cfg", "MatchZy")))
+        demos: list[dict] = []
+        seen_paths = set()
+        for label, root in roots:
+            if not os.path.isdir(root):
+                continue
+            try:
+                walker = os.walk(root)
+            except OSError:
+                continue
+            for cwd, _dirs, files in walker:
+                for fn in files:
+                    if not fn.lower().endswith(".dem"):
+                        continue
+                    p = os.path.join(cwd, fn)
+                    if p in seen_paths:
+                        continue
+                    seen_paths.add(p)
+                    try:
+                        st = os.stat(p)
+                    except OSError:
+                        continue
+                    demos.append({
+                        "name":      fn,
+                        # rel_path is what /api/demos/download uses to find
+                        # the file again.  Encoded as label + slash + path
+                        # relative to that root so the download endpoint
+                        # can resolve back to the actual csgo/... path
+                        # without trusting the operator with absolute paths.
+                        "rel_path":  f"{label}/{os.path.relpath(p, root)}",
+                        "size":      st.st_size,
+                        "mtime":     int(st.st_mtime),
+                        "mtime_iso": _time.strftime("%Y-%m-%d %H:%M:%S",
+                                                     _time.localtime(st.st_mtime)),
+                        "source":    label,
+                    })
+        # Newest first.
+        demos.sort(key=lambda d: d["mtime"], reverse=True)
+        return jsonify({"demos": demos, "scanned_roots": [r[0] for r in roots]})
+
+    @app.route("/api/demos/download")
+    @require_auth
+    @require_local
+    def api_demos_download():
+        from flask import send_file, abort
+        rel = (request.args.get("path") or "").strip()
+        if not rel or "/" not in rel:
+            return jsonify({"error": "path required as <label>/<relative>"}), 400
+        label, _slash, rel_inside = rel.partition("/")
+        # Validate label BEFORE checking csgo existence so callers can
+        # distinguish "bad request" from "server install missing" cleanly.
+        valid_labels = {"csgo", "matchzy", "css_logs", "cfg_mz"}
+        if label not in valid_labels:
+            return jsonify({"error": f"unknown label {label!r}"}), 400
+        csgo = core._csgo_dir() if core.server_dir else None
+        if not csgo or not os.path.isdir(csgo):
+            return jsonify({"error": "csgo/ not found"}), 404
+        root_map = {
+            "csgo":     csgo,
+            "matchzy":  os.path.join(csgo, "addons", "counterstrikesharp",
+                                      "plugins", "MatchZy", "demos"),
+            "css_logs": os.path.join(csgo, "addons", "counterstrikesharp",
+                                      "demos"),
+            "cfg_mz":   os.path.join(csgo, "cfg", "MatchZy"),
+        }
+        root = root_map[label]
+        target = os.path.realpath(os.path.join(root, rel_inside))
+        root_real = os.path.realpath(root)
+        # Path traversal guard — target must resolve inside its labelled root.
+        if os.path.commonpath([target, root_real]) != root_real:
+            return jsonify({"error": "path escapes root"}), 400
+        if not os.path.isfile(target):
+            return jsonify({"error": "not found"}), 404
+        if not target.lower().endswith(".dem"):
+            return jsonify({"error": "only .dem files served"}), 400
+        return send_file(target, as_attachment=True)
+
+    # ─── Tournament templates (v0.16.3 / task #169) ───────────────────────────
+    # Named bundles of mode + map + pack + Discord channels + team profile IDs.
+    # apply() walks the persisted payload and routes each piece through the
+    # endpoint that would have handled it interactively, so behaviour stays in
+    # one place and the same safety rails fire (preflight / atomic deploy).
+
+    @app.route("/api/templates")
+    @require_auth
+    def api_templates_list():
+        from . import template_store
+        return jsonify({"templates": template_store.list_templates()})
+
+    @app.route("/api/templates/save", methods=["POST"])
+    @require_auth
+    @require_local
+    def api_templates_save():
+        from . import template_store
+        d = request.get_json(silent=True) or {}
+        try:
+            saved = template_store.save_template(
+                template_id=(d.get("id") or None),
+                name=d.get("name") or "",
+                payload=d.get("payload") or {},
+            )
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        return jsonify({"ok": True, "template": saved})
+
+    @app.route("/api/templates/delete", methods=["POST"])
+    @require_auth
+    @require_local
+    def api_templates_delete():
+        from . import template_store
+        d = request.get_json(silent=True) or {}
+        tid = (d.get("id") or "").strip()
+        if not tid:
+            return jsonify({"error": "id is required"}), 400
+        if not template_store.delete_template(tid):
+            return jsonify({"error": "template not found"}), 404
+        return jsonify({"ok": True, "id": tid})
+
+    @app.route("/api/templates/apply", methods=["POST"])
+    @require_auth
+    @require_local
+    def api_templates_apply():
+        """Apply a saved template:
+            1. Backup config (so the whole batch is rollbackable).
+            2. Persist Discord channel + behaviour toggles via core.config_set.
+            3. Apply the plugin pack (mode + map + plugins) via the same
+               code path as /api/plugins/apply_pack — preflight + lock.
+
+        Returns {ok, applied: [...steps...]}.
+        Team profile IDs are surfaced in the response; the SPA loads them
+        into the local roster buffer client-side (no server-side roster state).
+        """
+        from . import template_store, core as _core
+        d   = request.get_json(silent=True) or {}
+        tid = (d.get("id") or "").strip()
+        if not tid:
+            return jsonify({"error": "id is required"}), 400
+        tpl = template_store.get_template(tid)
+        if not tpl:
+            return jsonify({"error": "template not found"}), 404
+        payload = tpl.get("payload") or {}
+        applied: list[str] = []
+
+        # 1. Snapshot so the whole batch is reversible if something goes wrong.
+        core.backup_config(reason=f"pre-template-{tpl.get('name', '?')[:20]}")
+
+        # 2. Save the Discord-side fields directly onto AppCore + persist.
+        discord_fields = (
+            "discord_veto_channel_id",
+            "discord_team_a_voice_channel_id",
+            "discord_team_b_voice_channel_id",
+            "discord_auto_move_on_distribute_enabled",
+            "discord_round_summaries_enabled",
+        )
+        wrote_any = False
+        for f in discord_fields:
+            if f in payload:
+                v = payload[f]
+                # Booleans must stay booleans; channel IDs are strings (digits).
+                if "enabled" in f:
+                    v = bool(v)
+                else:
+                    v = (v or "").strip() if isinstance(v, str) else ""
+                setattr(core, f, v)
+                wrote_any = True
+        if wrote_any:
+            core.save_config()
+            applied.append("discord_config")
+
+        # 3. Apply the pack (if any).  Preflight covers running / dl / veto state.
+        pack_id = (payload.get("pack_id") or "").strip()
+        if pack_id:
+            from .core import _PLUGIN_PACKS
+            pack = next((p for p in _PLUGIN_PACKS if p["id"] == pack_id), None)
+            if not pack:
+                return jsonify({"error": f"pack {pack_id!r} not found",
+                                "applied": applied}), 400
+            ok, status, err = _plugin_action_preflight()
+            if not ok:
+                # We may have already written discord fields above; the operator
+                # can roll back via Settings → Tools → Restore backup.
+                return jsonify({**err, "applied": applied,
+                                "note": "Discord settings already applied; "
+                                        "rerun once preflight passes."}), status
+            # Honour the template's explicit map if set; else default_map.
+            target_map = (payload.get("map") or "").strip() or \
+                          (pack.get("default_map") or None)
+            if core.running:
+                # Live restart path mirrors apply_pack's running branch.
+                tm, is_workshop = _resolve_live_swap_map(
+                    pack["mode"], preferred=target_map or "")
+                core.change_map(tm, pack["mode"], is_workshop=is_workshop,
+                                caller=f"template/{tpl.get('name', '?')[:20]}")
+                applied.append("pack_apply_restart")
+            else:
+                result = core.set_offline_mode_and_deploy(
+                    pack["mode"],
+                    caller=f"template/{tpl.get('name', '?')[:20]}",
+                    map_name=target_map,
+                )
+                if not result.get("ok"):
+                    return jsonify({"error": result.get("error") or "deploy failed",
+                                    "applied": applied}), 500
+                applied.append("pack_apply_offline")
+        elif (payload.get("mode") or "").strip() and not core.running:
+            # No pack but explicit mode + maybe map → stage it without plugins.
+            mode = payload["mode"].strip()
+            tm   = (payload.get("map") or "").strip() or None
+            result = core.set_offline_mode_and_deploy(
+                mode,
+                caller=f"template/{tpl.get('name', '?')[:20]}",
+                map_name=tm,
+            )
+            if result.get("ok"):
+                applied.append("mode_only_apply")
+
+        return jsonify({
+            "ok":          True,
+            "template_id": tid,
+            "name":        tpl.get("name"),
+            "applied":     applied,
+            "team_a_id":   payload.get("team_a_id") or "",
+            "team_b_id":   payload.get("team_b_id") or "",
+        })
 
     # ─── Persistent team profiles (v0.16.1 / task #160) ───────────────────────
     @app.route("/api/teams")
