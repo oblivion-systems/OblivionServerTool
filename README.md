@@ -3,16 +3,53 @@
 A desktop application for managing a **Counter-Strike 2 dedicated server** on Windows.  
 Built with Python + Flask + pywebview (Edge WebView2). Ships as a single `.exe` with an optional installer.
 
-> **Status: v0.15.2 (released 2026-06-12).**  Plugin Manager community
-> arc complete — operators can drop a folder into `%APPDATA%`, install
-> from a community registry, paste a URL for a release zip, see when
-> updates are available, and remove plugins they don't want — all from
-> the SPA, no app rebuild needed.  The
+> **Status: v0.16.3 (released 2026-06-12).**  v1.0 prep is in flight —
+> four "waves" of wishlist work landed across v0.16.0–v0.16.3 covering
+> config backup/restore, persistent team profiles, dedicated History +
+> Pre-flight + Logs pages, tournament templates, an in-app demo
+> browser, and a Discord mock-veto smoke button.  The
 > [`OblivionPluginRegistry`](https://github.com/jacquesvniekerk-eng/OblivionPluginRegistry)
-> repo is live; every running .exe fetches its `catalog.json` on a 24h
-> TTL.  **276/276 backend tests green.**
+> repo is live and every running .exe fetches its `catalog.json` on a
+> 24h TTL.  **287/287 backend tests green.**
 >
 > **What's new since v0.11.0**:
+> - **Wave 4 — tournament templates + demo browser + Discord mock-veto**
+>   *(v0.16.3)* — Plugins tab gains a **Templates strip**: save a complete
+>   recurring config (mode + map + pack + Discord channels + team IDs)
+>   under a name, restore it with one click; allowlist-filtered persistence
+>   so the JSON is safe to share.  History page gains a **Demos card**
+>   that walks `csgo/` + MatchZy/CSS demo dirs + MatchZy cfg, surfacing
+>   every `.dem` with size + date + one-click download (three-layer path
+>   safety: label allowlist + `.dem`-only + `commonpath` realpath check).
+>   Discord Config card gains a **🧪 Mock-veto smoke test** button —
+>   posts a real embed, simulates the full Ban → Pick → Side → Move flow
+>   with reaction payloads, leaves a "smoke test complete" embed (safe to
+>   delete) so operators can verify Discord setup without spinning up a
+>   real veto.
+> - **Wave 3 — History + Pre-flight + Logs pages** *(v0.16.2)* — three
+>   new dedicated sidebar entries.  **Pre-flight** runs 10 audited
+>   readiness checks (config, plugins, Discord, server install, PIN
+>   security) and emits ok/warn/fail/info with a one-line explanation —
+>   catches "admin_pin=1234" (default), "Discord bot token missing",
+>   "deploy never run", "active pack files missing".  **History** lifts
+>   match history out of the modal into a real page with search.
+>   **Logs** gives source-filtered, searchable, auto-refreshing access
+>   to backend logs + a download button.
+> - **Wave 2 — persistent team profiles** *(v0.16.1)* — Veto roster
+>   stage gains a **📋 Team Profiles** modal.  Save the current 5
+>   players as a named team (with tag + optional Discord IDs) for
+>   recurring tournaments; restore a saved team into either roster slot
+>   with one click.  Stored in `oblivion_teams.json` with atomic writes
+>   + stable UUIDs across edits.
+> - **Wave 1 — config backup/restore + wizard polish + PIN docs**
+>   *(v0.16.0)* — `core.backup_config(reason)` writes timestamped
+>   snapshots of `oblivion_config.json` to `%APPDATA%/.../backups/`,
+>   keeps the last 10, and auto-fires before risky plugin / pack
+>   actions; SPA gets `📥 Backup` / `📂 Restore` buttons in Config →
+>   Tools row.  First-run wizard Step 3 rewritten with a 3-step ordered
+>   guidance ("Deploy → Connect → First match").  TROUBLESHOOTING.md
+>   gains a **Security: PIN auth + remote exposure** section with a
+>   what-is/isn't-protected threat table.
 > - **Plugin Manager slice 3** *(v0.15.2)* — Uninstall + Reload + custom
 >   URL install + Update notifications + search filter.  Local-source
 >   library cards get a **Remove** button.  Plugins drop into
@@ -181,9 +218,13 @@ Built with Python + Flask + pywebview (Edge WebView2). Ships as a single `.exe` 
 >   voice-channel roster pull, live veto embed.  Degrades silently
 >   when no token is configured.
 >
-> **183/183 backend tests green** (28 v092 + 74 veto + 81 veto-api).
+> **287/287 backend tests green** across the veto state machine, the
+> API surface, plugin manifest/registry/install paths, team-profile +
+> template CRUD, readiness audits, and demo / mock-veto edge cases.
 > Full per-release prose in [CHANGELOG.md](CHANGELOG.md); spec for the
-> map-veto feature in [VETO.md](VETO.md); strategic roadmap to v1.0 in
+> map-veto feature in [VETO.md](VETO.md); plugin-author guide in
+> [PLUGINS.md](PLUGINS.md); driver-abstraction design doc in
+> [PLATFORM.md](PLATFORM.md); strategic roadmap to v1.0 in
 > [PLAN.md](PLAN.md); operator-facing runbook in
 > [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 
@@ -437,15 +478,24 @@ router changes, encrypted transport. See [TONIGHT.md](TONIGHT.md) for the full s
 CS2 was the founding game; it isn't the destination.  The strategic
 roadmap to v1.0 is in [PLAN.md](PLAN.md), but the headline:
 
-- **v0.12** — driver abstraction + plugin registry: third-party
-  plugins fetched on demand from upstream, not bundled
-- **v0.13** — second game driver (TF2)
-- **v0.14** — Linux + headless mode (systemd / Docker / multi-arch),
-  no GUI required for server-grade unattended deployments
-- **v0.15** — first non-Source game driver (Palworld / Valheim / TBD)
+- **v0.12** *(shipped)* — driver abstraction + plugin registry seam
+- **v0.13** *(shipped)* — PLATFORM.md design doc + first method
+  migration into the driver
+- **v0.14** *(shipped)* — Plugin Manager packs + runtime bootstrap
+  modal + live mode swap on running server
+- **v0.15** *(shipped)* — Plugin Manager community arc: self-describing
+  plugins (`plugin.json`), `OblivionPluginRegistry` remote fetch,
+  uninstall + URL install + update notifications + search
+- **v0.16** *(shipping)* — v1.0 prep waves: config backup/restore,
+  team profiles, History + Pre-flight + Logs pages, tournament
+  templates, demo browser, Discord mock-veto smoke button
 - **v1.0** — open-source under BSL (non-compete, reverts to Apache
-  after 4 years), 2-3 games supported, donation-funded, Plugin
-  Manager as the headline differentiator
+  after 4 years), donation-funded, Plugin Manager + tournament
+  workflow as the headline differentiators.  Remaining work: spectator
+  URL polish, auto-install MetaMod/CSS runtime, Discord bot resilience
+  soak, fresh-operator-to-tournament UX audit
+- **Post-1.0** — second game driver (TF2 driver paused at v0.13;
+  resumes here), Linux + headless mode, first non-Source game driver
 
 The two-audience pitch: **consumer-grade UX, pro-grade reliability.**
 Approachable enough for first-time CS2 server hosts, automated and
