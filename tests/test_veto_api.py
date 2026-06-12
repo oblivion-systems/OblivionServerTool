@@ -3924,6 +3924,72 @@ t('teams (v0.16.1): save + delete are @require_local; list is @require_auth',
   t_v161_teams_api_local_only)
 
 
+# ─── v0.16.2 — Tournament readiness pre-flight (task #168) ────────────────
+
+def t_v162_readiness_returns_well_formed_checks():
+    """Endpoint returns a list of checks, an overall verdict, and a
+    counts roll-up.  Verifies that the basic shape is honoured + the
+    expected check keys are surfaced — operator-facing changes must not
+    silently drop a category."""
+    ac, app, c = _new_app()
+    _login(c)
+    from cs2servergui import web as _web
+    for tok in list(_web._sessions.keys()):
+        _web._sessions[tok]['is_local'] = True
+    r = c.get('/api/readiness')
+    if r.status_code != 200:
+        return False, f'status={r.status_code} body={r.get_data(as_text=True)[:120]!r}'
+    body = r.get_json() or {}
+    if not isinstance(body.get('checks'), list):
+        return False, 'checks not a list'
+    if 'overall' not in body or body['overall'] not in ('ok', 'warn', 'fail'):
+        return False, f"overall missing/bad: {body.get('overall')!r}"
+    if 'counts' not in body or not isinstance(body['counts'], dict):
+        return False, 'counts missing'
+    required_keys = {'csgo', 'runtime', 'plugins', 'disk', 'pin'}
+    actual_keys = {c['key'] for c in body['checks']}
+    missing = required_keys - actual_keys
+    if missing:
+        return False, f'checks missing required keys: {missing}'
+    return True, f"{len(body['checks'])} checks, overall={body['overall']}"
+t('readiness (v0.16.2): /api/readiness returns checks + overall + counts',
+  t_v162_readiness_returns_well_formed_checks)
+
+
+def t_v162_readiness_remote_403():
+    ac, app, c = _new_app()
+    _login(c)
+    r = c.get('/api/readiness')
+    return r.status_code == 403, f'status={r.status_code} (want 403)'
+t('readiness (v0.16.2): /api/readiness 403 for non-local sessions',
+  t_v162_readiness_remote_403)
+
+
+def t_v162_readiness_pin_default_warning():
+    """If admin_pin == "1234" (default), the pin check returns warn —
+    operator who exposes the panel to internet with default PIN sees
+    it on the dashboard before clicking Start."""
+    ac, app, c = _new_app()
+    _login(c)
+    from cs2servergui import web as _web
+    for tok in list(_web._sessions.keys()):
+        _web._sessions[tok]['is_local'] = True
+    ac.admin_pin = '1234'
+    r = c.get('/api/readiness')
+    if r.status_code != 200:
+        return False, f'status={r.status_code}'
+    body = r.get_json() or {}
+    pin_check = next((c for c in body.get('checks', []) if c.get('key') == 'pin'),
+                     None)
+    if not pin_check:
+        return False, 'pin check missing'
+    if pin_check.get('status') != 'warn':
+        return False, f"pin status={pin_check.get('status')!r}, expected warn"
+    return True, 'default PIN correctly warned'
+t('readiness (v0.16.2): admin_pin=1234 triggers warn',
+  t_v162_readiness_pin_default_warning)
+
+
 # ─── v0.14.0 slice 5 — Runtime bootstrap detection ───────────────────────
 
 def t_plugins_runtime_install_state_surfaced():

@@ -3326,6 +3326,317 @@ function _vetoCleanup() {
   _vetoFinaleShownThisSession = false;
 }
 
+/* ═════════════════════════════════════════════════════════════════ LOGS TAB
+ * v0.16.2 / task #162 — searchable in-app log viewer (beyond the drawer).
+ * The drawer is great for live tail; this is the surface for grep-after-
+ * the-fact.  Reads /api/log/history (the in-memory ring buffer), exposes:
+ *   - Full-text search (case-insensitive, debounced)
+ *   - Source filter chips (parsed from [tag] prefix on each line)
+ *   - Download as .txt
+ *   - Auto-refresh toggle (poll every 3s)
+ * Persistent on-disk rotation is a future v0.17 thing if operator
+ * demand exists — for now the existing log_save endpoint handles
+ * "give me a one-shot dump" cases. */
+pages['logs'] = async function() {
+  const root = el('content');
+  if (_guestBlocked && _guestBlocked(root)) return;
+  if (typeof window._logsState === 'undefined') {
+    window._logsState = { search: '', source: 'all', autoRefresh: false };
+  }
+  const SOURCES = [
+    ['all',      'All'],
+    ['plugins',  'Plugins'],
+    ['server',   'Server'],
+    ['discord',  'Discord'],
+    ['veto',     'Veto'],
+    ['workshop', 'Workshop'],
+    ['rcon',     'RCON'],
+    ['app',      'App / Startup'],
+  ];
+  // Map filter key → list of bracketed tags that count as matching.
+  const SOURCE_TAGS = {
+    plugins:  ['plugins', 'gameinfo', 'metamod', 'css', 'backup'],
+    server:   ['server', 'preflight', 'crash', 'startup'],
+    discord:  ['discord', 'bot'],
+    veto:     ['veto', 'roster'],
+    workshop: ['workshop', 'steam', 'steamcmd'],
+    rcon:     ['rcon'],
+    app:      ['app', 'config'],
+  };
+  root.innerHTML = `
+    <div class="section-hdr">
+      <span class="section-title">App Log</span>
+      <div style="display:flex; gap:8px; align-items:center">
+        <label style="display:flex; gap:6px; align-items:center; font-size:11px; color:var(--text-3)">
+          <input type="checkbox" id="logs-auto"> Auto-refresh
+        </label>
+        <button class="btn btn-sm" id="logs-refresh">↻ Refresh</button>
+        <button class="btn btn-sm" id="logs-download">⬇ Download .txt</button>
+      </div>
+    </div>
+    <div class="text-sm text-sub" style="margin-bottom:10px">
+      In-memory ring buffer.  Survives until the app exits.  Use
+      <strong>↻ Refresh</strong> to pull the latest lines, or toggle auto-refresh.
+    </div>
+    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:10px">
+      <input class="input" id="logs-search" type="text"
+             placeholder="Search…" autocomplete="off" spellcheck="false"
+             style="width:280px">
+      <div style="display:flex; gap:4px; flex-wrap:wrap" id="logs-source-row">
+        ${SOURCES.map(([k, label]) =>
+          `<button class="btn btn-sm ${k === (window._logsState.source || 'all') ? 'btn-accent' : 'btn-ghost'} logs-src-btn" data-src="${k}">${esc(label)}</button>`
+        ).join('')}
+      </div>
+    </div>
+    <div id="logs-count" class="text-sm text-sub" style="margin-bottom:6px"></div>
+    <pre id="logs-body" class="text-mono text-sm"
+         style="background:var(--bg-1); padding:12px; border:1px solid var(--line-1); max-height:65vh; overflow:auto; white-space:pre-wrap; line-height:1.45"></pre>
+  `;
+  let lines = [];
+  const render = () => {
+    const term   = (window._logsState.search || '').toLowerCase().trim();
+    const src    = window._logsState.source || 'all';
+    const filter = (line) => {
+      if (term && !line.toLowerCase().includes(term)) return false;
+      if (src === 'all') return true;
+      const tags = SOURCE_TAGS[src] || [];
+      const lower = line.toLowerCase();
+      return tags.some(t => lower.includes(`[${t}`));
+    };
+    const visible = lines.filter(filter);
+    const cnt = el('logs-count');
+    if (cnt) cnt.textContent =
+      `${visible.length} of ${lines.length} line${lines.length === 1 ? '' : 's'} shown`;
+    const body = el('logs-body');
+    if (body) body.textContent = visible.join('\n') || '(no matching lines)';
+  };
+  const refresh = async () => {
+    const btn = el('logs-refresh');
+    if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
+    try {
+      const r = await api.logHistory();
+      lines = Array.isArray(r) ? r : (r.lines || r.log || []);
+      render();
+    } catch (e) {
+      const body = el('logs-body');
+      if (body) body.textContent = `Failed to load log: ${e.message}`;
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = '↻ Refresh'; }
+    }
+  };
+  await refresh();
+  // Wire interactions
+  const search = el('logs-search');
+  if (search) {
+    search.value = window._logsState.search || '';
+    let dbc;
+    search.addEventListener('input', () => {
+      window._logsState.search = search.value;
+      clearTimeout(dbc);
+      dbc = setTimeout(render, 80);
+    });
+  }
+  document.querySelectorAll('.logs-src-btn').forEach(b => {
+    b.addEventListener('click', () => {
+      window._logsState.source = b.dataset.src;
+      document.querySelectorAll('.logs-src-btn').forEach(x => {
+        x.classList.toggle('btn-accent', x.dataset.src === window._logsState.source);
+        x.classList.toggle('btn-ghost',   x.dataset.src !== window._logsState.source);
+      });
+      render();
+    });
+  });
+  el('logs-refresh').addEventListener('click', refresh);
+  el('logs-download').addEventListener('click', () => {
+    const term = (window._logsState.search || '').toLowerCase().trim();
+    const src  = window._logsState.source || 'all';
+    const filter = (line) => {
+      if (term && !line.toLowerCase().includes(term)) return false;
+      if (src === 'all') return true;
+      const tags = SOURCE_TAGS[src] || [];
+      const lower = line.toLowerCase();
+      return tags.some(t => lower.includes(`[${t}`));
+    };
+    const text = lines.filter(filter).join('\n');
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const blob = new Blob([text], { type: 'text/plain' });
+    const url  = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `oblivion_log_${stamp}.txt`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
+  // Auto-refresh
+  const auto = el('logs-auto');
+  if (auto) {
+    auto.checked = !!window._logsState.autoRefresh;
+    let timer;
+    const tick = () => { if (window._logsState.autoRefresh) refresh().finally(schedule); };
+    const schedule = () => { clearTimeout(timer); timer = setTimeout(tick, 3000); };
+    auto.addEventListener('change', () => {
+      window._logsState.autoRefresh = auto.checked;
+      if (auto.checked) schedule();
+      else clearTimeout(timer);
+    });
+    if (window._logsState.autoRefresh) schedule();
+  }
+};
+
+
+/* ════════════════════════════════════════════════════════════ READINESS TAB
+ * v0.16.2 / task #168 — one-button "is my server ready for tonight?" check.
+ * Calls /api/readiness which audits ~10 conditions and returns each as
+ * ok / warn / fail / info.  Operator hits ↻ Re-check before going live. */
+pages['readiness'] = async function() {
+  const root = el('content');
+  if (_guestBlocked && _guestBlocked(root)) return;
+  root.innerHTML = `
+    <div class="section-hdr">
+      <span class="section-title">Tournament Pre-flight</span>
+      <button class="btn btn-sm" id="rd-recheck">↻ Re-check</button>
+    </div>
+    <div class="text-sm text-sub" style="margin-bottom:14px">
+      Quick green/red audit of everything tonight's tournament will touch.
+      Run this before going live; fix anything red, ideally clear all warnings.
+    </div>
+    <div id="rd-summary"></div>
+    <div id="rd-body">
+      <div class="empty-state text-sm text-sub">Running checks…</div>
+    </div>
+  `;
+  const ICONS = { ok: '✓', warn: '⚠', fail: '✗', info: '·' };
+  async function run() {
+    const recheckBtn = el('rd-recheck');
+    if (recheckBtn) { recheckBtn.disabled = true; recheckBtn.textContent = 'Running…'; }
+    el('rd-body').innerHTML = '<div class="empty-state text-sm text-sub">Running checks…</div>';
+    let data;
+    try { data = await api.readiness(); }
+    catch (e) {
+      el('rd-body').innerHTML =
+        `<div class="text-sm text-red">Failed: ${esc(e.message)}</div>`;
+      if (recheckBtn) { recheckBtn.disabled = false; recheckBtn.textContent = '↻ Re-check'; }
+      return;
+    }
+    const c = data.counts || {};
+    const verdict =
+      data.overall === 'fail' ? '✗ Not ready — fix the red items below'
+    : data.overall === 'warn' ? '⚠ Mostly ready — warnings worth resolving'
+    :                            '✓ Ready for tournament';
+    const verdictColor =
+      data.overall === 'fail' ? 'var(--bad)'
+    : data.overall === 'warn' ? 'var(--warn)'
+    :                            'var(--ok)';
+    el('rd-summary').innerHTML = `
+      <div class="card" style="margin-bottom:14px; border-left:4px solid ${verdictColor}">
+        <div style="font-size:16px; font-weight:600; color:${verdictColor}; margin-bottom:6px">
+          ${esc(verdict)}
+        </div>
+        <div class="text-sm text-sub">
+          ${c.ok || 0} ok · ${c.warn || 0} warn · ${c.fail || 0} fail · ${c.info || 0} info
+        </div>
+      </div>`;
+    const rows = (data.checks || []).map(check => {
+      const color = check.status === 'fail' ? 'var(--bad)'
+                  : check.status === 'warn' ? 'var(--warn)'
+                  : check.status === 'ok'   ? 'var(--ok)'
+                  :                            'var(--text-3)';
+      return `
+        <div class="card" style="margin-bottom:8px; display:flex; gap:14px; align-items:flex-start">
+          <div style="font-size:20px; color:${color}; min-width:24px; text-align:center">
+            ${esc(ICONS[check.status] || '?')}
+          </div>
+          <div style="flex:1">
+            <div style="font-size:13px; color:var(--text-1); font-weight:500">
+              ${esc(check.label || check.key || '?')}
+            </div>
+            ${check.detail ? `<div class="text-sm text-sub" style="margin-top:4px">${esc(check.detail)}</div>` : ''}
+          </div>
+        </div>`;
+    }).join('');
+    el('rd-body').innerHTML = rows || '<div class="text-sm text-sub">No checks returned.</div>';
+    if (recheckBtn) { recheckBtn.disabled = false; recheckBtn.textContent = '↻ Re-check'; }
+  }
+  run();
+  el('rd-recheck').addEventListener('click', run);
+};
+
+
+/* ══════════════════════════════════════════════════════════════ HISTORY TAB
+ * v0.16.2 / task #161 — dedicated page for past tournaments.  The modal
+ * version (👈 _vetoOpenHistoryModal) stays as a quick peek from the Veto
+ * header; this page is the full surface with search/filter so operators
+ * can dig into "what did Cobras play last month?". */
+pages['history'] = async function() {
+  const root = el('content');
+  if (typeof window._historySearch === 'undefined') window._historySearch = '';
+  root.innerHTML = `
+    <div class="section-hdr">
+      <span class="section-title">Match History</span>
+      <input class="input" id="hist-search" type="text"
+             placeholder="Filter by team name / mode / map…"
+             style="width:280px" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="text-sm text-sub" style="margin-bottom:14px">
+      Past completed veto sessions, newest first.  Stored in
+      <code>%APPDATA%\\Oblivion Server Tool\\oblivion_matches.json</code>.
+      Last 10 retained.
+    </div>
+    <div id="hist-body">
+      <div class="empty-state text-sm text-sub">Loading…</div>
+    </div>
+  `;
+  let matches;
+  try {
+    const r = await api.veto.history();
+    matches = (r.matches || []).slice().reverse();   // newest first
+  } catch (e) {
+    el('hist-body').innerHTML =
+      `<div class="text-sm text-red">Failed to load: ${esc(e.message)}</div>`;
+    return;
+  }
+  const renderList = () => {
+    const body = el('hist-body');
+    const term = (window._historySearch || '').toLowerCase().trim();
+    const visible = !term ? matches : matches.filter(m => {
+      const blob = [
+        m.mode,
+        (m.team_a || {}).name, (m.team_b || {}).name,
+        ...((m.final_maps || []).map(x => typeof x === 'string' ? x : x.map)),
+        m.decider,
+      ].join(' ').toLowerCase();
+      return blob.includes(term);
+    });
+    if (!visible.length) {
+      body.innerHTML = `
+        <div class="empty-state text-sm text-sub">
+          ${matches.length === 0
+              ? 'No matches in history yet.'
+              : `No matches match <em>${esc(term)}</em>.`}
+        </div>`;
+      return;
+    }
+    body.innerHTML = `
+      <div class="text-sm text-sub" style="margin-bottom:12px">
+        Showing ${visible.length} of ${matches.length} match${matches.length === 1 ? '' : 'es'}.
+      </div>
+      <div class="veto-history-list">
+        ${visible.map(m => _renderHistoryEntry(m)).join('')}
+      </div>
+    `;
+  };
+  renderList();
+  const search = el('hist-search');
+  if (search) {
+    search.value = window._historySearch || '';
+    let debounce;
+    search.addEventListener('input', () => {
+      window._historySearch = search.value;
+      clearTimeout(debounce);
+      debounce = setTimeout(renderList, 80);
+    });
+  }
+};
+
 pages['veto'] = function() {
   _vetoLocalRoster = [];   // fresh roster buffer each time the tab opens
   const content = el('content');

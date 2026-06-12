@@ -207,6 +207,9 @@ const api = (() => {
     config_backups:       ()                  => get('/api/config/backups'),
     config_restore:       (filename)          => post('/api/config/restore', { filename }),
 
+    // ── Tournament readiness dashboard (v0.16.2 / task #168) ──────────────
+    readiness:            ()                  => get('/api/readiness'),
+
     // ── Persistent team profiles (v0.16.1 / task #160) ────────────────────
     teams: {
       list:   ()        => get('/api/teams'),
