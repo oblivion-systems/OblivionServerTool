@@ -4244,6 +4244,186 @@ def create_flask(core: AppCore) -> Flask:
             return jsonify({"error": "team not found"}), 404
         return jsonify({"ok": True, "id": team_id})
 
+    # ─── Tournament readiness pre-flight (v0.16.2 / task #168) ────────────────
+    # Single endpoint that audits ~10 things every tournament needs working.
+    # Operator hits ✓ Pre-flight before going live; gets a green/red dashboard
+    # that turns "something's broken — paste a snapshot" into "let me check
+    # before tonight."  Backs the Status tab's Pre-flight button.
+
+    @app.route("/api/readiness")
+    @require_auth
+    @require_local
+    def api_readiness():
+        import shutil as _shutil
+        from . import registry_client as _reg
+        checks: list[dict] = []
+
+        def add(key, status, label, detail=""):
+            # status: "ok" | "warn" | "fail" | "info"
+            checks.append({"key": key, "status": status,
+                            "label": label, "detail": detail})
+
+        # 1. CS2 install present
+        csgo_dir = core._csgo_dir() if core.server_dir else None
+        if csgo_dir and os.path.isdir(csgo_dir):
+            add("csgo", "ok", "CS2 server installed",
+                detail=csgo_dir)
+        else:
+            add("csgo", "fail", "CS2 server not installed",
+                detail="Open Config → Server Installation → Install / Reinstall")
+
+        # 2. MetaMod + CSS runtime present
+        try:
+            mm = core._metamod_installed()
+            css = core._css_installed()
+        except Exception:
+            mm = False; css = False
+        if mm and css:
+            add("runtime", "ok", "MetaMod + CSS installed")
+        elif mm or css:
+            missing = " + ".join(x for x, v in
+                                  (("MetaMod", mm), ("CSS", css)) if not v)
+            add("runtime", "warn", f"Plugin runtime partial — {missing} missing",
+                detail="Plugins tab → Set up plugin runtime")
+        else:
+            add("runtime", "fail",
+                "Plugin runtime missing (MetaMod + CSS)",
+                detail="Plugins tab → Set up plugin runtime")
+
+        # 3. Current mode's plugins deployed cleanly
+        try:
+            manifest = core._load_plugin_manifest() or {}
+            deployed = manifest.get("plugins", []) or []
+            cur_mode = core.current_mode or ""
+            expected = _MODE_PLUGIN_NAMES.get(cur_mode, [])
+            missing_plugins = sorted(set(expected) - set(deployed))
+            if cur_mode and missing_plugins:
+                add("plugins", "fail",
+                    f"Mode {cur_mode!r} missing plugins",
+                    detail=f"{', '.join(missing_plugins)} not deployed — re-apply the mode")
+            elif cur_mode and expected:
+                add("plugins", "ok",
+                    f"Mode {cur_mode!r}: {', '.join(deployed) or '(vanilla)'}")
+            else:
+                add("plugins", "info",
+                    f"Mode {cur_mode or '(none)'}: vanilla — no plugins to verify")
+        except Exception as exc:
+            add("plugins", "warn", "Could not verify plugins",
+                detail=str(exc))
+
+        # 4. Disk space at csgo/ (CS2 demos + workshop maps eat space)
+        try:
+            check_dir = csgo_dir if (csgo_dir and os.path.isdir(csgo_dir)) \
+                                  else os.path.dirname(_CONFIG_FILE)
+            free = _shutil.disk_usage(check_dir).free
+            free_gb = free / (1024 ** 3)
+            if free_gb >= 5:
+                add("disk", "ok", f"Disk space ok ({free_gb:.1f} GB free)")
+            elif free_gb >= 1:
+                add("disk", "warn", f"Disk space low ({free_gb:.1f} GB free)",
+                    detail="<5 GB free — workshop downloads may stall")
+            else:
+                add("disk", "fail", f"Disk almost full ({free_gb:.2f} GB free)",
+                    detail="Free up space before going live")
+        except Exception as exc:
+            add("disk", "warn", "Could not check disk", detail=str(exc))
+
+        # 5. PIN is set + non-default
+        if not core.admin_pin:
+            add("pin", "fail", "Admin PIN not set",
+                detail="Config → Security → Admin PIN")
+        elif core.admin_pin == "1234":
+            add("pin", "warn", "Admin PIN is still the default 1234",
+                detail="Rotate it before exposing to the internet")
+        else:
+            add("pin", "ok", "Admin PIN set")
+
+        # 6. Discord bot status (optional but warn if configured-but-broken)
+        if not core.discord_bot_token:
+            add("discord", "info", "Discord bot not configured (optional)",
+                detail="Skip if you don't need DM captain links or live embeds")
+        else:
+            try:
+                bot_status = _discord_bot_status()
+                if bot_status.get("connected"):
+                    add("discord", "ok",
+                        f"Discord bot connected as {bot_status.get('user') or '?'}")
+                else:
+                    add("discord", "fail",
+                        "Discord bot configured but not connected",
+                        detail="Check token + guild ID in Config → Discord")
+            except Exception as exc:
+                add("discord", "warn",
+                    "Discord bot status unknown", detail=str(exc))
+
+        # 7. Voice channel reachable (only relevant if VCs configured)
+        try:
+            vc_id = (core.discord_voice_channel_id or "").strip()
+            gid   = (core.discord_guild_id or "").strip()
+            if vc_id and gid:
+                # Cheap reachable test via Discord lib if available.
+                try:
+                    from . import discord_bot as _db
+                    info = _db.bot_voice_channel_info(int(gid), int(vc_id),
+                                                       timeout=1.5)
+                except Exception:
+                    info = None
+                if info and info.get("name"):
+                    add("vc", "ok",
+                        f"Default VC reachable: {info['name']}")
+                else:
+                    add("vc", "warn",
+                        "Default VC configured but lookup failed",
+                        detail="Bot may lack View Channels perm")
+            else:
+                add("vc", "info", "Default voice channel not set (optional)")
+        except Exception as exc:
+            add("vc", "warn", "VC check failed", detail=str(exc))
+
+        # 8. Registry catalog freshness (informational)
+        try:
+            st = _reg.get_registry_status()
+            if not st.get("have_cache"):
+                add("registry", "info", "Plugin registry never fetched",
+                    detail="Not blocking — registry is optional")
+            elif st.get("fresh"):
+                add("registry", "ok", "Plugin registry cache is fresh")
+            else:
+                add("registry", "info", "Plugin registry cache is stale",
+                    detail="Plugins → ↻ Re-fetch catalog to refresh")
+        except Exception:
+            add("registry", "info", "Registry unreachable (offline)")
+
+        # 9. Veto session NOT stuck mid-flow (would block a new match)
+        sess = getattr(core, "_veto_session", None)
+        state = getattr(sess, "state", "idle") if sess else "idle"
+        if state in ("idle", "complete"):
+            add("veto", "ok", "No stuck veto session")
+        else:
+            add("veto", "warn", f"Veto session active (state={state})",
+                detail="Open Veto tab → Reset if you're done with this match")
+
+        # 10. Public share URL configured (for remote captains over tunnel)
+        if core.public_share_url:
+            add("share_url", "ok", "Public share URL set",
+                detail=core.public_share_url)
+        else:
+            add("share_url", "info",
+                "Public share URL not set (LAN-only sessions)",
+                detail="Config → Match Flow → Public Share URL — needed for remote captains")
+
+        # Roll-up
+        counts = {"ok": 0, "warn": 0, "fail": 0, "info": 0}
+        for c in checks:
+            counts[c["status"]] = counts.get(c["status"], 0) + 1
+        overall = "fail" if counts["fail"] else \
+                  "warn" if counts["warn"] else "ok"
+        return jsonify({
+            "checks":  checks,
+            "counts":  counts,
+            "overall": overall,
+        })
+
     # ─── Config backup / restore (v0.16.0 / task #158) ────────────────────────
     # Operator-facing safety net.  Backups live next to the live config under
     # %APPDATA%/Oblivion Server Tool/backups/.  Auto-snapshot fires before
