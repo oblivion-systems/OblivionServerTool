@@ -42,6 +42,78 @@ The path to v1.0 is now:
 
 ---
 
+## v1.0 Wishlist (added 2026-06-12 after whole-project review)
+
+Honest read after closing the Plugin Manager arc: **what's missing or
+needs tweaking before the repo flips public.**  Items are tiered —
+**Must** = blocks the v1.0 ship; **Should** = ships v1.0 noticeably
+weaker without it; **Polish** = small but visible fixes; **Idea** =
+ambitious additions worth considering.
+
+### Must-have (blocks v1.0)
+- [ ] **#29** — Live stress test (10 humans + Warcraft + active match).
+  Without this, every v1.0 release is a gamble.
+- [ ] **#157** — First-run UX audit. Walk through download → tournament
+  as a brand-new operator. Fix the top 5-10 papercuts. Target: stranger
+  ships their first tournament in under 30 min.
+- [ ] **#158** — Backup/restore for `oblivion_config.json` + automatic
+  timestamped backup on every risky action. Trivially small, huge
+  confidence win.
+- [ ] **#159** — Discord bot resilience soak (gateway 503s, perm
+  changes, rate limits, token rotation). Adversarial review scoped to
+  `discord_bot.py` + the veto/finale paths.
+- [ ] **#89** — v1.0 launch posture (BSL license, donations link in
+  README, flip repo public). Paperwork; do last.
+
+### Should-have (ships weaker without)
+- [ ] **#160** — Persistent team profiles. Save rosters across
+  sessions. The single biggest stickiness feature missing.
+- [ ] **#161** — Match history promoted from modal to dedicated tab.
+  For a tournament-running app, history IS the product.
+- [ ] **#162** — Searchable in-app log viewer (beyond the drawer).
+  When something broke three matches ago, operator wants to grep.
+- [ ] **#163** — Auto-install MetaMod + CSS runtime (finish slice 5).
+  Don't make operators extract zips. Reuse `registry_client.install_from_url`'s
+  safety pipeline; ship runtime URLs in a sibling `runtime.json`.
+
+### Polish (small but visible)
+- [ ] **#164** — v0.16 polish sweep: consolidate two reload buttons,
+  fix `deployed_at: ?` display bug, refresh PLAN.md / FRIDAY_SMOKE.md /
+  PLATFORM.md / INGEST.md to v0.15.x, close the cs2fixes `.example`
+  warnings loop.
+- [ ] **#165** — Discord "Run mock veto" smoke button. Drive the full
+  veto flow against a fake roster so wiring bugs surface before the
+  operator's first real veto.
+- [ ] **#166** — Document or strengthen PIN auth threat model for
+  remote (Cloudflare-tunnel) sessions. 8-digit PIN is fine for LAN,
+  weak for public exposure.
+- [ ] **#167** — Setup wizard learns about the Plugin Manager. Final
+  step offers a Quick-Apply Pack so new operators don't end on a
+  vanilla server.
+
+### Ideas (consider for v1.0 or push to v1.1)
+- [ ] **#168** — Tournament readiness pre-flight dashboard.
+  One-button green/red check (runtime ✓, Discord ✓, voice ✓, csgo ✓,
+  registry ✓, public URL ✓, disk ✓). Pre-emptive diagnostic snapshot.
+- [ ] **#169** — Tournament templates. Named bundles of mode + map pool
+  + Discord channels + plugin pack + teams. "Cobras Wednesdays" → click
+  Apply. Depends on #160.
+- [ ] **#170** — Spectator URL polish — make it the actual streaming
+  surface. OBS-embeddable, auto-refresh, custom titles, low-latency
+  score updates.
+- [ ] **#171** — Demo browser. Scan csgo/ + MatchZy demo dir, list
+  recent demos with metadata + download. Demos card on the Match
+  History tab.
+
+### Remaining roadmap pre-v1.0 (lower urgency)
+- [ ] **#85** — Monetization sketch (branch, don't ship).
+- [ ] **#87** — TF2 driver (paused per operator).
+- [ ] **#88** — FiveM driver (first non-Source game proof point).
+- [ ] **#93** — Linux support + headless mode.
+- [ ] **#94** — `oblivion/core/platform.py` seam for cross-OS support.
+
+---
+
 ## Pending / In-Flight (working memory)
 *Everything below **shipped in v0.9.1** (committed, pushed, released 2026-05-29). What
 remains is **in-game verification** of the items that couldn't be tested here, plus a few

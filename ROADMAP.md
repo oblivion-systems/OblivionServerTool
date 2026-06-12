@@ -82,6 +82,60 @@ Highlights since v0.11.0:
 
 Full prose in [CHANGELOG.md](CHANGELOG.md).
 
+---
+
+## Path to v1.0 (updated 2026-06-12)
+
+The Plugin Manager arc closed; what's left is **finishing the operator
+workflow**, not adding more features.  Whole-project review yielded
+15 new tasks (#157-#171) layered onto the existing pre-v1.0 set.  See
+[TODO.md § v1.0 Wishlist](TODO.md#v10-wishlist-added-2026-06-12-after-whole-project-review)
+for the full tiered list.
+
+### Must-have before v1.0 ships
+| Task | Title |
+|---|---|
+| #29  | Live stress test — 10 humans + Warcraft + active match |
+| #157 | First-run UX audit — fresh-operator-to-tournament walkthrough |
+| #158 | Backup/restore for `oblivion_config.json` + auto-snapshot |
+| #159 | Discord bot resilience soak |
+| #89  | v1.0 launch posture (BSL license, donations, flip repo public) |
+
+### Should-have (ships v1.0 noticeably weaker without)
+| Task | Title |
+|---|---|
+| #160 | Persistent team profiles — single biggest stickiness feature |
+| #161 | Match history promoted from modal to dedicated tab |
+| #162 | Searchable in-app log viewer (beyond the drawer) |
+| #163 | Auto-install MetaMod + CSS runtime (finish slice 5) |
+
+### Polish (small but visible)
+| Task | Title |
+|---|---|
+| #164 | v0.16 polish sweep — reload buttons, `deployed_at: ?`, stale docs |
+| #165 | Discord "Run mock veto" smoke button |
+| #166 | Document PIN auth threat model for remote sessions |
+| #167 | Setup wizard learns about the Plugin Manager |
+
+### Ideas (consider for v1.0 or push to v1.1)
+| Task | Title |
+|---|---|
+| #168 | Tournament readiness pre-flight dashboard |
+| #169 | Tournament templates — named recurring configs |
+| #170 | Spectator URL polish for streamers |
+| #171 | Demo browser |
+
+### Roadmap items remaining (lower urgency)
+| Task | Title |
+|---|---|
+| #85  | Monetization sketch (branch, don't ship) |
+| #87  | TF2 driver (paused per operator) |
+| #88  | FiveM driver — first non-Source game proof point |
+| #93  | Linux support + headless mode |
+| #94  | `oblivion/core/platform.py` seam for cross-OS support |
+
+---
+
 ## Previously — v0.11.1 (released 2026-06-02)
 
 **Post-v0.11.0 polish sweep.**  Eight discrete operator-facing wins
