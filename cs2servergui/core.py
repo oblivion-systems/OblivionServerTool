@@ -1020,6 +1020,135 @@ class AppCore:
         except Exception as exc:
             self.log(f"Config save failed: {exc}")
 
+    # ── Config backup / restore (v0.16.0 / task #158) ─────────────────────────
+    # Operator-facing safety net for "I just messed up my config" / "the .exe
+    # update wrote something weird" / "I want to roll back this plugin install".
+    # Backups live under %APPDATA%/Oblivion Server Tool/backups/ with the
+    # timestamp + reason in the filename so the SPA picker can show what each
+    # snapshot is.  We keep the most recent 10 and prune older ones.
+
+    def _backups_dir(self) -> str:
+        return os.path.join(os.path.dirname(_CONFIG_FILE), "backups")
+
+    def backup_config(self, reason: str = "manual") -> dict:
+        """Snapshot oblivion_config.json to backups/oblivion_config_<ts>_<reason>.json.
+        Returns {filename, path, bytes, reason}.  Quiet no-op when the live
+        config file doesn't exist yet (e.g. first run).
+        """
+        if not os.path.isfile(_CONFIG_FILE):
+            return {"filename": "", "path": "", "bytes": 0,
+                    "reason": reason, "ok": False, "error": "config file missing"}
+        # Sanitise the reason — only [a-z0-9_-] survive so the filename is safe.
+        safe_reason = "".join(c if c.isalnum() or c in "-_" else "-"
+                              for c in (reason or "manual"))[:40] or "manual"
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        out_name = f"oblivion_config_{ts}_{safe_reason}.json"
+        out_dir = self._backups_dir()
+        try:
+            os.makedirs(out_dir, exist_ok=True)
+            out_path = os.path.join(out_dir, out_name)
+            shutil.copy2(_CONFIG_FILE, out_path)
+            size = os.path.getsize(out_path)
+        except Exception as exc:
+            self.log(f"[backup] {reason} → failed: {exc!r}")
+            return {"filename": "", "path": "", "bytes": 0,
+                    "reason": reason, "ok": False, "error": str(exc)}
+
+        # Prune to the most recent 10.  Sort by mtime descending.
+        try:
+            entries = []
+            for n in os.listdir(out_dir):
+                if not n.startswith("oblivion_config_") or not n.endswith(".json"):
+                    continue
+                p = os.path.join(out_dir, n)
+                try:
+                    entries.append((os.path.getmtime(p), p))
+                except OSError:
+                    pass
+            entries.sort(reverse=True)
+            for _mt, p in entries[10:]:
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
+        except Exception:
+            pass    # pruning failure is non-fatal — operator can clean by hand
+
+        self.log(f"[backup] {reason} → {out_name} ({size} bytes)")
+        return {"filename": out_name, "path": out_path, "bytes": size,
+                "reason": reason, "ok": True}
+
+    def list_config_backups(self) -> list[dict]:
+        """Return the recent backups newest-first.  Each entry has
+        {filename, bytes, mtime_iso, reason}.  reason is parsed from
+        the filename suffix."""
+        out_dir = self._backups_dir()
+        out: list[dict] = []
+        if not os.path.isdir(out_dir):
+            return out
+        for n in os.listdir(out_dir):
+            if not n.startswith("oblivion_config_") or not n.endswith(".json"):
+                continue
+            p = os.path.join(out_dir, n)
+            try:
+                st = os.stat(p)
+            except OSError:
+                continue
+            # Parse: oblivion_config_<ts>_<reason>.json
+            stem = n[len("oblivion_config_"):-len(".json")]
+            parts = stem.split("_", 2)    # ts_date, ts_time, reason
+            reason = parts[2] if len(parts) >= 3 else ""
+            out.append({
+                "filename":  n,
+                "bytes":     st.st_size,
+                "mtime":     int(st.st_mtime),
+                "mtime_iso": time.strftime("%Y-%m-%d %H:%M:%S",
+                                            time.localtime(st.st_mtime)),
+                "reason":    reason,
+            })
+        out.sort(key=lambda e: e["mtime"], reverse=True)
+        return out
+
+    def restore_config_backup(self, filename: str) -> dict:
+        """Atomic restore: take the named backup, snapshot the CURRENT config
+        as a 'pre-restore' backup, then swap the backup file into place.
+        Caller is expected to reload (re-read config) after — config is read
+        once at AppCore() construction, so a full app restart is the cleanest
+        UX.  Returns {ok, restored_from, pre_restore_backup}."""
+        # Filename safety: must be one of our own backups, NOT an absolute
+        # path or anything outside the backups dir.  We resolve through the
+        # backups directory to defend against ".." escapes.
+        if "/" in filename or "\\" in filename or filename.startswith(".."):
+            return {"ok": False, "error": "filename must be a bare basename"}
+        backup_dir = self._backups_dir()
+        target = os.path.normpath(os.path.join(backup_dir, filename))
+        # The normalized path must STILL be inside backup_dir.
+        if os.path.commonpath([os.path.realpath(target),
+                               os.path.realpath(backup_dir)]) \
+                != os.path.realpath(backup_dir):
+            return {"ok": False, "error": "filename escapes backup dir"}
+        if not os.path.isfile(target):
+            return {"ok": False, "error": f"backup {filename!r} not found"}
+
+        # Snapshot the live config first so a botched restore is itself
+        # reversible.  Tagged 'pre-restore' so the operator can see what was
+        # in place when they hit Restore.
+        pre = self.backup_config(reason="pre-restore")
+
+        try:
+            tmp = _CONFIG_FILE + ".restore.tmp"
+            shutil.copy2(target, tmp)
+            with self._config_save_lock:
+                os.replace(tmp, _CONFIG_FILE)
+            self.log(f"[backup] restored config from {filename!r}; "
+                     f"previous saved as {pre.get('filename') or '?'}")
+            return {"ok":                   True,
+                    "restored_from":        filename,
+                    "pre_restore_backup":   pre.get("filename") or ""}
+        except Exception as exc:
+            self.log(f"[backup] restore failed: {exc!r}")
+            return {"ok": False, "error": str(exc)}
+
     # ── server control ────────────────────────────────────────────────────────
 
     def _fix_metamod_dll_nesting(self) -> None:
@@ -2919,6 +3048,15 @@ class AppCore:
     # equivalent: same lock discipline, same plugin-deploy step, no
     # RCON.  The next /api/server/start will boot with the new mode +
     # plugins already on disk.
+    # v0.16.0 / task #158 — auto-backup config before any plugin deploy
+    # so an operator can roll back if a deploy goes sideways.
+    def set_offline_mode_and_deploy_with_backup(self, mode: str,
+                                                  caller: str = "plugin-tab",
+                                                  map_name: str | None = None) -> dict:
+        """Wrap set_offline_mode_and_deploy with a pre-action config backup."""
+        self.backup_config(reason=f"pre-deploy-{mode.replace(' ', '-')}")
+        return self.set_offline_mode_and_deploy(mode, caller, map_name)
+
     def set_offline_mode_and_deploy(self, mode: str, caller: str = "plugin-tab",
                                      map_name: str | None = None) -> dict:
         """Stage a new mode for the next server start, deploying its

@@ -199,3 +199,60 @@ greps:
 
 In Oblivion's log drawer you can Ctrl+F your browser's find on the
 log text.  Or save to file and grep there.
+
+---
+
+## Security: PIN auth + remote exposure (v0.16.0)
+
+Oblivion's web panel uses a **4-8 digit PIN** for authentication.  That's
+fine for the **default LAN-only deployment**, but the threat model
+changes when you expose the panel to the public internet (the
+Cloudflare-tunnel flow in `TONIGHT.md`).
+
+### What the PIN protects
+
+- **Local sessions** (running on the host machine, `127.0.0.1`): the PIN
+  is mostly a tab-rip-off defender — anyone who can run the .exe can
+  also read the config file, so the PIN doesn't gate anything they
+  couldn't otherwise reach.
+- **Remote sessions** (over a Cloudflare tunnel / port-forward): the
+  PIN is the ONLY thing between your dedicated server and the
+  internet at large.
+
+### Threat model
+
+| Attack | Mitigated? | Notes |
+|---|---|---|
+| Brute-force a weak PIN over the tunnel | partially | 5 failed attempts per IP triggers a 60-second lockout (`_login_lockouts` GC + sliding window). 4-digit PINs (10 000 combinations) are still brute-force-able over hours if the attacker has patience and rotates IPs. |
+| Captain token theft via shoulder-surf | yes | Captain tokens are single-use and bound to one team. Reset clears them. |
+| Captain link replay after match ends | yes | Tokens get invalidated on `/api/veto/reset` (v0.11.21). |
+| Session hijack via stolen cookie | partially | SameSite=Lax + Secure-on-HTTPS (v0.11.20). HTTP-only is set; no JS access. But there's no rotation on sensitive actions. |
+| Guest PIN privilege escalation | yes | Guest role is gated to maps/modes/workshop downloads only; all destructive endpoints are admin-gated server-side. |
+| RCON password leak via XSS | yes | All operator strings in the SPA are `esc()`'d. |
+| CSRF on admin endpoints | yes | All admin endpoints require a same-origin session cookie. |
+| Steam password theft from `oblivion_config.json` | partially | Stored in Windows keyring when available; falls back to plaintext in the config file. Backups (v0.16.0) DO contain whatever was in the live file. |
+
+### Recommendations by exposure level
+
+**LAN only** (`http://127.0.0.1:5050` and `http://<LAN IP>:5050`):
+- A 4-digit admin PIN is fine.
+- Guest PIN can stay blank.
+
+**Public tunnel** (Cloudflare quick tunnel / port-forward):
+- Use an **8-digit** admin PIN.  Even with lockouts, 4 digits is too few.
+- If you're sharing access with captains, use the guest PIN for them —
+  never share the admin PIN.
+- **Rotate the admin PIN** after each tournament.  Old captain links
+  reference the same session cookie format; rotating revokes them.
+- Stop the tunnel when not in use (`Ctrl+C` on the `cloudflared` window).
+  An unused public endpoint is an attack surface that adds zero value.
+
+**For v1.0 we may add** TOTP / magic-link / OAuth for the admin role —
+see TODO #166.  Until then, the above is the honest read.
+
+### What the diagnostic snapshot shows about your security posture
+
+The snapshot's `Config (redacted)` section shows `admin_pin: ***` and
+`guest_pin: ***` so you can confirm the PINs are SET without leaking
+them.  If either shows `(none)` or empty, fix that before exposing
+the panel.

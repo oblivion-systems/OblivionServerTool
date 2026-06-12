@@ -202,6 +202,11 @@ const api = (() => {
     // (Power Plan / Game Mode / Game DVR / cs2.exe core affinity).  Local-only.
     gamingMode:    (mode) => post('/api/system/gaming_mode', { mode }),
 
+    // ── Config backup / restore (v0.16.0 / task #158) ─────────────────────
+    config_backup:        (reason = 'manual') => post('/api/config/backup', { reason }),
+    config_backups:       ()                  => get('/api/config/backups'),
+    config_restore:       (filename)          => post('/api/config/restore', { filename }),
+
     // ── Plugin Manager (v0.13.2 + v0.14.0) ────────────────────────────────
     plugins: {
       list:     ()              => get('/api/plugins'),

@@ -1051,6 +1051,8 @@ def create_flask(core: AppCore) -> Flask:
                          "uninstall",
             }), 404
 
+        # v0.16.0 / task #158 — snapshot config before destructive op.
+        core.backup_config(reason=f"pre-uninstall-{slug}")
         try:
             shutil.rmtree(target, ignore_errors=False)
         except Exception as exc:
@@ -1088,6 +1090,9 @@ def create_flask(core: AppCore) -> Flask:
                          "/api/plugins/install_from_registry",
             }), 400
 
+        # v0.16.0 / task #158 — snapshot config before risky operation so
+        # operator can roll back via Settings → Tools → Restore backup.
+        core.backup_config(reason="pre-url-install")
         try:
             result = registry_client.install_from_url(
                 url, expected_sha256=sha256, expected_slug=exp_slug,
@@ -1110,6 +1115,8 @@ def create_flask(core: AppCore) -> Flask:
         version = (d.get("version") or "").strip() or None
         if not slug:
             return jsonify({"error": "slug is required"}), 400
+        # v0.16.0 / task #158 — snapshot config before risky operation.
+        core.backup_config(reason=f"pre-registry-install-{slug}")
         try:
             result = registry_client.install_plugin(slug, version=version)
         except registry_client.RegistryError as exc:
@@ -4199,6 +4206,52 @@ def create_flask(core: AppCore) -> Flask:
     # admin only — contains IPs, deployed plugin names, redacted config.
     # SPA button copies the result to clipboard.
 
+    # ─── Config backup / restore (v0.16.0 / task #158) ────────────────────────
+    # Operator-facing safety net.  Backups live next to the live config under
+    # %APPDATA%/Oblivion Server Tool/backups/.  Auto-snapshot fires before
+    # every risky plugin action (install/uninstall/deploy); manual snapshot
+    # available from the SPA Tools card.
+
+    @app.route("/api/config/backup", methods=["POST"])
+    @require_auth
+    @require_local
+    def api_config_backup():
+        d = request.get_json(silent=True) or {}
+        reason = (d.get("reason") or "manual").strip()
+        result = core.backup_config(reason=reason)
+        if not result.get("ok"):
+            return jsonify({"error": result.get("error") or "backup failed"}), 500
+        return jsonify({"ok": True, "result": result})
+
+    @app.route("/api/config/backups")
+    @require_auth
+    @require_local
+    def api_config_backups():
+        return jsonify({"backups": core.list_config_backups()})
+
+    @app.route("/api/config/restore", methods=["POST"])
+    @require_auth
+    @require_local
+    def api_config_restore():
+        d = request.get_json(silent=True) or {}
+        filename = (d.get("filename") or "").strip()
+        if not filename:
+            return jsonify({"error": "filename is required"}), 400
+        # Defensive: don't restore while a server is running — the operator
+        # might have RCON connections open against the current config.
+        if core.running:
+            return jsonify({"error": "Stop the server before restoring a "
+                                      "config backup."}), 409
+        result = core.restore_config_backup(filename)
+        if not result.get("ok"):
+            return jsonify({"error": result.get("error") or "restore failed"}), 400
+        return jsonify({
+            "ok":               True,
+            "restored_from":    result["restored_from"],
+            "pre_restore_backup": result["pre_restore_backup"],
+            "note": "Restart the app to load the restored config into memory.",
+        })
+
     @app.route("/api/diag/snapshot")
     @require_auth
     @require_local
@@ -4575,7 +4628,11 @@ def create_flask(core: AppCore) -> Flask:
             if manifest:
                 kv("last_deploy_mode", manifest.get("mode", "?"))
                 kv("plugins",           ", ".join(manifest.get("plugins", [])) or "(none)")
-                kv("deployed_at",       manifest.get("at", "?"))
+                # v0.16.0 / task #164a — was reading "at" but the writer
+                # in core._save_plugin_manifest stores "deployed_at" (since
+                # v0.10.x).  Stale key mismatch produced "deployed_at: ?"
+                # on every diag snapshot since that field was renamed.
+                kv("deployed_at",       manifest.get("deployed_at", "?"))
             else:
                 kv("manifest", "(no oblivion_plugins.json — nothing deployed yet)")
         except Exception as exc:

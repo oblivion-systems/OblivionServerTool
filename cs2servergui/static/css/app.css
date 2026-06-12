@@ -1382,6 +1382,27 @@ body.role-guest .admin-only { display: none !important; }
   text-transform: uppercase; margin-bottom: 12px;
 }
 .setup-hint { font-size: 13px; color: var(--text-3); line-height: 1.55; margin-bottom: 4px; }
+/* v0.16.0 / task #167 — ordered list of next-steps in wizard Step 3 */
+.setup-next-steps { padding-left: 0; list-style: none; counter-reset: step; margin-top: 14px; }
+.setup-next-steps li {
+  position: relative;
+  padding: 12px 12px 12px 44px;
+  margin: 10px 0;
+  background: var(--bg-2);
+  border: 1px solid var(--line-1);
+  counter-increment: step;
+}
+.setup-next-steps li::before {
+  content: counter(step);
+  position: absolute; left: 12px; top: 12px;
+  width: 22px; height: 22px;
+  background: var(--accent); color: var(--accent-on);
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono); font-weight: 700; font-size: 11px;
+}
+.setup-next-steps li strong { display: block; font-size: 13px; color: var(--text-1); margin-bottom: 4px; }
+.setup-next-steps li small { display: block; font-size: 12px; color: var(--text-3); line-height: 1.5; }
+.setup-next-steps li em { color: var(--accent); font-style: normal; }
 .setup-warn {
   background: var(--warn-lo); border-left: 2px solid var(--warn);
   padding: 10px 14px;
