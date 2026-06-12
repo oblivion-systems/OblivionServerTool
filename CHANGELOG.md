@@ -2,6 +2,123 @@
 
 ---
 
+## v0.16.3 — 2026-06-12 (Tournament templates + demo browser + Discord mock-veto)
+
+Wave 4 of the v1.0 wishlist. Three independent operator wins.
+
+### Tournament templates (task #169)
+- New `cs2servergui/template_store.py` with allowlist-filtered CRUD —
+  `mode` / `map` / `pack_id` / `discord_*` / `team_a_id` / `team_b_id` /
+  `description` survive the round trip; anything else is dropped at save
+  time (defence against XSS / config-injection if the JSON is ever shared).
+- `oblivion_templates.json` lives next to the existing teams file in
+  `%APPDATA%/Oblivion Server Tool/`. Atomic writes via tempfile + os.replace,
+  stable UUIDs across updates.
+- Four endpoints — `GET /api/templates` (@require_auth), `POST
+  /api/templates/save|delete|apply` (all @require_local). Apply pushes the
+  template's payload into config with a backup beforehand.
+- **Plugins tab: Templates strip + manager modal.** One click to save the
+  current setup as a named template, one click on a chip to restore it.
+  Modal lets the operator rename, edit, or delete.
+
+### Demo browser (task #171)
+- New `GET /api/demos` walks four well-known roots — `csgo/`,
+  MatchZy demo dir, CSS demo output, MatchZy cfg dir — and returns every
+  `.dem` it finds with size + mtime + relative label.
+- `GET /api/demos/download?path=<label>/<rel>` streams the file with
+  three-layer path safety: known-label allowlist, `.dem`-only extension
+  check, and `commonpath` realpath check to reject `../` traversal.
+- **History page: Demos card** showing the most-recent 50 demos with size,
+  date, and one-click download. Empty state explains the four locations
+  scanned.
+
+### Discord mock-veto smoke button (task #165)
+- New `POST /api/discord/mock_veto` posts a real embed to the configured
+  veto channel, simulates the full Ban → Pick → Side → Move flow with
+  reaction payloads, edits the embed at each step, then leaves a
+  "🟢 Smoke test complete" final embed (operator can delete it). Refuses
+  cleanly when the bot isn't connected (503) or the channel isn't
+  configured (400) — no stack trace.
+- **Discord Config card: 🧪 Mock-veto smoke test button** with per-step
+  output (`✓ Initial embed posted`, `✓ Ban 1 reacted`, etc.) so the
+  operator can verify their Discord setup without spinning up a real veto.
+
+### SPA quality-of-life
+- History page now bundles search + demo browser, no longer a stub.
+- Setup wizard Step 3 unchanged (still the 3-step ordered guidance shipped
+  in v0.16.0) — first-run UX audit (#157) is intentionally deferred until
+  the last v1.0 wave so the surface area to audit is stable.
+
+### Tests
+- 287 / 287 green (5 new — template CRUD + allowlist, templates auth
+  matrix, demos shape, demos path-traversal rejection, mock-veto error
+  cases).
+
+---
+
+## v0.16.2 — 2026-06-12 (History/Pre-flight/Logs SPA pages + readiness audit)
+
+Wave 3 of the v1.0 wishlist — three new SPA pages.
+
+- **History page** with search + demo browser sub-section (placeholder for
+  Wave 4 demo card).
+- **Pre-flight page** (`/api/readiness`) — 10 audited checks across
+  config, plugins, Discord, server install, and PIN security. Each check
+  emits ok / warn / fail / info with a one-line explanation. Catches
+  things like "admin_pin=1234" (warn — default PIN), "Discord bot token
+  missing", "deploy never run", "active pack files missing".
+- **Logs page** with search + source filter + auto-refresh + download.
+
+### Tests
+- 282 / 282 green (2 new — readiness shape, PIN default warning).
+
+---
+
+## v0.16.1 — 2026-06-12 (Persistent team profiles)
+
+Wave 2 of the v1.0 wishlist — task #160 only.
+
+- New `cs2servergui/team_profiles.py` — CRUD over `oblivion_teams.json`.
+  Each team has a UUID, name, tag, and a list of `{discord_id, ign}`
+  players. `discord_id` validated as digit-only string. Atomic writes via
+  tempfile + os.replace.
+- Three endpoints — `GET /api/teams` (@require_auth), `POST
+  /api/teams/save|delete` (@require_local).
+- **Veto roster stage: 📋 Team Profiles modal.** Save the current roster
+  as a named team or restore a saved team into the roster slots.
+
+### Tests
+- 280 / 280 green (2 new — team CRUD + auth matrix).
+
+---
+
+## v0.16.0 — 2026-06-12 (Config backup/restore + plugin docs + first-run polish)
+
+Wave 1 of the v1.0 wishlist — tasks #164, #158, #166, #167.
+
+- **Auto config backups** (#158): `core.backup_config(reason)` writes a
+  timestamped snapshot of `oblivion_config.json` into
+  `%APPDATA%/.../backups/`. Auto-fires before plugin install / uninstall /
+  pack apply. `list_config_backups()` keeps the last 10;
+  `restore_config_backup(filename)` copies back. Three endpoints —
+  `POST /api/config/backup`, `GET /api/config/backups`, `POST
+  /api/config/restore` — all `@require_local`.
+- **Setup wizard Step 3 rewrite** (#157 partial): replaced the wall of
+  text with a 3-step ordered guidance ("1. Deploy 2. Connect 3. First
+  match") so a first-time operator knows what to do after the wizard
+  closes.
+- **TROUBLESHOOTING.md: Security section** (#166): PIN auth + remote
+  exposure threat table — what's protected, what isn't, how to recover
+  from a leaked PIN.
+- **`zombie` plugin: copy missing `.example` files into active
+  counterparts** (#167) — admins.jsonc, discordbots.cfg, maplist.jsonc.
+  Stops the "plugin loads but never starts" silent failure on first run.
+
+### Tests
+- 278 / 278 green.
+
+---
+
 ## v0.15.2 — 2026-06-12 (Plugin Manager slice 3: uninstall + reload + URL install + updates + search)
 
 Closes the "easy for anyone to add new plugins" thread. Five Plugin-tab
