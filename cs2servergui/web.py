@@ -4206,6 +4206,44 @@ def create_flask(core: AppCore) -> Flask:
     # admin only — contains IPs, deployed plugin names, redacted config.
     # SPA button copies the result to clipboard.
 
+    # ─── Persistent team profiles (v0.16.1 / task #160) ───────────────────────
+    @app.route("/api/teams")
+    @require_auth
+    def api_teams_list():
+        from . import team_profiles
+        return jsonify({"teams": team_profiles.list_teams()})
+
+    @app.route("/api/teams/save", methods=["POST"])
+    @require_auth
+    @require_local
+    def api_teams_save():
+        from . import team_profiles
+        d = request.get_json(silent=True) or {}
+        try:
+            saved = team_profiles.save_team(
+                team_id=(d.get("id") or None),
+                name=d.get("name") or "",
+                tag=d.get("tag") or "",
+                players=d.get("players") or [],
+            )
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        return jsonify({"ok": True, "team": saved})
+
+    @app.route("/api/teams/delete", methods=["POST"])
+    @require_auth
+    @require_local
+    def api_teams_delete():
+        from . import team_profiles
+        d = request.get_json(silent=True) or {}
+        team_id = (d.get("id") or "").strip()
+        if not team_id:
+            return jsonify({"error": "id is required"}), 400
+        removed = team_profiles.delete_team(team_id)
+        if not removed:
+            return jsonify({"error": "team not found"}), 404
+        return jsonify({"ok": True, "id": team_id})
+
     # ─── Config backup / restore (v0.16.0 / task #158) ────────────────────────
     # Operator-facing safety net.  Backups live next to the live config under
     # %APPDATA%/Oblivion Server Tool/backups/.  Auto-snapshot fires before

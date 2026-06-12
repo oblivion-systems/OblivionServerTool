@@ -207,6 +207,13 @@ const api = (() => {
     config_backups:       ()                  => get('/api/config/backups'),
     config_restore:       (filename)          => post('/api/config/restore', { filename }),
 
+    // ── Persistent team profiles (v0.16.1 / task #160) ────────────────────
+    teams: {
+      list:   ()        => get('/api/teams'),
+      save:   (team)    => post('/api/teams/save',   team),
+      delete: (id)      => post('/api/teams/delete', { id }),
+    },
+
     // ── Plugin Manager (v0.13.2 + v0.14.0) ────────────────────────────────
     plugins: {
       list:     ()              => get('/api/plugins'),
