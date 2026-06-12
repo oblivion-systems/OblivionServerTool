@@ -3515,6 +3515,160 @@ function _renderVetoIdle(root) {
 }
 
 /* ── Roster ────────────────────────────────────────────────────────────── */
+/* v0.16.1 / task #160 — Persistent team profiles modal.
+ * Server-backed (oblivion_teams.json in %APPDATA%) so operators running
+ * recurring tournaments don't re-paste 10 SteamIDs every week.
+ * Each team = 5 players. Roster needs 10 — two teams. */
+async function _openTeamProfilesModal() {
+  let teams;
+  try { teams = (await api.teams.list()).teams || []; }
+  catch (e) { toast(`Teams list failed: ${e.message}`, 'var(--bad)'); return; }
+
+  const overlay = document.createElement('div');
+  overlay.className = 'plugins-bootstrap-overlay';
+  const renderBody = () => {
+    const slotsA = _vetoLocalRoster.slice(0, 5);
+    const slotsB = _vetoLocalRoster.slice(5, 10);
+    const sideHasNames = (s) => s.some(p => (p.name || '').trim());
+    return `
+      <div class="plugins-bootstrap-modal" style="max-width:680px">
+        <div class="section-hdr">
+          <span class="card-title" style="margin-bottom:0">Team Profiles</span>
+          <button class="btn btn-sm" id="tp-close">Close</button>
+        </div>
+        <p class="text-sm text-sub" style="margin-top:8px">
+          Stored in <code>%APPDATA%\\Oblivion Server Tool\\oblivion_teams.json</code>.
+          Each team is 5 players. Roster has 10 (Team A = slots 1-5, Team B = slots 6-10).
+        </p>
+
+        <div class="cfg-card-title" style="margin-top:18px">Saved teams (${teams.length})</div>
+        <div id="tp-list">
+          ${teams.length ? teams.map(t => `
+            <div class="plugin-card" style="margin-bottom:8px" data-id="${esc(t.id)}">
+              <div class="plugin-card-head">
+                <span class="plugin-card-title">
+                  ${esc(t.name)}${t.tag ? ` <span class="text-sub">[${esc(t.tag)}]</span>` : ''}
+                </span>
+                <span class="pill pill-mute">${t.players.length} players</span>
+              </div>
+              <div class="text-sm text-sub">
+                ${t.players.map(p => esc(p.name)).join(', ')}
+              </div>
+              <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:8px">
+                <button class="btn btn-sm tp-load-a" data-id="${esc(t.id)}">Load → Team A (1-5)</button>
+                <button class="btn btn-sm tp-load-b" data-id="${esc(t.id)}">Load → Team B (6-10)</button>
+                <button class="btn btn-sm btn-ghost tp-delete" data-id="${esc(t.id)}">Delete</button>
+              </div>
+            </div>`).join('')
+            : '<div class="text-sm text-sub">No teams saved yet. Save a side below.</div>'}
+        </div>
+
+        <hr class="cfg-card-divider">
+        <div class="cfg-card-title">Save current side as a team</div>
+        <div class="field" style="margin-top:8px">
+          <label>Team name</label>
+          <input class="input" id="tp-save-name" type="text" maxlength="40"
+                 placeholder="e.g. Cobras Wednesdays">
+        </div>
+        <div class="field">
+          <label>Tag <span class="text-sub">(optional, short label)</span></label>
+          <input class="input" id="tp-save-tag" type="text" maxlength="8" placeholder="COB">
+        </div>
+        <div class="flex gap-8" style="margin-top:8px">
+          <button class="btn btn-ghost flex-1" id="tp-save-a"
+                  ${sideHasNames(slotsA) ? '' : 'disabled title="Type names in slots 1-5 first"'}>
+            Save Team A (slots 1-5)
+          </button>
+          <button class="btn btn-ghost flex-1" id="tp-save-b"
+                  ${sideHasNames(slotsB) ? '' : 'disabled title="Type names in slots 6-10 first"'}>
+            Save Team B (slots 6-10)
+          </button>
+        </div>
+      </div>`;
+  };
+  overlay.innerHTML = renderBody();
+  document.body.appendChild(overlay);
+
+  const close = () => overlay.remove();
+  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+  el('tp-close').addEventListener('click', close);
+
+  const rewireAfter = async () => {
+    try { teams = (await api.teams.list()).teams || []; } catch (_) {}
+    overlay.innerHTML = renderBody();
+    document.body.appendChild(overlay);
+    wireButtons();
+  };
+  const wireButtons = () => {
+    el('tp-close').addEventListener('click', close);
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+    overlay.querySelectorAll('.tp-load-a, .tp-load-b').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.id;
+        const target = btn.classList.contains('tp-load-a') ? 'A' : 'B';
+        const t = teams.find(t => t.id === id);
+        if (!t) { toast('Team vanished', 'var(--bad)'); return; }
+        if (!window.confirm(
+          `Load ${t.name} into Team ${target} (slots ${target === 'A' ? '1-5' : '6-10'})?\n\n`
+          + `This OVERWRITES whatever is currently typed in those slots.`
+        )) return;
+        const startSlot = target === 'A' ? 0 : 5;
+        for (let i = 0; i < 5; i++) {
+          const src = t.players[i] || { name: '', steam_id: '', discord_id: '' };
+          _vetoLocalRoster[startSlot + i] = {
+            name:       src.name       || '',
+            steam_id:   src.steam_id   || '',
+            discord_id: src.discord_id || '',
+          };
+        }
+        close();
+        // Force the roster card to re-render with the loaded rows.
+        _renderVeto();
+        toast(`✓ Loaded ${t.name} into Team ${target}`, 'var(--ok)');
+      });
+    });
+    overlay.querySelectorAll('.tp-delete').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.id;
+        const t  = teams.find(t => t.id === id);
+        if (!window.confirm(`Delete saved team "${t ? t.name : id}"?`)) return;
+        try {
+          await api.teams.delete(id);
+          toast('Team deleted');
+          await rewireAfter();
+        } catch (e) {
+          toast(`Delete failed: ${e.message}`, 'var(--bad)');
+        }
+      });
+    });
+    const saveOne = async (sliceStart) => {
+      const name = el('tp-save-name').value.trim();
+      const tag  = el('tp-save-tag').value.trim();
+      if (!name) { toast('Team name is required', 'var(--bad)'); return; }
+      const players = _vetoLocalRoster.slice(sliceStart, sliceStart + 5)
+                                       .map(p => ({
+                                          name: (p.name || '').trim(),
+                                          steam_id: (p.steam_id || '').trim(),
+                                          discord_id: (p.discord_id || '').trim(),
+                                       }))
+                                       .filter(p => p.name);
+      if (!players.length) { toast('No named players in that side', 'var(--bad)'); return; }
+      try {
+        await api.teams.save({ name, tag, players });
+        toast(`✓ Saved ${name}`, 'var(--ok)');
+        await rewireAfter();
+      } catch (e) {
+        toast(`Save failed: ${e.message}`, 'var(--bad)');
+      }
+    };
+    const saveABtn = el('tp-save-a');
+    if (saveABtn && !saveABtn.disabled) saveABtn.addEventListener('click', () => saveOne(0));
+    const saveBBtn = el('tp-save-b');
+    if (saveBBtn && !saveBBtn.disabled) saveBBtn.addEventListener('click', () => saveOne(5));
+  };
+  wireButtons();
+}
+
 function _renderVetoRoster(root, sess) {
   // Pull existing roster from server if local buffer is empty (e.g. SSE
   // arrived first OR we revisited the tab mid-roster).
@@ -3571,6 +3725,12 @@ function _renderVetoRoster(root, sess) {
                 title="Load a saved roster preset (overwrites current input)">
           <option value="">— Load preset —</option>
         </select>
+        <!-- v0.16.1 / task #160 — Persistent server-backed team profiles.
+             Survives across machines (lives in %APPDATA%, not localStorage). -->
+        <button class="btn btn-ghost" id="veto-roster-teams"
+                title="Save / load 5-player teams (server-side persistence)">
+          👥 Teams
+        </button>
         <button class="btn btn-ghost" id="veto-roster-discord"
                 title="Pull connected members.  Uses your default voice channel if configured (Config → Discord); otherwise opens the picker.  Shift+click forces the picker.">
           🎤 Pull from voice channel
@@ -3746,12 +3906,13 @@ function _renderVetoRoster(root, sess) {
   // (discord_voice_channel_id), this becomes ONE CLICK — we pull directly
   // from that VC.  The picker only opens as a fallback (no default set,
   // or the configured channel is unreachable).  Shift-click forces the
-  // picker regardless ("I want to use a different VC tonight").
-  //
-  // v0.11.16: Double-click guard so two rapid clicks don't run two
-  // concurrent voiceChannelInfo + voiceMembers round-trips (which
-  // would overwrite _vetoLocalRoster twice and could open the picker
-  // modal underneath an in-flight pull).
+  // v0.16.1 / task #160 — Server-backed Teams modal.  Save current 5
+  // players from Team A's column OR Team B's column under a name; load
+  // a saved team into either column.  Survives across machines because
+  // %APPDATA% persists; localStorage presets don't.
+  const teamsBtn = el('veto-roster-teams');
+  if (teamsBtn) teamsBtn.addEventListener('click', () => _openTeamProfilesModal());
+
   const rosterDiscordBtn = el('veto-roster-discord');
   if (rosterDiscordBtn) rosterDiscordBtn.addEventListener('click', async (ev) => {
     if (rosterDiscordBtn.disabled) return;       // belt-and-braces

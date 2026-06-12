@@ -3835,6 +3835,95 @@ t('plugins (v0.15.2): update_available wiring is end-to-end correct (web.py + ha
   t_v152_api_plugins_update_available_end_to_end)
 
 
+# ─── v0.16.1 — Persistent team profiles (task #160) ──────────────────────
+
+def t_v161_teams_crud_happy_path():
+    """Save a team → list shows it → save again with same ID updates →
+    delete removes it.  Atomic file writes + UUID lifecycle exercised."""
+    import os as _os, tempfile, shutil
+    from cs2servergui import team_profiles, config as _config
+    test_dir = tempfile.mkdtemp(prefix='oblivion_teams_test_')
+    original = _config.TEAMS_FILE
+    _config.TEAMS_FILE = _os.path.join(test_dir, 'oblivion_teams.json')
+    try:
+        saved = team_profiles.save_team(
+            team_id=None, name='Cobras', tag='COB',
+            players=[
+                {'name': 'P1', 'steam_id': 'STEAM_1', 'discord_id': ''},
+                {'name': 'P2', 'steam_id': '',         'discord_id': '12345'},
+                {'name': 'P3', 'steam_id': '',         'discord_id': ''},
+                {'name': 'P4', 'steam_id': '',         'discord_id': ''},
+                {'name': 'P5', 'steam_id': '',         'discord_id': ''},
+            ],
+        )
+        if 'id' not in saved or len(saved['players']) != 5:
+            return False, f'unexpected save result: {saved!r}'
+        listed = team_profiles.list_teams()
+        if len(listed) != 1 or listed[0]['name'] != 'Cobras':
+            return False, f'list mismatch: {listed!r}'
+        updated = team_profiles.save_team(
+            team_id=saved['id'], name='Cobras Renamed', tag='COB',
+            players=saved['players'])
+        if updated['id'] != saved['id']:
+            return False, f'update changed id: {saved["id"]} → {updated["id"]}'
+        if updated['name'] != 'Cobras Renamed':
+            return False, f'update did not apply name change'
+        if not team_profiles.delete_team(saved['id']):
+            return False, 'delete returned False'
+        if team_profiles.list_teams():
+            return False, 'list non-empty after delete'
+        return True, 'create/list/update/delete all work'
+    finally:
+        _config.TEAMS_FILE = original
+        shutil.rmtree(test_dir, ignore_errors=True)
+t('teams (v0.16.1): CRUD happy path — save / list / update / delete',
+  t_v161_teams_crud_happy_path)
+
+
+def t_v161_teams_validates_input():
+    """Reject empty name, non-list players, bad discord_id (non-digits)."""
+    from cs2servergui import team_profiles
+    try:
+        team_profiles.save_team(team_id=None, name='', tag='', players=[])
+        return False, 'empty name should be rejected'
+    except ValueError:
+        pass
+    try:
+        team_profiles.save_team(team_id=None, name='X', tag='', players=[
+            {'name': 'P', 'steam_id': '', 'discord_id': 'not-digits'},
+        ])
+        return False, 'non-digit discord_id should be rejected'
+    except ValueError:
+        pass
+    try:
+        team_profiles.save_team(team_id=None, name='X', tag='', players=[
+            {'steam_id': 'x', 'discord_id': ''},   # missing name
+        ])
+        return False, 'player without name should be rejected'
+    except ValueError:
+        pass
+    return True, 'all three validation cases reject correctly'
+t('teams (v0.16.1): input validation rejects bad payloads',
+  t_v161_teams_validates_input)
+
+
+def t_v161_teams_api_local_only():
+    """save + delete endpoints are @require_local; list is @require_auth.
+    Locks down the destructive operations to the desktop session."""
+    ac, app, c = _new_app()
+    _login(c)
+    # Non-local: save and delete should 403, list should 200.
+    r_save = c.post('/api/teams/save',
+                    json={'name': 'X', 'tag': '', 'players': [{'name': 'P'}]})
+    r_del  = c.post('/api/teams/delete', json={'id': 'nonexistent'})
+    r_list = c.get('/api/teams')
+    return (r_save.status_code == 403 and r_del.status_code == 403
+            and r_list.status_code == 200), \
+           f'save={r_save.status_code} delete={r_del.status_code} list={r_list.status_code}'
+t('teams (v0.16.1): save + delete are @require_local; list is @require_auth',
+  t_v161_teams_api_local_only)
+
+
 # ─── v0.14.0 slice 5 — Runtime bootstrap detection ───────────────────────
 
 def t_plugins_runtime_install_state_surfaced():

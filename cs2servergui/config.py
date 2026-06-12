@@ -66,7 +66,7 @@ DEPOTDL_RELEASE_URL = (
 # ── App self-update ────────────────────────────────────────────────────────────
 # Bump APP_VERSION before each release tag, then push and create a GitHub
 # release tagged "v<APP_VERSION>" — all connected clients will see the update.
-APP_VERSION      = "0.16.0"
+APP_VERSION      = "0.16.1"
 
 # ── Plugin registry (v0.15 slice 2) ────────────────────────────────────────────
 # Where the community plugin catalog lives.  Repo: OblivionPluginRegistry.
@@ -152,6 +152,18 @@ _CONFIG_FILE = os.path.join(_APP_DIR, "oblivion_config.json")
 # history if the in-memory state was lost (e.g. app restart between matches).
 MATCH_HISTORY_FILE = os.path.join(_APP_DIR, "oblivion_matches.json")
 MATCH_HISTORY_KEEP = 10        # how many recent matches to retain on disk
+
+# v0.16.1 / task #160 — Persistent team profiles.  Operators running recurring
+# tournaments save rosters under a name (e.g. "Cobras") + reuse across sessions
+# instead of re-pasting 10 SteamIDs every week.  Each entry is a dict:
+#   {name, players: [{name, steam_id, discord_id}], created_at, updated_at}
+# Stored as a top-level array.
+TEAMS_FILE = os.path.join(_APP_DIR, "oblivion_teams.json")
+
+# v0.16.1 / task #169 — Tournament templates.  A named bundle of mode + map
+# pool + Discord channel + plugin pack + (optionally) two team IDs from
+# TEAMS_FILE.  One click stages everything for a recurring tournament format.
+TEMPLATES_FILE = os.path.join(_APP_DIR, "oblivion_templates.json")
 
 # v0.11.3 — Active veto session persists across app restarts so an accidental
 # Ctrl+Q / Windows update / crash mid-veto doesn't evaporate the captains'
