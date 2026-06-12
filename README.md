@@ -3,13 +3,57 @@
 A desktop application for managing a **Counter-Strike 2 dedicated server** on Windows.  
 Built with Python + Flask + pywebview (Edge WebView2). Ships as a single `.exe` with an optional installer.
 
-> **Status: v0.13.1 (released 2026-06-06).**  PLATFORM.md design doc +
-> first driver-method migration (`install_root()` from `_csgo_dir()`).
-> The strangler-fig pattern is now proven on one method; v0.13.2+ moves
-> the rest one at a time per the doc.  Closes design task #84.
-> **233/233 backend tests green.**
+> **Status: v0.15.2 (released 2026-06-12).**  Plugin Manager community
+> arc complete — operators can drop a folder into `%APPDATA%`, install
+> from a community registry, paste a URL for a release zip, see when
+> updates are available, and remove plugins they don't want — all from
+> the SPA, no app rebuild needed.  The
+> [`OblivionPluginRegistry`](https://github.com/jacquesvniekerk-eng/OblivionPluginRegistry)
+> repo is live; every running .exe fetches its `catalog.json` on a 24h
+> TTL.  **276/276 backend tests green.**
 >
 > **What's new since v0.11.0**:
+> - **Plugin Manager slice 3** *(v0.15.2)* — Uninstall + Reload + custom
+>   URL install + Update notifications + search filter.  Local-source
+>   library cards get a **Remove** button.  Plugins drop into
+>   `%APPDATA%/.../plugins/` and **↻ Reload** picks them up without an
+>   app restart.  Updated plugins flash an orange **Update v…** pill.
+>   See the [v0.15.2 release notes](https://github.com/jacquesvniekerk-eng/OblivionServerTool/releases/tag/v0.15.2).
+> - **Community plugin registry** *(v0.15.1)* —
+>   [`OblivionPluginRegistry`](https://github.com/jacquesvniekerk-eng/OblivionPluginRegistry)
+>   fetched via raw URL; new SPA section **"Available to Install (Community)"**;
+>   one-click install with SHA-256 verification + Zip-Slip protection +
+>   atomic tempdir-then-move.  HTTPS-only, 50 MB cap, 12s timeout.
+> - **Self-describing plugins** *(v0.15.0)* — every plugin folder ships
+>   a `plugin.json` manifest (`kind`, `modes`, `load_order`, `copy_rules`,
+>   `verify_files`, `cleanup`).  The five hardcoded plugin tables in
+>   `core.py` are now derived from the manifests at module load.
+>   Discovery scans bundled (`cs2servergui/plugins/`) AND local
+>   (`%APPDATA%/.../plugins/`).  See
+>   [PLUGINS.md](PLUGINS.md) for the plugin-author schema.
+> - **Config tab restructure** *(v0.14.2)* — single-column layout with six
+>   sections in operator-mental-model order: **Setup → Security → Server
+>   (+ Bots) → Match Flow → Discord → Tools row**.  Strong section
+>   separators (accent bar + 2px top border).  Discord webhook moved
+>   into the Discord card.  Bots folded into Server.  Whole-app button
+>   hover polish (accent-tinted border + soft glow on non-purple buttons).
+> - **Live mode swap on running server** *(v0.14.1)* — Plugin tab actions
+>   no longer 409 when the server is running.  They route through
+>   `change_map`'s stop-deploy-restart cycle.  Banner warns instead of
+>   disabling; confirm prompts mention STOP + RESTART; toasts say
+>   "Restarting into X — watch Status tab".
+> - **Plugin Manager: packs + runtime bootstrap** *(v0.14.0)* — five
+>   Quick-Apply Packs (Competitive 5v5 / Warcraft Night / Casual DM /
+>   Retakes / Vanilla Competitive); JSON catalog file; **🔧 Set up plugin
+>   runtime** modal with direct sourcemm.net + CSS GitHub links when
+>   MetaMod or CSS is missing.  Plus 4 audit fixes (csgo_dir leak gated,
+>   XSS surface escaped, catalog load errors loud, inline fallback dict
+>   dropped).
+> - **Plugins tab (read-only) + Activate/Vanilla** *(v0.13.2)* — new
+>   admin-only **Plugins** entry in the sidebar between Maps and Veto.
+>   Server Readiness card + Currently Deployed card + Plugin Library grid
+>   with Activate buttons (single-mode auto-pick or multi-mode dropdown)
+>   + Switch-to-vanilla button.
 > - **PLATFORM.md + worked-example migration** *(v0.13.1)* — the design
 >   doc + the first concrete method extraction (`install_root()`).
 >   AppCore's `_csgo_dir()` is now a thin shim that delegates to the
