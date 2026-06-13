@@ -1509,6 +1509,15 @@ class AppCore:
             # made the Jailbreak crash hard to diagnose.
             "-condebug",
             "-port",          str(RCON_PORT),
+            # Force RCON's TCP socket to bind on ALL interfaces.  Without this,
+            # Source 2 picks "first interface Windows resolves as primary",
+            # which on a host with Hyper-V / WSL installed is the vEthernet
+            # virtual adapter (172.19.x.x).  Result: RCON listens on the WSL
+            # NIC, the app tries to reach it via the real LAN IP, and gets
+            # WinError 10061 forever.  Binding 0.0.0.0 makes RCON reachable
+            # from loopback, LAN, AND vEthernet — strictly more permissive,
+            # never worse.  UDP game traffic already binds 0.0.0.0 by default.
+            "+ip",            "0.0.0.0",
             "+sv_lan",        "0",
             "+game_type",     s["game_type"],
             "+game_mode",     s["game_mode"],

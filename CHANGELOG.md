@@ -2,6 +2,30 @@
 
 ---
 
+## v0.16.4 — 2026-06-13 (Hotfix: force RCON to bind on all interfaces)
+
+Caught from a live session: on a host with Hyper-V or WSL installed,
+cs2.exe was binding its RCON TCP socket exclusively to the virtual
+`vEthernet` adapter (e.g. `172.19.160.1:27015`) instead of the real
+LAN IP.  Game traffic (UDP) still worked because UDP binds `0.0.0.0`
+by default — but every RCON request from the app failed with WinError
+10061 "connection refused", which then cascaded into "Port 27015 not
+opening" warnings and the 90s optimistic-online fallback.
+
+### Fix
+- Launch args in [core.py:1504](cs2servergui/core.py:1504) now include
+  `+ip 0.0.0.0`.  This binds RCON's TCP listener to ALL interfaces
+  (loopback, real LAN, and vEthernet alike) so Source 2's "first
+  interface Windows resolves as primary" heuristic can't trap the
+  socket on a virtual NIC.
+- Strictly more permissive than the previous behaviour — never worse
+  for users without Hyper-V / WSL.
+
+### Tests
+- 287 / 287 green.
+
+---
+
 ## v0.16.3 — 2026-06-12 (Tournament templates + demo browser + Discord mock-veto)
 
 Wave 4 of the v1.0 wishlist. Three independent operator wins.
