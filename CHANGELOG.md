@@ -2,6 +2,34 @@
 
 ---
 
+## v0.16.7 — 2026-06-15 (Hotfix: refresh hardcoded MetaMod + CSS URLs)
+
+The MetaMod URL pinned in v0.16.5 (`mmsource-2.0.0-git1331-windows.zip`)
+and the CSS URL (`v378/counterstrikesharp-with-runtime-build-378-...`)
+both returned 404 against today's mms.alliedmods.net + GitHub releases.
+Friend clicking "Install MetaMod" would have hit a dead link.
+
+### Fix
+- `RUNTIME_METAMOD_DEFAULT_URL` updated to
+  `mmsource-2.0.0-git1402-windows.zip` (HEAD 200, 6.5 MB; layout
+  verified — addons/metamod/ at root).
+- `RUNTIME_CSS_DEFAULT_URL` updated to
+  `v1.0.369/counterstrikesharp-with-runtime-windows-1.0.369.zip`
+  (HEAD 302 redirect, 49.5 MB compressed; layout verified — both
+  addons/counterstrikesharp/ AND addons/metamod/counterstrikesharp.vdf
+  at root, which is what makes MetaMod load CSS).
+
+### Note
+Both URLs go stale eventually as upstream cuts new builds.  Operators
+can override via `metamod_download_url` / `css_download_url` in
+`oblivion_config.json` without waiting for an app update — that fallback
+shipped in v0.16.5.
+
+### Tests
+- 294 / 294 green.
+
+---
+
 ## v0.16.6 — 2026-06-15 (First-run UX: Getting Started card + Discord one-button check + actionable Pre-flight)
 
 Three coordinated SPA changes that surface the things a brand-new

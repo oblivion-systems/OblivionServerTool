@@ -66,7 +66,7 @@ DEPOTDL_RELEASE_URL = (
 # ── App self-update ────────────────────────────────────────────────────────────
 # Bump APP_VERSION before each release tag, then push and create a GitHub
 # release tagged "v<APP_VERSION>" — all connected clients will see the update.
-APP_VERSION      = "0.16.6"
+APP_VERSION      = "0.16.7"
 
 # ── Plugin registry (v0.15 slice 2) ────────────────────────────────────────────
 # Where the community plugin catalog lives.  Repo: OblivionPluginRegistry.
@@ -111,11 +111,11 @@ REGISTRY_FETCH_TIMEOUT_SECONDS = 12   # full fetch (connect + read)
 # CSS picks the "with-runtime" flavour: ships a bundled .NET 8 runtime so
 # the operator doesn't need a separate .NET install.  ~150 MB unpacked.
 RUNTIME_METAMOD_DEFAULT_URL = (
-    "https://mms.alliedmods.net/mmsdrop/2.0/mmsource-2.0.0-git1331-windows.zip"
+    "https://mms.alliedmods.net/mmsdrop/2.0/mmsource-2.0.0-git1402-windows.zip"
 )
 RUNTIME_CSS_DEFAULT_URL = (
     "https://github.com/roflmuffin/CounterStrikeSharp/releases/download/"
-    "v378/counterstrikesharp-with-runtime-build-378-windows-378.zip"
+    "v1.0.369/counterstrikesharp-with-runtime-windows-1.0.369.zip"
 )
 # Runtime zips are larger than regular plugin zips (CSS with-runtime is ~150 MB
 # unpacked), so the registry's 50 MB cap won't fit.  Use a 250 MB ceiling +
