@@ -2444,13 +2444,14 @@ async function _renderPluginsTab() {
               <div class="text-sm text-sub">Plugins: ${plugins}</div>
               ${tags ? `<div style="margin-top:4px">${tags}</div>` : ''}
               ${isActive ? '' : `
-                <button class="btn btn-sm plugins-pack-btn"
+                <button class="btn btn-accent btn-full plugins-pack-btn"
                         data-pack-id="${esc(p.id)}"
                         data-name="${esc(p.name)}"
                         data-mode="${esc(p.mode)}"
                         data-map="${esc(p.default_map || '')}"
+                        style="margin-top:10px"
                         ${actionsBlocked ? 'disabled' : ''}>
-                  Apply
+                  ▶ Apply this pack
                 </button>`}
             </div>`;
         }).join('')}
@@ -3205,7 +3206,7 @@ async function _openTemplatesModal() {
           <div class="text-sm">${bits.join(' · ') || '(empty)'}</div>
           ${p.description ? `<div class="text-sm text-sub">${esc(p.description)}</div>` : ''}
           <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:8px">
-            <button class="btn btn-sm tpl-modal-apply" data-id="${esc(t.id)}" data-name="${esc(t.name)}">Apply</button>
+            <button class="btn btn-accent btn-sm tpl-modal-apply" data-id="${esc(t.id)}" data-name="${esc(t.name)}">▶ Apply</button>
             <button class="btn btn-sm btn-ghost tpl-modal-delete" data-id="${esc(t.id)}" data-name="${esc(t.name)}">Delete</button>
           </div>
         </div>`;
