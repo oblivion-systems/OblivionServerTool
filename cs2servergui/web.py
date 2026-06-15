@@ -1161,12 +1161,6 @@ def create_flask(core: AppCore) -> Flask:
             return jsonify({"error": f"csgo/ not found at {csgo}. "
                                        "Install or repair CS2 first."}), 400
 
-        # Snapshot config before — even though the runtime install touches
-        # csgo/ not oblivion_config.json, the gameinfo.gi patch IS a
-        # meaningful state change that the operator might want to roll
-        # back.  Keeping the backup discipline consistent.
-        core.backup_config(reason=f"pre-runtime-{component}")
-
         try:
             result = registry_client.install_runtime(component, csgo)
         except registry_client.RegistryError as exc:
@@ -1174,38 +1168,66 @@ def create_flask(core: AppCore) -> Flask:
         except Exception as exc:  # pragma: no cover — defensive
             return jsonify({"error": f"unexpected: {exc!r}"}), 500
 
+        # v0.16.8 (review fix #5) — backup only AFTER install succeeds.
+        # Previously this fired before the install even on failure, which
+        # over time pushed legitimate pre-deploy backups out of the 10-slot
+        # ring as failed attempts (bad URL, shaky wifi) accumulated.
+        core.backup_config(reason=f"post-runtime-{component}")
+
         # Post-install fixups:
         # 1. MetaMod's zip historically has a bin/win64/win64/ nesting
         #    bug — fix in place if detected.  Idempotent — no-op if clean.
         # 2. MetaMod needs the search path patched into gameinfo.gi.  CSS
         #    doesn't need this (it's a MetaMod plugin and rides MetaMod's
         #    own search path).
+        # v0.16.8 (review fix #1) — method name corrected to `_patch_gameinfo`.
+        # The original `_gameinfo_patch_metamod` doesn't exist on AppCore;
+        # the AttributeError was swallowed by `except Exception`, and the
+        # JSON response still claimed `ok: true` with `metamod_installed:
+        # true`.  Friend would have seen the green pill, started the server,
+        # and watched MetaMod silently never load.
         gameinfo_patched = False
+        warnings = []
         if component == "metamod":
             try:
                 core._fix_metamod_dll_nesting()
             except Exception as exc:
-                core.log(f"[runtime] DLL nesting fix failed: {exc!r}")
+                msg = f"DLL nesting fix failed: {exc!r}"
+                warnings.append(msg)
+                core.log(f"[runtime] {msg}")
             try:
-                gameinfo_patched = core._gameinfo_patch_metamod()
+                gameinfo_patched = core._patch_gameinfo()
             except Exception as exc:
-                core.log(f"[runtime] gameinfo.gi patch failed: {exc!r}")
+                msg = f"gameinfo.gi patch failed: {exc!r}"
+                warnings.append(msg)
+                core.log(f"[runtime] {msg}")
 
         # Re-check the live install status so the SPA can render a green
         # "✓ installed" pill immediately.
+        gameinfo_now = bool(core._gameinfo_has_metamod())
         runtime_status = {
             "metamod_installed": core._metamod_installed(),
             "css_installed":     core._css_installed(),
-            "gameinfo_patched":  bool(core._gameinfo_has_metamod()),
+            "gameinfo_patched":  gameinfo_now,
         }
+
+        # If we installed MetaMod but gameinfo.gi is STILL not patched, the
+        # engine won't load any of it — surface that as a warning so the SPA
+        # can show yellow not green and the friend knows to retry.
+        ok_for_caller = True
+        if component == "metamod" and not gameinfo_now:
+            warnings.append("gameinfo.gi is NOT patched — MetaMod will not "
+                            "load even though files are in place")
+            ok_for_caller = False
 
         core.log(f"[runtime] ✓ Installed {result['label']} "
                  f"({result['files_written']} files from {result['url'][:60]}…)")
         return jsonify({
-            "ok":             True,
-            "result":         result,
-            "runtime_after":  runtime_status,
-            "gameinfo_patched_now": gameinfo_patched,
+            "ok":                     ok_for_caller,
+            "result":                 result,
+            "runtime_after":          runtime_status,
+            "gameinfo_patched_now":   gameinfo_patched,
+            "warnings":               warnings,
         })
 
     @app.route("/api/plugins/packs")
