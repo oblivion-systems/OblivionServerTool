@@ -71,18 +71,30 @@ Source: "dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "scripts\*"; DestDir: "{app}\scripts"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 ; WebView2 bootstrapper — installs the Edge WebView2 runtime if missing.
-; Edge WebView2 ships with Windows 11 by default but is NOT preinstalled on
-; clean Windows 10.  Without it, the pywebview window will fail to render
-; on first launch.  To activate this:
-;   1. Download MicrosoftEdgeWebview2Setup.exe (~2 MB) from
-;      https://developer.microsoft.com/en-us/microsoft-edge/webview2/
-;   2. Place it in the repo root (alongside installer.iss).
-;   3. Uncomment the two lines below.
-;   4. Re-run ISCC installer.iss.
-; The Microsoft bootstrapper is itself idempotent — running /silent /install on
-; a system that already has WebView2 is a no-op, so no Check: function needed.
-; Source: "MicrosoftEdgeWebview2Setup.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
-; Run: "{tmp}\MicrosoftEdgeWebview2Setup.exe"; Parameters: "/silent /install"; StatusMsg: "Installing Microsoft Edge WebView2 Runtime..."
+; Edge WebView2 ships with Windows 11 by default but is NOT preinstalled
+; on clean Windows 10.  Without it, the pywebview window will fail to
+; render on first launch.
+;
+; v0.16.5 / task #157 (item A): conditionally bundled at compile time.
+; build.bat downloads the bootstrapper (~2 MB) before invoking ISCC; if
+; for some reason it's missing the installer still compiles, just without
+; the WebView2 install step.  Manual fallback: download from
+; https://developer.microsoft.com/en-us/microsoft-edge/webview2/
+; and place MicrosoftEdgeWebview2Setup.exe next to installer.iss.
+;
+; The Microsoft bootstrapper is idempotent — running /silent /install on
+; a system that already has WebView2 is a no-op, so we always run it.
+#if FileExists("MicrosoftEdgeWebview2Setup.exe")
+[Files]
+Source: "MicrosoftEdgeWebview2Setup.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
+[Run]
+Filename: "{tmp}\MicrosoftEdgeWebview2Setup.exe"; Parameters: "/silent /install"; StatusMsg: "Installing Microsoft Edge WebView2 Runtime..."; Flags: waituntilterminated
+#else
+; WebView2 bootstrapper not present at build time — installer will rely
+; on Windows 11's pre-installed WebView2.  Friends on clean Windows 10
+; will get a blank app window until they install Edge WebView2 manually.
+; Run `tools\fetch_webview2.ps1` (or build.bat which calls it) to bundle.
+#endif
 
 [Icons]
 ; IconFilename explicitly set so the Start Menu / Desktop shortcuts always show
