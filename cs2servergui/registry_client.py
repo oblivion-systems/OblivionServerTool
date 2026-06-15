@@ -39,12 +39,31 @@ import os
 import shutil
 import sys
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
 import zipfile
 
 from . import config as _config
+
+
+# v0.16.8 (review fix #4) — per-component lock so two simultaneous
+# install_runtime calls for the same component can't race on
+# shutil.copy2 against the same csgo/addons/<x>/ paths.  A second click
+# while the first is in flight blocks until the first finishes.
+_RUNTIME_LOCKS: dict[str, threading.Lock] = {}
+_RUNTIME_LOCKS_GUARD = threading.Lock()
+
+
+def _runtime_lock_for(component: str) -> threading.Lock:
+    """Return (lazy-create) the lock for a given runtime component."""
+    with _RUNTIME_LOCKS_GUARD:
+        lk = _RUNTIME_LOCKS.get(component)
+        if lk is None:
+            lk = threading.Lock()
+            _RUNTIME_LOCKS[component] = lk
+        return lk
 
 
 # Public exception type — web.py catches this to map onto specific 4xx/5xx.
@@ -538,6 +557,25 @@ def install_runtime(component: str, csgo_dir: str) -> dict:
     if not os.path.isdir(csgo_dir):
         raise RegistryError(f"csgo_dir does not exist: {csgo_dir!r}")
 
+    # v0.16.8 (review fix #4) — per-component lock prevents two simultaneous
+    # install_runtime calls for the same component from racing on shutil.copy2
+    # against the same csgo/addons/<x>/ paths.  A double-click on the SPA's
+    # "Install" button (the second click was already dispatched before
+    # btn.disabled took effect) reached here twice; the second call now
+    # blocks until the first finishes, then returns the same end state.
+    lock = _runtime_lock_for(component)
+    if not lock.acquire(blocking=False):
+        raise RegistryError(
+            f"install of {component!r} already in progress — wait for it "
+            f"to finish, or refresh the page")
+    try:
+        return _install_runtime_locked(component, csgo_dir, meta)
+    finally:
+        lock.release()
+
+
+def _install_runtime_locked(component: str, csgo_dir: str, meta: dict) -> dict:
+    """Real body of install_runtime; runs inside the per-component lock."""
     url = _resolve_runtime_url(component)
 
     # Bigger zips than registry plugins — use the runtime-specific caps.

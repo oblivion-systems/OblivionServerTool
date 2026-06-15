@@ -2,6 +2,77 @@
 
 ---
 
+## v0.16.8 — 2026-06-15 (Adversarial-review fixes)
+
+A self-review pass on the v0.16.5–v0.16.7 first-run polish caught 5
+real bugs.  All 5 fixed and shipped together.
+
+### #1 — Critical: wrong method name (silent MetaMod failure)
+`/api/plugins/install_runtime` called `core._gameinfo_patch_metamod()`,
+which doesn't exist — the actual method is `core._patch_gameinfo`.  The
+`AttributeError` was swallowed by `except Exception`, and the JSON
+response still claimed `ok: true` with `metamod_installed: true`.  The
+friend would have clicked Install, seen the green pill, started the
+server, and watched MetaMod silently fail to load — because gameinfo.gi
+was never patched.
+
+Fixed: method name corrected, plus a post-install assertion that
+`gameinfo_has_metamod()` is True before reporting success — when it's
+not, the response now says `ok: false` with a clear warning so the SPA
+can show yellow not green.
+
+### #2 — High: build.bat didn't actually fetch WebView2 bootstrapper
+The v0.16.5 installer comment claimed "build.bat downloads the
+bootstrapper" but build.bat had no such step.  The obvious dev workflow
+(`build.bat → ISCC installer.iss`) would ship an installer that skipped
+WebView2 entirely, defeating the whole point of item A for clean Win10.
+
+Fixed: new step `[1.6/3] Fetching WebView2 bootstrapper for installer
+bundling` invokes `tools\fetch_webview2.ps1` before ISCC.  If the fetch
+fails, a WARN is printed and the build continues — the operator can
+still ship without WebView2 if they want.
+
+### #3 — Medium: fetch_webview2.ps1 had no size validation
+A truncated/0-byte download (CDN edge drop, network hiccup) was
+accepted as valid; `Test-Path` returns true on a 0-byte file.  The
+installer would have bundled a corrupt exe; install-time would fail
+with `ERROR_BAD_EXE_FORMAT` and surface a mid-install error dialog.
+
+Fixed: `MIN_SIZE_BYTES = 1MB` guard rejects any file under 1 MB (real
+bootstrapper is ~1.6 MB).  Plus `-MaximumRedirection 5` and
+`-TimeoutSec 60` on the `Invoke-WebRequest`.
+
+### #4 — Medium: double-click race on Install button
+Two rapid clicks on "📥 Install MetaMod" could both reach
+`_runtimeInstall` before `btn.disabled = true` blocked re-entry (the
+second click event was already dispatched before the first handler
+ran).  Two concurrent backend calls each `tempfile.mkdtemp` and merge
+into `csgo/addons/<x>/` simultaneously via `shutil.copy2`, racing on
+the same dst paths and leaving a half-merged install.
+
+Fixed:
+- SPA: module-level `window._oblivionRuntimeInflight` Set; second
+  click sees the flag and bails with a toast.
+- Backend: per-component `threading.Lock` (`_runtime_lock_for`) in
+  `registry_client`; a second `install_runtime` call returns
+  `RegistryError("install of X already in progress")` rather than
+  racing on the filesystem.
+
+### #5 — Low: pre-install backup polluted ring on failure
+`backup_config(reason="pre-runtime-X")` was called BEFORE the install.
+If install failed for any reason (network error, bad zip, csgo not
+writable), the backup still landed and consumed a slot in the 10-slot
+ring.  Friend on shaky wifi clicking Install five times would have
+evicted the operator's real pre-deploy snapshots.
+
+Fixed: backup moved to AFTER `install_runtime` succeeds; reason
+renamed `post-runtime-X` to match the new ordering.
+
+### Tests
+- 294 / 294 green (no new tests — fixes target existing behaviour).
+
+---
+
 ## v0.16.7 — 2026-06-15 (Hotfix: refresh hardcoded MetaMod + CSS URLs)
 
 The MetaMod URL pinned in v0.16.5 (`mmsource-2.0.0-git1331-windows.zip`)

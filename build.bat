@@ -91,6 +91,20 @@ if exist dist\OblivionServerTool.exe del /f /q dist\OblivionServerTool.exe
 if exist dist\OblivionServerTool.exe.bak del /f /q dist\OblivionServerTool.exe.bak
 echo.
 
+REM v0.16.8 (review fix #2) — fetch the WebView2 Evergreen bootstrapper.
+REM installer.iss conditionally bundles it via #if FileExists; without
+REM this step the obvious "build.bat → ISCC" flow ships an installer that
+REM skips WebView2 entirely, defeating v0.16.5's item A on clean Windows
+REM 10 machines.  Idempotent — fetch_webview2.ps1 exits early if present.
+echo [1.6/3] Fetching WebView2 bootstrapper for installer bundling...
+powershell -ExecutionPolicy Bypass -NoProfile -File "tools\fetch_webview2.ps1"
+if errorlevel 1 (
+  echo WARN: WebView2 bootstrapper fetch failed - installer will skip the
+  echo       WebView2 bundle.  Friends on Win10 may see a blank window.
+  echo       Re-run "tools\fetch_webview2.ps1" manually or ship without it.
+)
+echo.
+
 echo [2/3] Building executable...
 %PY% -m PyInstaller ^
   --onefile ^

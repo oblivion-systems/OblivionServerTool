@@ -3049,10 +3049,21 @@ function _pluginBootstrap(rt) {
   // v0.16.5 / task #163: auto-install handler.  Shared between MM + CSS.
   // Tracks button state across the install lifecycle so the operator
   // always sees progress (download → extract → re-check → green pill).
+  // v0.16.8 (review fix #4) — re-entry guard via module-level Set.  A
+  // rapid second click was reaching this handler before btn.disabled
+  // took effect; the second call now bails immediately.  Backend also
+  // has a threading.Lock as defense-in-depth.
+  if (!window._oblivionRuntimeInflight) window._oblivionRuntimeInflight = new Set();
   async function _runtimeInstall(component, btnId, statusId, origBtnText, sizeNote) {
     const btn    = el(btnId);
     const status = el(statusId);
     if (!btn || !status) return;
+    if (window._oblivionRuntimeInflight.has(component)) {
+      // Visible feedback so the friend understands why the click did nothing.
+      toast(`Already installing ${component} — please wait`, 'var(--warn)');
+      return;
+    }
+    window._oblivionRuntimeInflight.add(component);
     btn.disabled = true;
     btn.textContent = `Downloading ${sizeNote}…`;
     status.style.display = 'block';
@@ -3083,6 +3094,11 @@ function _pluginBootstrap(rt) {
       btn.disabled = false;
       btn.textContent = origBtnText;
       toast(`Runtime install failed — see manual install fallback`, 'var(--bad)');
+    } finally {
+      // v0.16.8 (review fix #4) — release the in-flight flag so the
+      // operator can retry after a failure (or after a successful install
+      // of the *other* runtime that didn't auto-disable this button).
+      window._oblivionRuntimeInflight.delete(component);
     }
   }
 
