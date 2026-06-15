@@ -3,16 +3,44 @@
 A desktop application for managing a **Counter-Strike 2 dedicated server** on Windows.  
 Built with Python + Flask + pywebview (Edge WebView2). Ships as a single `.exe` with an optional installer.
 
-> **Status: v0.16.3 (released 2026-06-12).**  v1.0 prep is in flight —
-> four "waves" of wishlist work landed across v0.16.0–v0.16.3 covering
-> config backup/restore, persistent team profiles, dedicated History +
-> Pre-flight + Logs pages, tournament templates, an in-app demo
-> browser, and a Discord mock-veto smoke button.  The
+> **Status: v0.16.6 (released 2026-06-15).**  v1.0 first-run UX audit
+> (task #157) is in flight — the v0.16.5 and v0.16.6 releases close the
+> heaviest fresh-install friction points: one-click MetaMod + CSS
+> runtime install (no more "find the addons/ folder and extract it
+> yourself"), Edge WebView2 bundled into the installer (Win10 friends
+> no longer get a blank window), a Getting Started card on the Status
+> page that walks a brand-new operator through the three things they
+> need to do before their first tournament, a one-click Discord setup
+> check, and actionable "→ Fix" buttons on every Pre-flight row.  The
 > [`OblivionPluginRegistry`](https://github.com/jacquesvniekerk-eng/OblivionPluginRegistry)
 > repo is live and every running .exe fetches its `catalog.json` on a
-> 24h TTL.  **287/287 backend tests green.**
+> 24h TTL.  **294/294 backend tests green.**
 >
 > **What's new since v0.11.0**:
+> - **First-run UX polish** *(v0.16.6)* — Status page gains a
+>   "🚀 Getting started — N of 3 done" card with action buttons that
+>   navigate to each step (install CS2 → install runtime → pick a
+>   pack); auto-hides when all green.  Config → Discord card gains a
+>   primary **🩺 Run Discord setup check** button (full embed-lifecycle
+>   smoke test in one click); per-feature tests moved to an "Advanced"
+>   expander.  Every Pre-flight row gets a per-key "→ Fix" button that
+>   routes to the right tab.
+> - **Auto-install MetaMod + CSS runtime** *(v0.16.5)* — Plugin Runtime
+>   modal swaps manual zip-extraction instructions for "📥 Install"
+>   buttons that download, verify, extract, and patch gameinfo.gi in
+>   one click each.  Reuses the registry's safe-download primitives
+>   (HTTPS, size cap, Zip Slip, atomic staging).  Manual fallback kept
+>   under a `<details>` expander if the auto-download ever fails.
+> - **Edge WebView2 bundled into installer** *(v0.16.5)* — `installer.iss`
+>   conditionally bundles the ~2 MB Microsoft bootstrapper via
+>   `#if FileExists`.  Friends on Windows 10 (no preinstalled WebView2)
+>   no longer get a blank window on first launch.  Pre-build helper at
+>   `tools/fetch_webview2.ps1` fetches it from Microsoft's Evergreen URL.
+> - **RCON binds to all interfaces** *(v0.16.4 hotfix)* — adds
+>   `+ip 0.0.0.0` to the cs2.exe launch args so RCON's TCP socket
+>   doesn't get trapped on the Hyper-V vEthernet adapter on hosts with
+>   WSL / Hyper-V installed.  Fixes the silent "connection refused"
+>   loop that affected operators with a virtual NIC.
 > - **Wave 4 — tournament templates + demo browser + Discord mock-veto**
 >   *(v0.16.3)* — Plugins tab gains a **Templates strip**: save a complete
 >   recurring config (mode + map + pack + Discord channels + team IDs)
@@ -218,7 +246,7 @@ Built with Python + Flask + pywebview (Edge WebView2). Ships as a single `.exe` 
 >   voice-channel roster pull, live veto embed.  Degrades silently
 >   when no token is configured.
 >
-> **287/287 backend tests green** across the veto state machine, the
+> **294/294 backend tests green** across the veto state machine, the
 > API surface, plugin manifest/registry/install paths, team-profile +
 > template CRUD, readiness audits, and demo / mock-veto edge cases.
 > Full per-release prose in [CHANGELOG.md](CHANGELOG.md); spec for the
@@ -488,12 +516,15 @@ roadmap to v1.0 is in [PLAN.md](PLAN.md), but the headline:
   uninstall + URL install + update notifications + search
 - **v0.16** *(shipping)* — v1.0 prep waves: config backup/restore,
   team profiles, History + Pre-flight + Logs pages, tournament
-  templates, demo browser, Discord mock-veto smoke button
+  templates, demo browser, Discord mock-veto smoke button; v0.16.5
+  closed the heaviest first-run friction (auto-install MetaMod + CSS
+  runtime, Edge WebView2 bundled into installer); v0.16.6 added the
+  Getting Started card + one-click Discord setup check + actionable
+  Pre-flight "→ Fix" buttons
 - **v1.0** — open-source under BSL (non-compete, reverts to Apache
   after 4 years), donation-funded, Plugin Manager + tournament
   workflow as the headline differentiators.  Remaining work: spectator
-  URL polish, auto-install MetaMod/CSS runtime, Discord bot resilience
-  soak, fresh-operator-to-tournament UX audit
+  URL polish, Discord bot resilience soak
 - **Post-1.0** — second game driver (TF2 driver paused at v0.13;
   resumes here), Linux + headless mode, first non-Source game driver
 
