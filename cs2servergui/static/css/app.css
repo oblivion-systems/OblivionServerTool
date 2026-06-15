@@ -460,8 +460,14 @@ input[type="text"], input[type="password"], input[type="number"], select, textar
   padding: 10px 16px;
   font-family: var(--font-mono);
   font-size: 12px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase;
-  border: 1px solid var(--line-1); background: var(--bg-2); color: var(--text-2);
+  /* v0.16.9 — text-1 (was text-2) so enabled default reads clearly as
+     clickable.  Previous text-2 was close to the :disabled opacity 0.35
+     reading, which made "is this button greyed out or just unhovered?"
+     genuinely ambiguous in screenshots like the Apply pack buttons.
+     Border slightly more saturated too — line-2 over line-1. */
+  border: 1px solid var(--line-2); background: var(--bg-2); color: var(--text-1);
   transition: background .12s, color .12s, border-color .12s, box-shadow .12s;
+  cursor: pointer;
 }
 /* v0.14.2 polish — accent-tinted border + soft glow on hover so buttons
    without the bright purple fill (.btn / .btn-ghost / .btn-neutral) still
@@ -473,7 +479,16 @@ input[type="text"], input[type="password"], input[type="number"], select, textar
   box-shadow: 0 0 16px -8px var(--glow-1);
 }
 .btn:active { background: var(--bg-3); box-shadow: none; }
-.btn:disabled { opacity: .35; pointer-events: none; }
+/* v0.16.9 — opacity dropped from .35 → .28 + grayscale 60% + line-through-less
+   strikethrough via cursor change to widen the visual gap from the brighter
+   enabled state.  Combined with the text-1 bump on default .btn, "is this
+   button enabled?" stops being ambiguous. */
+.btn:disabled {
+  opacity: .28;
+  pointer-events: none;
+  filter: grayscale(.6);
+  cursor: not-allowed;
+}
 .btn svg { width: 12px; height: 12px; stroke: currentColor; fill: none;
            stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 
@@ -507,7 +522,10 @@ input[type="text"], input[type="password"], input[type="number"], select, textar
 .btn-yellow:hover  { background: var(--warn); color: var(--accent-on); }
 
 .btn-ghost {
-  background: transparent; color: var(--text-3); border-color: var(--line-1);
+  /* v0.16.9 — text-2 (was text-3) so ghost variant doesn't read as
+     "permanently dimmed" when sitting next to a btn-accent.  Border
+     bumped from line-1 → line-2 for the same reason. */
+  background: transparent; color: var(--text-2); border-color: var(--line-2);
 }
 /* v0.14.2 polish — ghost is the most-used non-accent variant (Browse buttons,
    Maps actions, Discord test, RCON Send, Tools row).  Same accent-tinted
