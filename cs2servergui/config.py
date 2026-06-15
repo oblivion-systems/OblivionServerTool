@@ -66,7 +66,7 @@ DEPOTDL_RELEASE_URL = (
 # ── App self-update ────────────────────────────────────────────────────────────
 # Bump APP_VERSION before each release tag, then push and create a GitHub
 # release tagged "v<APP_VERSION>" — all connected clients will see the update.
-APP_VERSION      = "0.16.11"
+APP_VERSION      = "0.16.12"
 
 # ── Plugin registry (v0.15 slice 2) ────────────────────────────────────────────
 # Where the community plugin catalog lives.  Repo: OblivionPluginRegistry.
@@ -332,13 +332,25 @@ MODE_MAPS: dict[str, list[str] | None] = {
     "1v1":         OFFICIAL_MAPS,
     "2v2":         OFFICIAL_MAPS,
     "Arms Race":   ["ar_shoots", "ar_baggage", "ar_dizzy"],
-    # v0.16.11 — the CS:GO mini-Demolition maps (de_lake, de_safehouse,
-    # de_shortdust, de_stmarc, de_bank, de_sugarcane) were dropped from
-    # CS2's official rotation; CS2 returns "invalid map name" if you
-    # pass them as +map.  Workshop ports exist, still selectable via the
-    # Workshop tab.  Default list now mirrors the standard CS2 maps,
-    # which all play fine under game_type=1/game_mode=1.
-    "Demolition":  OFFICIAL_MAPS,
+    # v0.16.12 — Demolition's design intent is SMALL maps for fast 6v6
+    # rounds with weapon progression; Valve dropped the CS:GO mini-maps
+    # (de_lake, de_safehouse, de_shortdust, de_stmarc, de_bank,
+    # de_sugarcane) from CS2's official rotation but the community
+    # workshop ports preserve them.  Order matters here: workshop IDs
+    # FIRST so an operator who's subscribed to them gets the intended
+    # mini-Demolition vibe; OFFICIAL_MAPS as fallback for a cold-install
+    # operator who hasn't grabbed the workshop classics yet (full-size
+    # Demolition is awkward but functional).
+    "Demolition":  [
+        # Workshop ports of the CS:GO Demolition mini-maps (small, fast).
+        "125439738",   # Shorttrain (de_shortdust)
+        "125440342",   # Bank
+        "125440847",   # Sugarcane
+        "125441004",   # St. Marc
+        # Official CS2 maps — fallback for operators who haven't
+        # subscribed to the workshop classics.
+        "de_dust2", "de_overpass", "de_inferno",
+    ],
     # Deathmatch: limited to maps that have pre-configured spawn points in our
     # bundle (de_dust2, de_inferno, de_mirage, de_vertigo).  Other official maps
     # can be added after running the in-game spawn editor on the server.
