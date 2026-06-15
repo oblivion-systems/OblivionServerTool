@@ -66,7 +66,7 @@ DEPOTDL_RELEASE_URL = (
 # ── App self-update ────────────────────────────────────────────────────────────
 # Bump APP_VERSION before each release tag, then push and create a GitHub
 # release tagged "v<APP_VERSION>" — all connected clients will see the update.
-APP_VERSION      = "0.16.4"
+APP_VERSION      = "0.16.5"
 
 # ── Plugin registry (v0.15 slice 2) ────────────────────────────────────────────
 # Where the community plugin catalog lives.  Repo: OblivionPluginRegistry.
@@ -93,6 +93,36 @@ REGISTRY_CACHE_TTL_SECONDS = 86400
 # a hundred-MB payload.
 REGISTRY_MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024
 REGISTRY_FETCH_TIMEOUT_SECONDS = 12   # full fetch (connect + read)
+
+# ─── Runtime install (v0.16.5 / task #163) ────────────────────────────────────
+# Auto-install MetaMod + CounterStrikeSharp into the operator's CS2 server
+# from the Plugins tab modal.  Without this, the operator had to download
+# both zips manually and extract the addons/ folder by hand — the most
+# common stuck-point for a new operator setting up tournament mode.
+#
+# URLs point at known-good stable builds.  Operators can override either
+# via `oblivion_config.json` (keys: "metamod_download_url",
+# "css_download_url") when a newer build lands before we ship an update.
+#
+# MetaMod's "latest snapshot" URL pattern: alliedmods publishes per-build
+# zips under mms.alliedmods.net.  Pin a known-stable git build rather
+# than a moving "latest" symlink — the friend benefits from reproducibility.
+#
+# CSS picks the "with-runtime" flavour: ships a bundled .NET 8 runtime so
+# the operator doesn't need a separate .NET install.  ~150 MB unpacked.
+RUNTIME_METAMOD_DEFAULT_URL = (
+    "https://mms.alliedmods.net/mmsdrop/2.0/mmsource-2.0.0-git1331-windows.zip"
+)
+RUNTIME_CSS_DEFAULT_URL = (
+    "https://github.com/roflmuffin/CounterStrikeSharp/releases/download/"
+    "v378/counterstrikesharp-with-runtime-build-378-windows-378.zip"
+)
+# Runtime zips are larger than regular plugin zips (CSS with-runtime is ~150 MB
+# unpacked), so the registry's 50 MB cap won't fit.  Use a 250 MB ceiling +
+# 90s timeout — comfortably above today's known builds.
+RUNTIME_MAX_DOWNLOAD_BYTES = 250 * 1024 * 1024
+RUNTIME_FETCH_TIMEOUT_SECONDS = 90
+
 APP_REPO         = "jacquesvniekerk-eng/OblivionServerTool"
 APP_RELEASES_URL = f"https://github.com/{APP_REPO}/releases/latest"
 APP_API_URL      = f"https://api.github.com/repos/{APP_REPO}/releases/latest"

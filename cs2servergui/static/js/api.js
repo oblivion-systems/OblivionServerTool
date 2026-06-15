@@ -261,6 +261,11 @@ const api = (() => {
         if (expectedSlug) body.expected_slug = expectedSlug;
         return post('/api/plugins/install_from_url', body);
       },
+      // v0.16.5 / task #163: auto-install MetaMod or CounterStrikeSharp.
+      // component must be 'metamod' or 'css'.  Backend downloads, extracts,
+      // patches gameinfo.gi (MetaMod), and returns updated runtime status.
+      installRuntime:  (component) =>
+        post('/api/plugins/install_runtime', { component }),
     },
 
     // ── Game data ─────────────────────────────────────────────────────────
