@@ -66,7 +66,7 @@ DEPOTDL_RELEASE_URL = (
 # ── App self-update ────────────────────────────────────────────────────────────
 # Bump APP_VERSION before each release tag, then push and create a GitHub
 # release tagged "v<APP_VERSION>" — all connected clients will see the update.
-APP_VERSION      = "0.16.10"
+APP_VERSION      = "0.16.11"
 
 # ── Plugin registry (v0.15 slice 2) ────────────────────────────────────────────
 # Where the community plugin catalog lives.  Repo: OblivionPluginRegistry.
@@ -332,8 +332,13 @@ MODE_MAPS: dict[str, list[str] | None] = {
     "1v1":         OFFICIAL_MAPS,
     "2v2":         OFFICIAL_MAPS,
     "Arms Race":   ["ar_shoots", "ar_baggage", "ar_dizzy"],
-    "Demolition":  ["de_lake", "de_safehouse", "de_shortdust",
-                    "de_stmarc", "de_bank", "de_sugarcane"],
+    # v0.16.11 — the CS:GO mini-Demolition maps (de_lake, de_safehouse,
+    # de_shortdust, de_stmarc, de_bank, de_sugarcane) were dropped from
+    # CS2's official rotation; CS2 returns "invalid map name" if you
+    # pass them as +map.  Workshop ports exist, still selectable via the
+    # Workshop tab.  Default list now mirrors the standard CS2 maps,
+    # which all play fine under game_type=1/game_mode=1.
+    "Demolition":  OFFICIAL_MAPS,
     # Deathmatch: limited to maps that have pre-configured spawn points in our
     # bundle (de_dust2, de_inferno, de_mirage, de_vertigo).  Other official maps
     # can be added after running the in-game spawn editor on the server.
