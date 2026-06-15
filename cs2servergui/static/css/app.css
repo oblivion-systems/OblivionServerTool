@@ -1403,6 +1403,72 @@ body.role-guest .admin-only { display: none !important; }
 .setup-next-steps li strong { display: block; font-size: 13px; color: var(--text-1); margin-bottom: 4px; }
 .setup-next-steps li small { display: block; font-size: 12px; color: var(--text-3); line-height: 1.5; }
 .setup-next-steps li em { color: var(--accent); font-style: normal; }
+
+/* v0.16.5 / task #157 (item D) — Getting Started card on Status page.
+   Surfaces the 3 critical first-run readiness checks; auto-hides when
+   all green; manually dismissible for the session. */
+.getting-started-card {
+  background: linear-gradient(180deg, rgba(160, 58, 245, 0.07), var(--bg-2));
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: 16px 18px;
+  margin-bottom: 18px;
+}
+.getting-started-card .gs-hdr {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 10px;
+}
+.getting-started-card .gs-title {
+  font-weight: 600; font-size: 14px; color: var(--text-1);
+  letter-spacing: 0.02em;
+}
+.getting-started-card .gs-progress {
+  height: 4px; background: var(--bg-3); border-radius: 2px;
+  margin-bottom: 16px; overflow: hidden;
+}
+.getting-started-card .gs-progress-bar {
+  height: 100%; background: var(--accent);
+  transition: width 360ms ease-out;
+}
+.getting-started-card .gs-steps {
+  padding-left: 0; list-style: none; margin: 0;
+}
+.getting-started-card .gs-step {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 12px;
+  background: var(--bg-1);
+  border: 1px solid var(--line-1);
+  margin: 8px 0;
+  border-radius: 4px;
+}
+.getting-started-card .gs-step-done {
+  opacity: 0.6;
+  background: var(--bg-2);
+}
+.getting-started-card .gs-step-num {
+  flex: 0 0 28px; height: 28px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  background: var(--accent); color: var(--accent-on);
+  font-family: var(--font-mono); font-weight: 700; font-size: 12px;
+}
+.getting-started-card .gs-step-done .gs-step-num {
+  background: var(--ok); color: var(--accent-on);
+}
+.getting-started-card .gs-step-body { flex: 1 1 auto; min-width: 0; }
+.getting-started-card .gs-step-title {
+  font-size: 13px; color: var(--text-1); font-weight: 500;
+}
+.getting-started-card .gs-step-hint {
+  font-size: 11px; color: var(--text-3); margin-top: 2px;
+}
+.getting-started-card .gs-footer {
+  color: var(--text-3); font-size: 11px;
+  margin-top: 12px; padding-top: 12px;
+  border-top: 1px solid var(--line-1);
+}
+.getting-started-card .gs-footer a { color: var(--accent); text-decoration: none; }
+.getting-started-card .gs-footer a:hover { text-decoration: underline; }
 .setup-warn {
   background: var(--warn-lo); border-left: 2px solid var(--warn);
   padding: 10px 14px;

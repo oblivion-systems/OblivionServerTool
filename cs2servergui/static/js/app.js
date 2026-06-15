@@ -1025,9 +1025,138 @@ function _wireMatchControls() {
   });
 }
 
+/* v0.16.5 / task #157 — item D — Getting Started card on Status page.
+ * Surfaces the three first-run friction points (install CS2 / install
+ * plugin runtime / pick a Quick-Apply Pack) as actionable rows.
+ * Calls /api/readiness, maps the existing checks onto the three
+ * first-run steps, and renders only if at least one is not green.
+ * Auto-hides when all three steps are done. */
+async function _renderGettingStartedCard(mountNode) {
+  let data;
+  try { data = await api.readiness(); }
+  catch (e) {
+    // If readiness is unreachable (server down, network), don't show
+    // a half-rendered card — silently bail.  The friend's first-run
+    // path doesn't depend on it being there.
+    return;
+  }
+  const checks = (data && data.checks) || [];
+  const get = (key) => checks.find(c => c.key === key) || { status: 'info' };
+  const cs    = get('csgo');
+  const rt    = get('runtime');
+  const pl    = get('plugins');
+
+  // Three rows.  Each row's `done` state derives from the existing
+  // readiness checks — we don't add new ones.
+  // - "Install CS2 server"          → csgo.status === 'ok'
+  // - "Install plugin runtime"      → runtime.status === 'ok'
+  // - "Pick a Quick-Apply Pack"     → plugins.status === 'ok' (a mode +
+  //                                    its plugins are deployed; vanilla
+  //                                    Competitive counts as a non-pack)
+  const steps = [
+    {
+      id: 'cs2',
+      done: cs.status === 'ok',
+      title: 'Install CS2 dedicated server',
+      hint:  cs.status === 'ok' ? cs.detail || 'csgo/ found.' :
+             '~15 GB download via steamcmd.  Walk away for 10 minutes.',
+      ctaLabel: cs.status === 'ok' ? '✓ Done' : 'Open Config → Install',
+      onClick:  () => navigate('config'),
+    },
+    {
+      id: 'runtime',
+      done: rt.status === 'ok',
+      title: 'Install plugin runtime (MetaMod + CounterStrikeSharp)',
+      hint:  rt.status === 'ok' ? 'MetaMod + CSS detected.' :
+             rt.status === 'warn' ? rt.detail || 'Partially installed.' :
+             'Needed for MatchZy, Warcraft, Retakes etc.  One click each.',
+      ctaLabel: rt.status === 'ok' ? '✓ Done' : 'Open Plugins → Set up runtime',
+      onClick:  () => navigate('plugins'),
+    },
+    {
+      id: 'pack',
+      done: pl.status === 'ok',
+      title: 'Pick a Quick-Apply Pack',
+      hint:  pl.status === 'ok' ? pl.detail || 'Pack active.' :
+             'Competitive 5v5 / Warcraft Night / Casual DM — one click stages mode + map + plugins.',
+      ctaLabel: pl.status === 'ok' ? '✓ Done' : 'Open Plugins → Packs',
+      onClick:  () => navigate('plugins'),
+    },
+  ];
+
+  const doneCount = steps.filter(s => s.done).length;
+  // All three green?  Don't render — friend is ready, no card.
+  if (doneCount === steps.length) return;
+
+  // Render.
+  const card = h('div', 'getting-started-card');
+  card.innerHTML = `
+    <div class="gs-hdr">
+      <span class="gs-title">🚀 Getting started — ${doneCount} of ${steps.length} done</span>
+      <button class="btn btn-sm btn-ghost" id="gs-dismiss" title="Hide for this session">✕</button>
+    </div>
+    <div class="gs-progress">
+      <div class="gs-progress-bar" style="width:${(doneCount / steps.length) * 100}%"></div>
+    </div>
+    <ol class="gs-steps">
+      ${steps.map((s, i) => `
+        <li class="gs-step ${s.done ? 'gs-step-done' : ''}">
+          <span class="gs-step-num">${s.done ? '✓' : i + 1}</span>
+          <div class="gs-step-body">
+            <div class="gs-step-title">${esc(s.title)}</div>
+            <div class="gs-step-hint">${esc(s.hint)}</div>
+          </div>
+          <button class="btn btn-sm ${s.done ? 'btn-ghost' : 'btn-accent'}"
+                  data-step="${s.id}" ${s.done ? 'disabled' : ''}>
+            ${esc(s.ctaLabel)}
+          </button>
+        </li>`).join('')}
+    </ol>
+    <div class="gs-footer text-sm">
+      Once all three are green, you're ready for a tournament.
+      Discord is optional — set it up later in Config → Discord.
+      <a href="#" id="gs-preflight">Open full Pre-flight check →</a>
+    </div>
+  `;
+  mountNode.appendChild(card);
+
+  // Wire up the per-step action buttons.
+  card.querySelectorAll('button[data-step]').forEach(btn => {
+    const stepId = btn.dataset.step;
+    const step   = steps.find(s => s.id === stepId);
+    if (step && !step.done) btn.addEventListener('click', step.onClick);
+  });
+
+  el('gs-dismiss').addEventListener('click', () => {
+    // Session-scoped (not permanent) — operator who refreshes the app
+    // gets the card back, so it's easy to recover from an accidental
+    // dismiss.  Permanent hide would need a Config toggle.
+    sessionStorage.setItem('oblivion-getting-started-dismissed', '1');
+    card.remove();
+  });
+
+  el('gs-preflight').addEventListener('click', (e) => {
+    e.preventDefault();
+    navigate('readiness');
+  });
+}
+
 function buildStatusPage() {
   const s = state.server;
   const root = el('content');
+
+  // ── Getting Started card (v0.16.5 / task #157 — item D) ─────────────────
+  // First-time friend lands on this page after the wizard.  If CS2 isn't
+  // installed yet, or the plugin runtime is missing, surface a 3-step
+  // checklist with action buttons that navigate to the right tab.  Card
+  // auto-hides once all three checks pass.  Operator can dismiss for
+  // the session via the X button (sessionStorage flag).
+  if (!sessionStorage.getItem('oblivion-getting-started-dismissed')) {
+    const gsContainer = h('div');
+    gsContainer.id = 'getting-started-mount';
+    root.appendChild(gsContainer);
+    _renderGettingStartedCard(gsContainer);   // async; fades in if needed
+  }
 
   // ── Server panel (process state) ─────────────────────────────────────────
   const sp = h('div', 'server-panel offline');
@@ -3864,13 +3993,34 @@ pages['readiness'] = async function() {
           ${c.ok || 0} ok · ${c.warn || 0} warn · ${c.fail || 0} fail · ${c.info || 0} info
         </div>
       </div>`;
-    const rows = (data.checks || []).map(check => {
+    // v0.16.5 / task #157 item F: map each check key to a "→ Fix" action
+    // (target tab + button copy).  Only renders when status is fail/warn,
+    // so green/info rows stay clean.
+    const FIX_ACTIONS = {
+      csgo:      { tab: 'config',   label: 'Open Config → Install' },
+      runtime:   { tab: 'plugins',  label: 'Open Plugins → Set up runtime' },
+      plugins:   { tab: 'plugins',  label: 'Open Plugins → Pick a pack' },
+      disk:      null,   // operator-only fix; no in-app navigation helps
+      pin:       { tab: 'config',   label: 'Open Config → Security' },
+      discord:   { tab: 'config',   label: 'Open Config → Discord' },
+      vc:        { tab: 'config',   label: 'Open Config → Discord (VC)' },
+      registry:  { tab: 'plugins',  label: 'Open Plugins → ↻ Re-fetch catalog' },
+      veto:      { tab: 'veto',     label: 'Open Veto → Reset' },
+      share_url: { tab: 'config',   label: 'Open Config → Match Flow' },
+    };
+    const rows = (data.checks || []).map((check, idx) => {
       const color = check.status === 'fail' ? 'var(--bad)'
                   : check.status === 'warn' ? 'var(--warn)'
                   : check.status === 'ok'   ? 'var(--ok)'
                   :                            'var(--text-3)';
+      const action = FIX_ACTIONS[check.key];
+      const showFix = action && (check.status === 'fail' || check.status === 'warn');
+      const fixBtn = showFix
+        ? `<button class="btn btn-sm" data-fix-idx="${idx}"
+                   data-fix-tab="${esc(action.tab)}">${esc(action.label)} →</button>`
+        : '';
       return `
-        <div class="card" style="margin-bottom:8px; display:flex; gap:14px; align-items:flex-start">
+        <div class="card" style="margin-bottom:8px; display:flex; gap:14px; align-items:center">
           <div style="font-size:20px; color:${color}; min-width:24px; text-align:center">
             ${esc(ICONS[check.status] || '?')}
           </div>
@@ -3880,9 +4030,14 @@ pages['readiness'] = async function() {
             </div>
             ${check.detail ? `<div class="text-sm text-sub" style="margin-top:4px">${esc(check.detail)}</div>` : ''}
           </div>
+          ${fixBtn}
         </div>`;
     }).join('');
     el('rd-body').innerHTML = rows || '<div class="text-sm text-sub">No checks returned.</div>';
+    // Wire up the per-check "→ Fix" buttons after re-render.
+    document.querySelectorAll('button[data-fix-idx]').forEach(btn => {
+      btn.addEventListener('click', () => navigate(btn.dataset.fixTab));
+    });
     if (recheckBtn) { recheckBtn.disabled = false; recheckBtn.textContent = '↻ Re-check'; }
   }
   run();
@@ -6425,32 +6580,47 @@ pages['config'] = async function() {
 
           <button class="btn btn-accent btn-full" id="cfg-discord-save">Save Discord Settings</button>
 
-          <!-- Connection check -->
+          <!-- Connection check — v0.16.5 / task #157 item E:
+               primary "Run setup check" button drives the full mock-veto
+               smoke test (embed lifecycle + VC reachability + reactions).
+               Per-feature tests (test embed / test DM) tucked into an
+               Advanced expander so a new operator can verify the wiring
+               in one click. -->
           <div class="cfg-conn-check">
-            <div class="cfg-conn-check-label">Connection check</div>
-            <div class="flex gap-8">
-              <button class="btn btn-ghost flex-1" id="cfg-discord-test-embed"
-                      title="Post a sample embed to your configured veto channel">
-                📤 Send test embed
-              </button>
-              <button class="btn btn-ghost flex-1" id="cfg-discord-test-dm"
-                      title="DM a sample message to a Discord user (paste your own ID for a self-test)">
-                📨 Send test DM
-              </button>
-            </div>
-            <!-- v0.16.3 / task #165 — Full bot lifecycle smoke test -->
-            <button class="btn btn-ghost btn-full" id="cfg-discord-mock-veto"
-                    style="margin-top:8px"
-                    title="Walk the full embed lifecycle (post + 3 edits + final state) + VC reachability check. Catches wiring bugs before the first real veto.">
-              🎲 Run mock veto (full bot smoke test)
+            <div class="cfg-conn-check-label">Verify your Discord setup</div>
+            <small class="text-sub text-sm" style="display:block;margin-bottom:10px;line-height:1.5">
+              Click the button below to run a full smoke test — the bot will
+              post an embed to your veto channel, edit it 3× to simulate a
+              veto, then leave a 🟢 "test complete" embed (safe to delete).
+              Confirms everything is wired correctly before your first real
+              tournament.
+            </small>
+            <button class="btn btn-accent btn-full" id="cfg-discord-mock-veto"
+                    title="Walks the full embed lifecycle (post + 3 edits + final state) + VC reachability check.">
+              🩺 Run Discord setup check
             </button>
             <pre id="cfg-discord-mock-out" class="text-mono text-sm"
                  style="display:none; margin-top:10px; max-height:240px; overflow:auto; background:var(--bg-1); padding:10px; white-space:pre-wrap"></pre>
-            <small class="text-sub text-sm" style="display:block;margin-top:8px">
-              The first two buttons each verify ONE thing.  Mock veto walks the
-              full embed lifecycle so you spot wiring bugs before the first real
-              captain DM goes out.
-            </small>
+
+            <details style="margin-top:14px">
+              <summary class="text-sm" style="cursor:pointer;color:var(--sub)">
+                Advanced: individual feature tests
+              </summary>
+              <small class="text-sub text-sm" style="display:block;margin-top:8px;line-height:1.5">
+                Each verifies ONE feature in isolation — use these to
+                triage when the full setup check fails.
+              </small>
+              <div class="flex gap-8" style="margin-top:8px">
+                <button class="btn btn-ghost flex-1" id="cfg-discord-test-embed"
+                        title="Post a sample embed to your configured veto channel">
+                  📤 Send test embed
+                </button>
+                <button class="btn btn-ghost flex-1" id="cfg-discord-test-dm"
+                        title="DM a sample message to a Discord user (paste your own ID for a self-test)">
+                  📨 Send test DM
+                </button>
+              </div>
+            </details>
           </div>
         </div>
       </section>
