@@ -2,6 +2,101 @@
 
 ---
 
+## v0.16.6 — 2026-06-15 (First-run UX: Getting Started card + Discord one-button check + actionable Pre-flight)
+
+Three coordinated SPA changes that surface the things a brand-new
+operator actually needs to do, where they need to do them.  Triggered
+by the v1.0 first-run audit (task #157) and the upcoming friend-hands-on
+test.
+
+### Getting Started card — Status page (item D)
+- New card auto-renders at the top of Status when readiness shows
+  csgo / runtime / plugins aren't all green yet.  Three actionable
+  rows (install CS2 / install runtime / pick a pack) each with a
+  button that navigates straight to the right tab.  Progress bar at
+  top — visual proof of forward motion.
+- Auto-hides when all three checks pass (returning operators see no
+  card).  Manual dismiss for the session via the X button — refreshing
+  the app brings it back, so an accidental dismiss isn't permanent.
+- "Open full Pre-flight check →" link routes to the existing readiness
+  page for deeper triage.
+
+### Discord Connection check restructured (item E)
+- "🎲 Run mock veto" (v0.16.3) promoted to the **primary** action with
+  clearer copy: "🩺 Run Discord setup check — bot will post an embed,
+  edit it 3×, then leave a 🟢 test-complete embed (safe to delete)".
+  Accent-coloured, full-width button.
+- Per-feature tests (test embed / test DM) moved into a `<details>`
+  "Advanced: individual feature tests" expander — useful for triaging,
+  but the primary verification path is now one click.
+- Sub-copy explains what the smoke test actually does so a friend
+  understands the friendly side-effect (an embed in their channel)
+  before clicking.
+
+### Pre-flight actionable "→ Fix" buttons (item F)
+- Each readiness row now renders a per-key "Open Config → Install" /
+  "Open Plugins → Set up runtime" / "Open Plugins → Pick a pack"
+  button when the check is fail/warn.  Maps 9 of the 10 checks to a
+  target tab (disk-low has no in-app fix).
+- Clicking the button navigates to the relevant tab — the operator
+  doesn't have to remember which tab a given problem lives on.
+
+### Tests
+- 294 / 294 green (no new tests — SPA-only).
+
+---
+
+## v0.16.5 — 2026-06-15 (Auto-install MetaMod + CSS runtime + WebView2 installer bundle)
+
+Two changes that close the heaviest fresh-install friction points.
+
+### Auto-install MetaMod + CounterStrikeSharp (task #163)
+Tournament-mode plugins (MatchZy, Warcraft, Retakes) all need MetaMod +
+CSS in csgo/.  Before this slice, the operator downloaded two zips,
+found the addons/ folder inside each, and drag-extracted them by hand
+without misnesting bin/win64/.  Now: one click per runtime in the
+Plugin Runtime modal.
+
+- `registry_client.install_runtime(component, csgo_dir)` reuses the
+  registry's safe-download primitives — size cap (250 MB for CSS),
+  HTTPS guard, Zip Slip protection — and merges the extracted addons/
+  tree into csgo/ via per-file copy (preserves operator's other csgo/
+  contents).  Rejects zips that don't contain the expected
+  `addons/<component>/` layout BEFORE writing anything.
+- Hardcoded URL defaults in config.py for a known-stable build of each;
+  operators can override via `metamod_download_url` / `css_download_url`
+  in `oblivion_config.json` when a newer build lands.
+- New `POST /api/plugins/install_runtime {component}` endpoint
+  (@require_local) — invokes install_runtime, runs MetaMod's existing
+  bin/win64/win64/ nesting-fix + gameinfo.gi patcher when component is
+  metamod, returns updated runtime status so the SPA can flip the pill
+  to green immediately.
+- Pre-action config backup fires before install (same discipline as
+  registry / URL install paths).
+- **SPA modal** — manual extraction instructions replaced with a primary
+  "📥 Install" button per component.  Lifecycle: idle → "Downloading…"
+  → "Installed" with file count + dest dir.  Manual fallback kept under
+  a `<details>` expander.
+
+### WebView2 installer bundle (item A)
+- `installer.iss` now uses `#if FileExists("MicrosoftEdgeWebview2Setup.exe")`
+  to conditionally bundle the ~2 MB bootstrapper at compile time.  The
+  [Files] entry drops it to {tmp}, the [Run] entry invokes it with
+  `/silent /install` and waits for completion before launching the app.
+  Friends on Windows 10 (no preinstalled WebView2) no longer get a
+  blank window on first launch.
+- New `tools/fetch_webview2.ps1` downloads the bootstrapper from
+  Microsoft's Evergreen URL.  Idempotent — exits early if already
+  present.  Run before each installer build, or wire into a CI step.
+- The bootstrapper exe stays out of git (`.gitignore` += `MicrosoftEdgeWebview2Setup.exe`).
+
+### Tests
+- 294 / 294 green (+7 new — @require_local, unknown component, URL
+  override precedence, bad-zip rejection, happy-path extraction, csgo
+  precondition).
+
+---
+
 ## v0.16.4 — 2026-06-13 (Hotfix: force RCON to bind on all interfaces)
 
 Caught from a live session: on a host with Hyper-V or WSL installed,

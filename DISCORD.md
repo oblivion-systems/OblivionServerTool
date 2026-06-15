@@ -106,20 +106,26 @@ Discord IDs are 17-19 digit numbers.  Two ways to get them:
 
 If you see `[discord] Login failed — check your bot token in Config.`, the token is wrong or was reset since you copied it.  Reset it again and re-paste.
 
-### v0.11.1 — verify the wiring before going live
+### Verify the wiring before going live
 
-The Config → Discord card has two **test buttons** (local-only):
+The Config → Discord card has a **🩺 Run Discord setup check** button
+(local-only) — this is the one-click verification path:
 
-- **Test Embed** — posts a small test embed to the configured veto
-  channel.  Confirms Layer 1C (bot can post embeds + you have the
-  channel ID right + bot has Send Messages + Embed Links permissions
-  there).
-- **Test DM** — type any Discord user ID and the bot DMs them a test
-  message.  Confirms Layer 1A (bot can DM + that captain hasn't
-  blocked server-member DMs).
+1. Bot posts an initial embed to your configured veto channel
+2. Edits it 3× to simulate Ban → Pick → Side → Move steps
+3. Reacts on its own messages (the same payload flow a real veto uses)
+4. Leaves a 🟢 "test complete" embed — **safe to delete**
+5. Also checks the configured default voice channel is reachable
 
-Run both before a real session — much faster feedback loop than
-"run a full veto and see if the embed appears."
+Output shows per-step pass/fail.  If everything's green, your Discord
+setup is wired correctly and you're ready for a real tournament.
+
+**Advanced individual feature tests** (under the expander) — use these
+to triage when the setup check fails:
+- **Test Embed** — posts ONE embed.  Confirms bot can post + channel
+  ID + Send Messages + Embed Links perms.
+- **Test DM** — DMs any Discord user ID.  Confirms bot can DM + that
+  captain hasn't blocked server-member DMs.
 
 ---
 
