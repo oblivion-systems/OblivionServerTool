@@ -4149,6 +4149,189 @@ t('plugins (v0.14.0): runtime block surfaces metamod_installed + css_installed',
   t_plugins_runtime_install_state_surfaced)
 
 
+# ─── v0.16.5 — Auto-install MetaMod + CSS runtime (task #163) ────────────
+
+def t_v165_runtime_install_endpoint_local_only():
+    """`/api/plugins/install_runtime` must @require_local — friends on
+    remote sessions can't trigger a 150 MB CSS download on the operator's
+    machine, and the install writes into the game server tree."""
+    ac, app, c = _new_app()
+    _login(c)
+    # No `is_local` patch — request comes in as a remote session.
+    r = c.post('/api/plugins/install_runtime', json={'component': 'metamod'})
+    return r.status_code == 403, f'status={r.status_code} (want 403)'
+t('runtime (v0.16.5): install_runtime is @require_local',
+  t_v165_runtime_install_endpoint_local_only)
+
+
+def t_v165_runtime_install_rejects_unknown_component():
+    """Component must be 'metamod' or 'css'.  Anything else → 400 with
+    a clear error message (don't crash, don't silently default)."""
+    ac, app, c = _new_app()
+    _login(c)
+    from cs2servergui import web as _web
+    for tok in list(_web._sessions.keys()):
+        _web._sessions[tok]['is_local'] = True
+    r = c.post('/api/plugins/install_runtime',
+                json={'component': 'metamod-but-evil'})
+    if r.status_code != 400:
+        return False, f'status={r.status_code}'
+    err = (r.get_json() or {}).get('error', '')
+    if 'metamod' not in err.lower() or 'css' not in err.lower():
+        return False, f'error message unclear: {err!r}'
+    return True, 'bad component rejected with helpful message'
+t('runtime (v0.16.5): rejects unknown component',
+  t_v165_runtime_install_rejects_unknown_component)
+
+
+def t_v165_runtime_install_refuses_when_csgo_missing():
+    """Without a configured server_dir / existing csgo/, the endpoint
+    must 400 with an actionable error — never crash trying to extract
+    into a nonexistent directory."""
+    ac, app, c = _new_app()
+    _login(c)
+    from cs2servergui import web as _web
+    for tok in list(_web._sessions.keys()):
+        _web._sessions[tok]['is_local'] = True
+    # The default test fixture sets server_dir to a fake csgo tempdir
+    # via _csgo_dir monkeypatch — but core.server_dir may be empty,
+    # which the endpoint checks first.  Clear it explicitly to test
+    # the precondition.
+    ac.server_dir = ''
+    r = c.post('/api/plugins/install_runtime', json={'component': 'css'})
+    if r.status_code != 400:
+        return False, f'status={r.status_code}'
+    err = (r.get_json() or {}).get('error', '').lower()
+    if 'server' not in err and 'csgo' not in err:
+        return False, f'error message vague: {err!r}'
+    return True, 'no server_dir → 400 with helpful error'
+t('runtime (v0.16.5): refuses install when csgo missing',
+  t_v165_runtime_install_refuses_when_csgo_missing)
+
+
+def t_v165_runtime_url_override_via_config():
+    """Operators can override the hardcoded MetaMod / CSS URL in
+    `oblivion_config.json` (keys: metamod_download_url, css_download_url)
+    so they can pin a different build without waiting for an app update.
+    Verify the resolver picks up the override."""
+    import os as _os, tempfile, json as _json
+    from cs2servergui import registry_client, config as _cfg
+    # Stash + redirect the config file path so we don't write the real one.
+    original = _cfg._CONFIG_FILE
+    test_dir = tempfile.mkdtemp(prefix='oblivion_runtime_url_')
+    _cfg._CONFIG_FILE = _os.path.join(test_dir, 'oblivion_config.json')
+    try:
+        # No config file → default URL used.
+        u1 = registry_client._resolve_runtime_url('metamod')
+        if u1 != _cfg.RUNTIME_METAMOD_DEFAULT_URL:
+            return False, f'default not used when config absent: {u1!r}'
+        # Config with empty override → still default.
+        with open(_cfg._CONFIG_FILE, 'w', encoding='utf-8') as f:
+            _json.dump({'metamod_download_url': ''}, f)
+        u2 = registry_client._resolve_runtime_url('metamod')
+        if u2 != _cfg.RUNTIME_METAMOD_DEFAULT_URL:
+            return False, f'empty override not ignored: {u2!r}'
+        # Config with real override → override wins.
+        custom_url = 'https://example.com/custom-mm.zip'
+        with open(_cfg._CONFIG_FILE, 'w', encoding='utf-8') as f:
+            _json.dump({'metamod_download_url': custom_url}, f)
+        u3 = registry_client._resolve_runtime_url('metamod')
+        if u3 != custom_url:
+            return False, f'override not picked up: {u3!r}'
+        return True, 'override precedence: config > default'
+    finally:
+        _cfg._CONFIG_FILE = original
+        import shutil; shutil.rmtree(test_dir, ignore_errors=True)
+t('runtime (v0.16.5): URL override via oblivion_config.json',
+  t_v165_runtime_url_override_via_config)
+
+
+def t_v165_runtime_install_unknown_component_in_lib():
+    """The registry_client function itself must reject unknown components
+    even if a future caller bypasses the web layer's allowlist."""
+    from cs2servergui import registry_client
+    try:
+        registry_client.install_runtime('not-a-real-component', '/tmp/nowhere')
+    except registry_client.RegistryError as exc:
+        if 'unknown' not in str(exc).lower():
+            return False, f'wrong error: {exc!r}'
+        return True, 'lib-layer guard works'
+    return False, 'expected RegistryError, got none'
+t('runtime (v0.16.5): library-level unknown-component guard',
+  t_v165_runtime_install_unknown_component_in_lib)
+
+
+def t_v165_runtime_install_unzip_rejects_bad_layout():
+    """If a runtime zip doesn't contain the expected addons/<component>/
+    folder at root, install must reject it BEFORE writing anything into
+    csgo/.  Mirrors the Zip Slip / slug-mismatch defenses from the regular
+    install_plugin path."""
+    import io as _io, tempfile, zipfile as _zf, os as _os
+    from cs2servergui import registry_client, config as _cfg
+    # Build a zip that has NO addons/metamod/ folder — just a stray file.
+    buf = _io.BytesIO()
+    with _zf.ZipFile(buf, 'w') as zf:
+        zf.writestr('README.txt', 'wrong layout, should be rejected')
+    bad_zip = buf.getvalue()
+    fake_csgo = tempfile.mkdtemp(prefix='oblivion_runtime_csgo_')
+    # Force registry_client to use our bytes by monkey-patching _http_fetch.
+    original_fetch = registry_client._http_fetch
+    registry_client._http_fetch = lambda url, **kw: bad_zip  # type: ignore
+    try:
+        registry_client.install_runtime('metamod', fake_csgo)
+    except registry_client.RegistryError as exc:
+        if 'expected folder' not in str(exc) and 'addons' not in str(exc):
+            return False, f'wrong error: {exc!r}'
+        # csgo dir must be untouched — no addons/ leftover.
+        addons = _os.path.join(fake_csgo, 'addons')
+        if _os.path.exists(addons):
+            return False, 'csgo/ contaminated despite rejection'
+        return True, 'bad-layout zip rejected; csgo untouched'
+    except Exception as exc:
+        return False, f'unexpected error type: {exc!r}'
+    finally:
+        registry_client._http_fetch = original_fetch
+        import shutil; shutil.rmtree(fake_csgo, ignore_errors=True)
+    return False, 'expected RegistryError; got none'
+t('runtime (v0.16.5): rejects zip without expected addons/<component>/',
+  t_v165_runtime_install_unzip_rejects_bad_layout)
+
+
+def t_v165_runtime_install_happy_path_extracts_into_csgo():
+    """Build a synthetic addons/metamod/loader.dll zip, monkey-patch the
+    fetcher to return it, and confirm the install lands the file in
+    csgo/addons/metamod/loader.dll — the core extraction contract."""
+    import io as _io, tempfile, zipfile as _zf, os as _os
+    from cs2servergui import registry_client
+    # Build a valid addons/metamod/ payload.
+    buf = _io.BytesIO()
+    with _zf.ZipFile(buf, 'w') as zf:
+        zf.writestr('addons/metamod/metaplugins.ini', '; test\n')
+        zf.writestr('addons/metamod/bin/win64/loader.dll', b'\xDE\xAD\xBE\xEF')
+    good_zip = buf.getvalue()
+    fake_csgo = tempfile.mkdtemp(prefix='oblivion_runtime_happy_')
+    original_fetch = registry_client._http_fetch
+    registry_client._http_fetch = lambda url, **kw: good_zip  # type: ignore
+    try:
+        result = registry_client.install_runtime('metamod', fake_csgo)
+        loader = _os.path.join(fake_csgo, 'addons', 'metamod', 'bin', 'win64', 'loader.dll')
+        ini    = _os.path.join(fake_csgo, 'addons', 'metamod', 'metaplugins.ini')
+        if not _os.path.isfile(loader):
+            return False, f'loader.dll not at expected path: {loader}'
+        if not _os.path.isfile(ini):
+            return False, f'metaplugins.ini not at expected path: {ini}'
+        if result.get('component') != 'metamod':
+            return False, f'result component wrong: {result!r}'
+        if result.get('files_written', 0) < 2:
+            return False, f'files_written too low: {result!r}'
+        return True, f'happy path extracted {result["files_written"]} files'
+    finally:
+        registry_client._http_fetch = original_fetch
+        import shutil; shutil.rmtree(fake_csgo, ignore_errors=True)
+t('runtime (v0.16.5): happy-path extracts into csgo/addons/',
+  t_v165_runtime_install_happy_path_extracts_into_csgo)
+
+
 # ─── Auto-generated pytest cases ──────────────────────────────────────────
 def _slug(name):
     out = ''.join(c if c.isalnum() else '_' for c in name).strip('_').lower()

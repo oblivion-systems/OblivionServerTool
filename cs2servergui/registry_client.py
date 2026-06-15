@@ -466,6 +466,138 @@ def install_from_url(url: str, expected_sha256: str | None = None,
     }
 
 
+# ─── Runtime install (v0.16.5 / task #163) ─────────────────────────────────
+# Auto-install MetaMod + CounterStrikeSharp directly into csgo/addons/.
+# Different shape from install_plugin (which targets %APPDATA%/plugins/):
+# the runtime IS the game-engine extension, not a manageable plugin, so
+# it must land in csgo/.  Uses the same safe-download primitives —
+# size cap, timeout, Zip Slip protection, atomic-via-tempdir staging.
+
+_RUNTIME_COMPONENTS = {
+    "metamod": {
+        "label":           "MetaMod : Source 2",
+        "url_attr":        "RUNTIME_METAMOD_DEFAULT_URL",
+        "config_key":      "metamod_download_url",
+        "expect_relpath":  os.path.join("addons", "metamod"),
+    },
+    "css": {
+        "label":           "CounterStrikeSharp (with runtime)",
+        "url_attr":        "RUNTIME_CSS_DEFAULT_URL",
+        "config_key":      "css_download_url",
+        "expect_relpath":  os.path.join("addons", "counterstrikesharp"),
+    },
+}
+
+
+def _resolve_runtime_url(component: str) -> str:
+    """Resolve the download URL for `component`, allowing oblivion_config.json
+    to override the hardcoded default (for when a new MetaMod / CSS build
+    lands before we ship an app update)."""
+    meta = _RUNTIME_COMPONENTS.get(component)
+    if not meta:
+        raise RegistryError(f"unknown runtime component {component!r} "
+                            f"(expected one of {list(_RUNTIME_COMPONENTS)})")
+    # Check the live config dict for an override; fall through to the
+    # config.py default if absent / empty.
+    override = ""
+    try:
+        cfg_path = _config._CONFIG_FILE
+        if os.path.isfile(cfg_path):
+            with open(cfg_path, encoding="utf-8") as f:
+                doc = json.load(f)
+            override = (doc.get(meta["config_key"]) or "").strip()
+    except Exception:
+        # Bad config file shouldn't break runtime install — fall through
+        # to the default URL.
+        pass
+    return override or getattr(_config, meta["url_attr"])
+
+
+def install_runtime(component: str, csgo_dir: str) -> dict:
+    """Download + extract a runtime component (MetaMod or CSS) into
+    `csgo_dir`.
+
+    Safety mirrors install_plugin / install_from_url:
+        * HTTPS only (allow http on localhost for tests).
+        * Size cap + timeout from RUNTIME_MAX_DOWNLOAD_BYTES / TIMEOUT.
+        * Zip Slip protection — every member's normalised target must
+          resolve inside csgo_dir.
+        * Atomic staging — extract into a tempdir, validate the expected
+          addons/<x> folder exists, then merge into csgo_dir/.
+        * Existing files OVERWRITTEN by the merge (operator can re-run
+          this to repair a corrupted install).
+
+    Returns a result dict with `component`, `url`, `sha256` (computed,
+    not verified — runtime URLs are operator-overridable so we don't
+    pin a hash), `extracted_files`, `dest_dir`.  RegistryError on any
+    failure; csgo_dir is untouched if the zip is rejected.
+    """
+    meta = _RUNTIME_COMPONENTS.get(component)
+    if not meta:
+        raise RegistryError(f"unknown runtime component {component!r}")
+    if not os.path.isdir(csgo_dir):
+        raise RegistryError(f"csgo_dir does not exist: {csgo_dir!r}")
+
+    url = _resolve_runtime_url(component)
+
+    # Bigger zips than registry plugins — use the runtime-specific caps.
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    if parsed.scheme not in ("https", "http"):
+        raise RegistryError(f"URL scheme {parsed.scheme!r} not supported")
+    if parsed.scheme == "http":
+        host = (parsed.hostname or "").lower()
+        if host not in ("localhost", "127.0.0.1", "::1"):
+            raise RegistryError("plain http:// not allowed for runtime downloads")
+
+    data = _http_fetch(
+        url,
+        max_bytes=_config.RUNTIME_MAX_DOWNLOAD_BYTES,
+        timeout=_config.RUNTIME_FETCH_TIMEOUT_SECONDS,
+    )
+    sha_actual = hashlib.sha256(data).hexdigest()
+
+    # Stage into a tempdir, validate, then merge into csgo_dir.
+    # We do the merge ourselves (not shutil.move of the whole tree) so the
+    # operator's other csgo/ contents — workshop maps, custom configs,
+    # other plugins — are preserved.
+    staging = tempfile.mkdtemp(prefix=f"oblivion_runtime_{component}_")
+    try:
+        _safe_extract_zip(data, staging)
+
+        # Expect addons/<component>/ at the zip root.  Both MetaMod and
+        # CSS zips ship this layout.  Reject zips that don't.
+        expected = os.path.join(staging, meta["expect_relpath"])
+        if not os.path.isdir(expected):
+            raise RegistryError(
+                f"runtime zip does not contain expected folder "
+                f"{meta['expect_relpath']!r} (rejecting — wrong zip?)")
+
+        # Merge staging into csgo_dir, file by file.  shutil.copytree
+        # with dirs_exist_ok=True does exactly this on 3.8+.
+        files_written = 0
+        for root, _dirs, files in os.walk(staging):
+            rel = os.path.relpath(root, staging)
+            target_root = os.path.join(csgo_dir, rel) if rel != "." else csgo_dir
+            os.makedirs(target_root, exist_ok=True)
+            for fname in files:
+                src  = os.path.join(root, fname)
+                dst  = os.path.join(target_root, fname)
+                shutil.copy2(src, dst)
+                files_written += 1
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+
+    return {
+        "component":       component,
+        "label":           meta["label"],
+        "url":             url,
+        "sha256":          sha_actual,
+        "files_written":   files_written,
+        "dest_dir":        os.path.join(csgo_dir, meta["expect_relpath"]),
+    }
+
+
 def install_plugin(slug: str, version: str | None = None) -> dict:
     """Download + verify + extract a registry-listed plugin into
     ``%APPDATA%/.../plugins/<slug>/``.

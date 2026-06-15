@@ -1137,6 +1137,77 @@ def create_flask(core: AppCore) -> Flask:
             "stats":  stats,
         })
 
+    # v0.16.5 / task #163 — Auto-install MetaMod or CounterStrikeSharp.
+    # Eliminates the most common stuck-point for a fresh operator: "download
+    # this zip from sourcemm.net, find the addons/ folder inside, drag it
+    # to csgo/, make sure you don't double-nest bin/win64/win64/".  Now
+    # one click in the SPA runtime modal → backend downloads → extracts
+    # → patches gameinfo.gi → done.  @require_local because runtime install
+    # writes into the game server tree.
+    @app.route("/api/plugins/install_runtime", methods=["POST"])
+    @require_auth
+    @require_local
+    def api_plugins_install_runtime():
+        from . import registry_client
+        d         = request.get_json(silent=True) or {}
+        component = (d.get("component") or "").strip().lower()
+        if component not in ("metamod", "css"):
+            return jsonify({"error": "component must be 'metamod' or 'css'"}), 400
+        if not core.server_dir:
+            return jsonify({"error": "Server directory not configured. "
+                                       "Set it in the Setup wizard or Config."}), 400
+        csgo = core._csgo_dir()
+        if not os.path.isdir(csgo):
+            return jsonify({"error": f"csgo/ not found at {csgo}. "
+                                       "Install or repair CS2 first."}), 400
+
+        # Snapshot config before — even though the runtime install touches
+        # csgo/ not oblivion_config.json, the gameinfo.gi patch IS a
+        # meaningful state change that the operator might want to roll
+        # back.  Keeping the backup discipline consistent.
+        core.backup_config(reason=f"pre-runtime-{component}")
+
+        try:
+            result = registry_client.install_runtime(component, csgo)
+        except registry_client.RegistryError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:  # pragma: no cover — defensive
+            return jsonify({"error": f"unexpected: {exc!r}"}), 500
+
+        # Post-install fixups:
+        # 1. MetaMod's zip historically has a bin/win64/win64/ nesting
+        #    bug — fix in place if detected.  Idempotent — no-op if clean.
+        # 2. MetaMod needs the search path patched into gameinfo.gi.  CSS
+        #    doesn't need this (it's a MetaMod plugin and rides MetaMod's
+        #    own search path).
+        gameinfo_patched = False
+        if component == "metamod":
+            try:
+                core._fix_metamod_dll_nesting()
+            except Exception as exc:
+                core.log(f"[runtime] DLL nesting fix failed: {exc!r}")
+            try:
+                gameinfo_patched = core._gameinfo_patch_metamod()
+            except Exception as exc:
+                core.log(f"[runtime] gameinfo.gi patch failed: {exc!r}")
+
+        # Re-check the live install status so the SPA can render a green
+        # "✓ installed" pill immediately.
+        runtime_status = {
+            "metamod_installed": core._metamod_installed(),
+            "css_installed":     core._css_installed(),
+            "gameinfo_patched":  bool(core._gameinfo_has_metamod()),
+        }
+
+        core.log(f"[runtime] ✓ Installed {result['label']} "
+                 f"({result['files_written']} files from {result['url'][:60]}…)")
+        return jsonify({
+            "ok":             True,
+            "result":         result,
+            "runtime_after":  runtime_status,
+            "gameinfo_patched_now": gameinfo_patched,
+        })
+
     @app.route("/api/plugins/packs")
     @require_auth
     def api_plugins_packs():

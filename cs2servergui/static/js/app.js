@@ -2813,76 +2813,97 @@ function _pluginBootstrap(rt) {
       <p class="text-sm">
         Plugins need two pieces of software installed into your CS2 server's
         <code>csgo/</code> folder before any plugin can load.
-        Oblivion auto-patches <code>gameinfo.gi</code> for you,
-        but you have to install the runtimes once.
+        Oblivion can install both for you — one click each.
       </p>
 
       ${mmNeeded ? `
-        <div class="plugins-bootstrap-step">
+        <div class="plugins-bootstrap-step" id="bs-mm-step">
           <h4>1. Install MetaMod — Source 2</h4>
           <p class="text-sm">
             MetaMod is the loader the engine reads to find plugins.
             Every plugin depends on it.
           </p>
-          <p class="text-sm">
-            <a href="https://www.sourcemm.net/downloads.php?branch=master"
-               target="_blank" rel="noopener noreferrer"
-               class="plugins-bootstrap-link">
-              ↗ Open MetaMod download page
-            </a>
-          </p>
-          <ol class="text-sm">
-            <li>Download the latest <strong>Windows</strong> zip
-                (e.g. <code>mmsource-2.0.0-git&lt;NNNN&gt;-windows.zip</code>).</li>
-            <li>Open the zip — inside you'll see an <code>addons/</code> folder.</li>
-            <li>Extract the <code>addons/</code> folder directly into
-                <code>${csgoDir}</code>.</li>
-            <li>You should end up with
-                <code>${csgoDir}\\addons\\metamod\\bin\\win64\\metamod.2.cs2.dll</code>.</li>
-          </ol>
+          <button class="btn btn-accent" id="bs-mm-install">
+            📥 Install MetaMod (auto-download ~5 MB)
+          </button>
+          <div id="bs-mm-status" class="text-sm" style="margin-top:8px;display:none"></div>
+          <details style="margin-top:10px">
+            <summary class="text-sm" style="cursor:pointer;color:var(--sub)">
+              Download fails? Show manual install instructions
+            </summary>
+            <p class="text-sm" style="margin-top:6px">
+              <a href="https://www.sourcemm.net/downloads.php?branch=master"
+                 target="_blank" rel="noopener noreferrer"
+                 class="plugins-bootstrap-link">
+                ↗ Open MetaMod download page
+              </a>
+            </p>
+            <ol class="text-sm">
+              <li>Download the latest <strong>Windows</strong> zip
+                  (e.g. <code>mmsource-2.0.0-git&lt;NNNN&gt;-windows.zip</code>).</li>
+              <li>Open the zip — inside you'll see an <code>addons/</code> folder.</li>
+              <li>Extract the <code>addons/</code> folder directly into
+                  <code>${csgoDir}</code>.</li>
+              <li>You should end up with
+                  <code>${csgoDir}\\addons\\metamod\\bin\\win64\\metamod.2.cs2.dll</code>.</li>
+            </ol>
+          </details>
         </div>` : `
         <div class="plugins-bootstrap-step plugins-bootstrap-done">
           <h4>✓ MetaMod already installed</h4>
         </div>`}
 
       ${cssNeeded ? `
-        <div class="plugins-bootstrap-step">
+        <div class="plugins-bootstrap-step" id="bs-css-step">
           <h4>${mmNeeded ? '2.' : '1.'} Install CounterStrikeSharp</h4>
           <p class="text-sm">
             CounterStrikeSharp (CSS) is the C# host that runs most modern CS2
             plugins — MatchZy, Warcraft, Retakes, etc. all depend on it.
           </p>
-          <p class="text-sm">
-            <a href="https://github.com/roflmuffin/CounterStrikeSharp/releases/latest"
-               target="_blank" rel="noopener noreferrer"
-               class="plugins-bootstrap-link">
-              ↗ Open CounterStrikeSharp releases
-            </a>
+          <button class="btn btn-accent" id="bs-css-install">
+            📥 Install CounterStrikeSharp (auto-download ~150 MB)
+          </button>
+          <p class="text-sm" style="margin-top:4px;color:var(--sub)">
+            Larger download — bundles its own .NET runtime so you don't need a
+            separate .NET install.  Takes 30-90s on a fast connection.
           </p>
-          <ol class="text-sm">
-            <li>Download the <strong>with-runtime</strong> Windows zip
-                (e.g. <code>counterstrikesharp-with-runtime-build-NNN-windows.zip</code>).</li>
-            <li>Open the zip — you'll see an <code>addons/</code> folder.</li>
-            <li>Extract the <code>addons/</code> folder directly into
-                <code>${csgoDir}</code>.</li>
-            <li>You should end up with
-                <code>${csgoDir}\\addons\\counterstrikesharp\\api\\</code>
-                AND <code>...\\counterstrikesharp\\bin\\</code>.</li>
-          </ol>
+          <div id="bs-css-status" class="text-sm" style="margin-top:8px;display:none"></div>
+          <details style="margin-top:10px">
+            <summary class="text-sm" style="cursor:pointer;color:var(--sub)">
+              Download fails? Show manual install instructions
+            </summary>
+            <p class="text-sm" style="margin-top:6px">
+              <a href="https://github.com/roflmuffin/CounterStrikeSharp/releases/latest"
+                 target="_blank" rel="noopener noreferrer"
+                 class="plugins-bootstrap-link">
+                ↗ Open CounterStrikeSharp releases
+              </a>
+            </p>
+            <ol class="text-sm">
+              <li>Download the <strong>with-runtime</strong> Windows zip
+                  (e.g. <code>counterstrikesharp-with-runtime-build-NNN-windows.zip</code>).</li>
+              <li>Open the zip — you'll see an <code>addons/</code> folder.</li>
+              <li>Extract the <code>addons/</code> folder directly into
+                  <code>${csgoDir}</code>.</li>
+              <li>You should end up with
+                  <code>${csgoDir}\\addons\\counterstrikesharp\\api\\</code>
+                  AND <code>...\\counterstrikesharp\\bin\\</code>.</li>
+            </ol>
+          </details>
         </div>` : `
         <div class="plugins-bootstrap-step plugins-bootstrap-done">
           <h4>✓ CounterStrikeSharp already installed</h4>
         </div>`}
 
       <div class="plugins-bootstrap-step">
-        <h4>Final step</h4>
+        <h4>Done? Verify install state</h4>
         <p class="text-sm">
-          Click below and Oblivion will re-check the install state.
-          If everything looks good the page will refresh and the warning
-          will disappear.
+          Click below to re-check.  When both runtimes are green, you can
+          install MatchZy / Warcraft / Retakes etc. from the Library or
+          Quick-Apply Packs.
         </p>
         <button class="btn" id="plugins-bootstrap-verify">
-          ✓ I've installed them — verify now
+          ✓ Re-check install state
         </button>
       </div>
     </div>
@@ -2895,6 +2916,61 @@ function _pluginBootstrap(rt) {
     if (e.target === overlay) close();
   });
   el('plugins-bootstrap-close').addEventListener('click', close);
+
+  // v0.16.5 / task #163: auto-install handler.  Shared between MM + CSS.
+  // Tracks button state across the install lifecycle so the operator
+  // always sees progress (download → extract → re-check → green pill).
+  async function _runtimeInstall(component, btnId, statusId, origBtnText, sizeNote) {
+    const btn    = el(btnId);
+    const status = el(statusId);
+    if (!btn || !status) return;
+    btn.disabled = true;
+    btn.textContent = `Downloading ${sizeNote}…`;
+    status.style.display = 'block';
+    status.style.color = 'var(--sub)';
+    status.textContent = 'Fetching the zip — this is the slow part.  Hold tight.';
+    try {
+      const r = await api.plugins.installRuntime(component);
+      // Backend already extracted + patched gameinfo.gi for MetaMod.
+      status.style.color = 'var(--ok)';
+      const after  = r.runtime_after || {};
+      const flagOk = component === 'metamod' ? after.metamod_installed : after.css_installed;
+      if (flagOk) {
+        const fileCount = r.result?.files_written ?? '?';
+        status.textContent = `✓ Installed — ${fileCount} files written to ${esc(r.result?.dest_dir || 'csgo/addons')}`;
+        btn.textContent = '✓ Installed';
+        // Keep the button disabled — they don't need to click again.
+        toast(`✓ ${component === 'metamod' ? 'MetaMod' : 'CounterStrikeSharp'} installed`, 'var(--ok)');
+      } else {
+        status.style.color = 'var(--warn)';
+        status.textContent = '⚠ Download finished but verify check still says missing. ' +
+                             'Open csgo/addons/ in Explorer to inspect, or use manual install below.';
+        btn.disabled = false;
+        btn.textContent = origBtnText;
+      }
+    } catch (e) {
+      status.style.color = 'var(--bad)';
+      status.textContent = `❌ ${e.message || e}`;
+      btn.disabled = false;
+      btn.textContent = origBtnText;
+      toast(`Runtime install failed — see manual install fallback`, 'var(--bad)');
+    }
+  }
+
+  if (mmNeeded) {
+    const mmBtn = el('bs-mm-install');
+    if (mmBtn) mmBtn.addEventListener('click', () =>
+      _runtimeInstall('metamod', 'bs-mm-install', 'bs-mm-status',
+                       '📥 Install MetaMod (auto-download ~5 MB)', '~5 MB'));
+  }
+  if (cssNeeded) {
+    const cssBtn = el('bs-css-install');
+    if (cssBtn) cssBtn.addEventListener('click', () =>
+      _runtimeInstall('css', 'bs-css-install', 'bs-css-status',
+                       '📥 Install CounterStrikeSharp (auto-download ~150 MB)',
+                       '~150 MB'));
+  }
+
   el('plugins-bootstrap-verify').addEventListener('click', async () => {
     close();
     toast('Re-checking install state…');
