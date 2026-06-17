@@ -2,6 +2,108 @@
 
 ---
 
+## v0.16.13 — 2026-06-17 (Warcraft plugin: 4 main-thread safety fixes)
+
+Source-side re-audit of `D:\warcraft-build\src\` after CSS shipped v1.0.369.
+Four bugs not covered by the June 1 patches.  Source edits applied,
+WarcraftPlugin.dll rebuilt (net8.0/Release), bundle DLL refreshed.
+
+- **Critical: `_commandCooldowns` Dictionary corruption** — plain
+  `Dictionary<>` accessed from chat-command callbacks.  10-player
+  tournament smashing `!skills`/`!class`/`!shop` in the same tick → rehash
+  during concurrent read → silent main-thread freeze.  Switched to
+  `ConcurrentDictionary<>` (matches the `WarcraftPlayers` pattern).
+- **High: `Database.ResetClients` blocked main thread** — `.GetAwaiter().GetResult()`
+  on the single-worker dispatcher queued behind any pending dirty-flush.
+  Multi-hundred-ms map-start hitch with dirty players.  Split into
+  `ResetClientsAsync()` + `FireAndForget` at both call sites.
+- **Medium: `OnClientPutInServerAsync` race on `NativeAPI.GetEntityFromIndex`**
+  — entity-list lookups on a worker thread race the engine's tick-time
+  updates.  All entity work moved to the main-thread handler; async path
+  now takes a pre-validated controller.
+- **Medium (dormant): `MenuTypeManager.GetPlayerMenuType` blocked main thread
+  on MySQL** — `.GetAwaiter().GetResult()` on every first-time menu open.
+  Currently dormant (MySQL menu persistence off), but a footgun.  Now
+  returns default immediately + populates cache async.
+
+Build clean, 0 errors.  Bundle DLL 499 KB → 500 KB; PDB refreshed so stack
+traces from this build show line numbers.
+
+Tests: 294/294 green (no new tests — fixes target C# code in a separate
+project; verification is the next real tournament).
+
+---
+
+## v0.16.12 — 2026-06-15 (Demolition map list: workshop classics + official fallback)
+
+Follow-up to v0.16.11's "use OFFICIAL_MAPS" fix.  Right point from user:
+CS:GO's Demolition maps were specifically SMALL by design (fast 6v6
+rounds, weapon progression).  Running full-size de_dust2 in Demolition
+mode works mechanically but loses the gameplay loop.
+
+Hybrid list — workshop ports of the CS:GO classics first (preserves
+design intent for operators who've subscribed to them), official CS2
+maps as fallback (cold-install operators get something that boots):
+
+```
+"Demolition": [
+    "125439738",   # Shorttrain (de_shortdust port)
+    "125440342",   # Bank
+    "125440847",   # Sugarcane
+    "125441004",   # St. Marc
+    "de_dust2", "de_overpass", "de_inferno",   # fallback
+]
+```
+
+---
+
+## v0.16.11 — 2026-06-15 (Demolition default-map list: CS:GO mini-maps removed)
+
+Caught in a v0.16.10 smoke-test snapshot: switching to Demolition mode
+picked `de_bank` as default, cs2.exe rejected it with "invalid map
+name", server never bound port 27015, app showed "Port 27015 not
+opening" forever.
+
+Root cause: config listed the CS:GO-era Demolition mini-maps (`de_lake`,
+`de_safehouse`, `de_shortdust`, `de_stmarc`, `de_bank`, `de_sugarcane`)
+as defaults — Valve dropped all six from CS2's official rotation.
+
+Quick fix: Demolition default list = `OFFICIAL_MAPS`.  Superseded by
+v0.16.12's hybrid approach.
+
+---
+
+## v0.16.10 — 2026-06-15 (Pack + Template Apply buttons → accent CTAs)
+
+User feedback after seeing the v0.16.9 rebuild: still "not great" — the
+plugin pack APPLY button blended in with the tag chips because it was
+using the SECONDARY outline style (`.btn`) when it should have been the
+PRIMARY card CTA.
+
+- Pack Apply: `.btn .btn-sm` → `.btn .btn-accent .btn-full`,
+  copy "Apply" → "▶ Apply this pack"
+- Template Apply: same accent treatment at sm-size
+- Template Delete stays ghost (correctly secondary/destructive)
+
+---
+
+## v0.16.9 — 2026-06-15 (Widen visual gap between enabled and disabled buttons)
+
+User flagged: some buttons unhovered looked greyed-out, ambiguous about
+clickability.  Screenshot showed the pack Apply button reading as
+disabled when actually fully active.
+
+Root cause: `.btn` default state used `text-2` (dim) + `line-1` border,
+and `:disabled` was only opacity 0.35.  Visual gap too narrow.
+
+- `.btn` text-2 → text-1, line-1 → line-2, + `cursor:pointer`
+- `.btn-ghost` text-3 → text-2, line-1 → line-2
+- `.btn:disabled` opacity 0.35 → 0.28, + `grayscale(0.6)` + `cursor:not-allowed`
+
+Pack-button-specific follow-up landed in v0.16.10.
+
+---
+
 ## v0.16.8 — 2026-06-15 (Adversarial-review fixes)
 
 A self-review pass on the v0.16.5–v0.16.7 first-run polish caught 5

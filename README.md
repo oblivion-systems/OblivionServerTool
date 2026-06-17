@@ -3,20 +3,50 @@
 A desktop application for managing a **Counter-Strike 2 dedicated server** on Windows.  
 Built with Python + Flask + pywebview (Edge WebView2). Ships as a single `.exe` with an optional installer.
 
-> **Status: v0.16.6 (released 2026-06-15).**  v1.0 first-run UX audit
-> (task #157) is in flight — the v0.16.5 and v0.16.6 releases close the
-> heaviest fresh-install friction points: one-click MetaMod + CSS
-> runtime install (no more "find the addons/ folder and extract it
-> yourself"), Edge WebView2 bundled into the installer (Win10 friends
-> no longer get a blank window), a Getting Started card on the Status
-> page that walks a brand-new operator through the three things they
-> need to do before their first tournament, a one-click Discord setup
-> check, and actionable "→ Fix" buttons on every Pre-flight row.  The
+> **Status: v0.16.13 (released 2026-06-17).**  v1.0 first-run UX audit
+> (task #157) shipped — v0.16.5 → v0.16.13 closes the heaviest fresh-install
+> friction points: one-click MetaMod + CSS runtime install (no more "find
+> the addons/ folder and extract it yourself"), Edge WebView2 bundled into
+> the installer (Win10 friends no longer get a blank window), a Getting
+> Started card on the Status page that walks a brand-new operator through
+> the three things they need to do before their first tournament, a
+> one-click Discord setup check, actionable "→ Fix" buttons on every
+> Pre-flight row, and a 5-bug self-review pass on the same stream (1
+> critical: missing `_patch_gameinfo` call that would have silently broken
+> MetaMod for fresh installs).  v0.16.13 also lands 4 main-thread safety
+> fixes in the Warcraft plugin source — caught by an adversarial re-audit
+> of the C# code, rebuilt + bundled.  The
 > [`OblivionPluginRegistry`](https://github.com/jacquesvniekerk-eng/OblivionPluginRegistry)
 > repo is live and every running .exe fetches its `catalog.json` on a
 > 24h TTL.  **294/294 backend tests green.**
 >
 > **What's new since v0.11.0**:
+> - **Warcraft plugin: 4 main-thread safety fixes** *(v0.16.13)* —
+>   source-side adversarial audit of the patched WarcraftPlugin against
+>   CSS v1.0.369 caught a Critical chat-command Dictionary corruption
+>   (Friday lobby smashing `!skills`/`!class`/`!shop` would have rehashed
+>   mid-read → silent freeze), `ResetClients` blocking the main thread,
+>   `NativeAPI.GetEntityFromIndex` racing on a worker thread during
+>   tournament fill, and a dormant MySQL block in the menu manager.
+>   Source patched, DLL rebuilt, bundled.
+> - **Demolition map list** *(v0.16.11 → v0.16.12)* — CS:GO's mini-maps
+>   (`de_bank`, `de_lake`, etc.) were dropped from CS2's official rotation;
+>   the app picked `de_bank` as Demolition default, cs2.exe returned
+>   "invalid map name", server never bound 27015.  Now: workshop ports
+>   of the CS:GO classics first (preserves the small-map design intent for
+>   operators who've subscribed), CS2 official maps as fallback.
+> - **Button contrast pass** *(v0.16.9 → v0.16.10)* — pack/template Apply
+>   buttons now use accent-filled CTAs instead of outline buttons that
+>   read as "greyed out" to a friend trying the app cold; `.btn`/`.btn-ghost`
+>   default state brightened, `:disabled` darkened + grayscale-filtered
+>   to widen the visual gap.
+> - **5 review fixes** *(v0.16.8)* — self-review pass on v0.16.5–v0.16.7
+>   caught 1 Critical (`_gameinfo_patch_metamod` didn't exist; the
+>   AttributeError was swallowed and the response still said `ok:true` —
+>   friend would have installed MetaMod, seen the green pill, started the
+>   server, and watched MetaMod silently fail to load), 1 High
+>   (build.bat didn't actually fetch the WebView2 bootstrapper), 2 Medium,
+>   1 Low.  All five fixed, plus the response now surfaces warnings.
 > - **First-run UX polish** *(v0.16.6)* — Status page gains a
 >   "🚀 Getting started — N of 3 done" card with action buttons that
 >   navigate to each step (install CS2 → install runtime → pick a
