@@ -23,7 +23,7 @@ Built with Python + Flask + pywebview (Edge WebView2). Ships as a single `.exe` 
 > MetaMod for fresh installs).  v0.16.13 also lands 4 main-thread safety
 > fixes in the Warcraft plugin source — caught by an adversarial re-audit
 > of the C# code, rebuilt + bundled.  The
-> [`OblivionPluginRegistry`](https://github.com/oblivion-tech/OblivionPluginRegistry)
+> [`OblivionPluginRegistry`](https://github.com/oblivion-systems/OblivionPluginRegistry)
 > repo is live and every running .exe fetches its `catalog.json` on a
 > 24h TTL.  **294/294 backend tests green.**
 >
@@ -120,9 +120,9 @@ Built with Python + Flask + pywebview (Edge WebView2). Ships as a single `.exe` 
 >   library cards get a **Remove** button.  Plugins drop into
 >   `%APPDATA%/.../plugins/` and **↻ Reload** picks them up without an
 >   app restart.  Updated plugins flash an orange **Update v…** pill.
->   See the [v0.15.2 release notes](https://github.com/oblivion-tech/OblivionServerTool/releases/tag/v0.15.2).
+>   See the [v0.15.2 release notes](https://github.com/oblivion-systems/OblivionServerTool/releases/tag/v0.15.2).
 > - **Community plugin registry** *(v0.15.1)* —
->   [`OblivionPluginRegistry`](https://github.com/oblivion-tech/OblivionPluginRegistry)
+>   [`OblivionPluginRegistry`](https://github.com/oblivion-systems/OblivionPluginRegistry)
 >   fetched via raw URL; new SPA section **"Available to Install (Community)"**;
 >   one-click install with SHA-256 verification + Zip-Slip protection +
 >   atomic tempdir-then-move.  HTTPS-only, 50 MB cap, 12s timeout.
@@ -466,14 +466,14 @@ real-device checklist run before live sessions.
 ## Getting Started
 
 ### Option A — Pre-built executable (recommended)
-1. Download `OblivionServerTool.exe` from [Releases](https://github.com/oblivion-tech/OblivionServerTool/releases)
+1. Download `OblivionServerTool.exe` from [Releases](https://github.com/oblivion-systems/OblivionServerTool/releases)
 2. Run it — no installer needed (or use the `OblivionServerToolSetup-v*.exe` installer for a Start Menu entry)
 3. On first launch a setup wizard will ask for your CS2 server directory and admin PIN
 4. If you don't have a CS2 server yet, click **Install Now** — it downloads everything automatically
 
 ### Option B — Run from source
 ```bash
-git clone https://github.com/oblivion-tech/OblivionServerTool.git
+git clone https://github.com/oblivion-systems/OblivionServerTool.git
 cd OblivionServerTool
 pip install -r requirements.txt
 python main.py

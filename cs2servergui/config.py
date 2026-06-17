@@ -78,7 +78,7 @@ APP_VERSION      = "0.16.15"
 # returns an empty catalog gracefully so the SPA's "Available to install"
 # section is empty rather than showing a network error.
 OBLIVION_REGISTRY_URL = (
-    "https://raw.githubusercontent.com/oblivion-tech/"
+    "https://raw.githubusercontent.com/oblivion-systems/"
     "OblivionPluginRegistry/main/catalog.json"
 )
 # Catalog cache lives next to oblivion_config.json so it persists across
@@ -123,7 +123,7 @@ RUNTIME_CSS_DEFAULT_URL = (
 RUNTIME_MAX_DOWNLOAD_BYTES = 250 * 1024 * 1024
 RUNTIME_FETCH_TIMEOUT_SECONDS = 90
 
-APP_REPO         = "oblivion-tech/OblivionServerTool"
+APP_REPO         = "oblivion-systems/OblivionServerTool"
 APP_RELEASES_URL = f"https://github.com/{APP_REPO}/releases/latest"
 APP_API_URL      = f"https://api.github.com/repos/{APP_REPO}/releases/latest"
 

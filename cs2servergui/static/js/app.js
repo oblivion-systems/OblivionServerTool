@@ -5087,7 +5087,7 @@ async function _vetoOpenDiscordPullModal(opts) {
         ${esc(err.message || 'Failed to fetch voice channels')}
       </div>
       <div style="padding:0 24px 24px;text-align:center;color:var(--text-4);font-size:11px">
-        Need help?  See <a href="https://github.com/oblivion-tech/OblivionServerTool/blob/master/DISCORD.md">DISCORD.md</a>
+        Need help?  See <a href="https://github.com/oblivion-systems/OblivionServerTool/blob/master/DISCORD.md">DISCORD.md</a>
         for permissions + setup.
       </div>
     `;
@@ -6443,7 +6443,7 @@ pages['config'] = async function() {
                    placeholder="https://random-words.trycloudflare.com">
             <small class="text-sub text-sm" style="display:block;margin-top:6px;line-height:1.5">
               When set, captain join URLs use this base instead of <code>http://&lt;public_ip&gt;:&lt;port&gt;</code>.
-              Paste your Cloudflare tunnel URL here (see <a href="https://github.com/oblivion-tech/OblivionServerTool/blob/master/TONIGHT.md">TONIGHT.md</a> for the tunnel setup).
+              Paste your Cloudflare tunnel URL here (see <a href="https://github.com/oblivion-systems/OblivionServerTool/blob/master/TONIGHT.md">TONIGHT.md</a> for the tunnel setup).
               Leave blank to fall back to <code>public_ip + port</code> (which requires a port-forward).
             </small>
           </div>
@@ -6487,7 +6487,7 @@ pages['config'] = async function() {
         <p class="cfg-section-sub">
           Bot integration: DM captain links, voice-channel roster pull, live veto embed, auto-move
           to team VCs, round summaries. See
-          <a href="https://github.com/oblivion-tech/OblivionServerTool/blob/master/DISCORD.md">DISCORD.md</a>
+          <a href="https://github.com/oblivion-systems/OblivionServerTool/blob/master/DISCORD.md">DISCORD.md</a>
           for the 5-minute setup guide.
         </p>
 
