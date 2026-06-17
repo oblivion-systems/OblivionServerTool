@@ -1,67 +1,76 @@
 # DONATIONS — Oblivion Server Tool
 
-**Status: DRAFT for v1.0 launch.** Task #89.
+> **Defaults filled** for v1.0 launch — review each section, then
+> uncomment the badges in [README.md](README.md#donations) and ship
+> `.github/FUNDING.yml`.
 
-The app is donation-funded — no ads, no paid tiers, no telemetry.  If
-you run a regular tournament on it and want to keep development going,
-the options below are how to chip in.
-
----
-
-## Platform comparison
-
-| Platform | One-off | Recurring | Fee | Tax handling | Anonymous? |
-|---|---|---|---|---|---|
-| **GitHub Sponsors** | ✓ | ✓ | 0% (GitHub absorbs Stripe fees) | GitHub handles US tax form | no — Github username visible |
-| **Ko-fi** | ✓ | ✓ | 0% one-off · 5% recurring | maintainer self-reports | yes (guest mode) |
-| **Liberapay** | — | ✓ | 0% (relies on Stripe/PayPal) | maintainer self-reports | yes |
-| **Stripe direct** | ✓ | ✓ | 2.9% + 30¢ | maintainer self-reports | no |
-| **PayPal.me** | ✓ | — | 2.9% + 30¢ | maintainer self-reports | no |
+This app is donation-funded.  No ads, no paid tiers, no telemetry.  If
+you host a recurring tournament on it and want to help keep it going,
+the options below are how.
 
 ---
 
-## Recommendation
+## Where to send money
 
-**GitHub Sponsors as the primary link** + **Ko-fi as the fallback** for
-people who don't have a Github account.  Both link from the README
-right under the badges section.
+**GitHub Sponsors** is the primary channel — recurring or one-off,
+0% platform fee, and the "Sponsor" button appears right on the repo
+page so the discovery cost is zero for anyone who finds the project.
 
-GitHub Sponsors covers the 80% case (developers already have Github
-accounts, the Stripe fee absorption is real money over a year), and
-Ko-fi catches the rest (CS2 operators who're more comfortable with a
-gaming-adjacent tip jar than a developer-tool platform).
+**Ko-fi** is the fallback for people who don't have a GitHub account
+or who prefer a gaming-adjacent tip jar.  One-off donations are 0%
+fee; recurring is 5%.
 
----
+Both accept any amount.  There are no tiers, no perks, no obligations.
 
-## Decisions to confirm before v1.0
-
-1. **Primary platform**: GitHub Sponsors? Ko-fi? Both?
-2. **Suggested tiers** (if any): $3 / $5 / $10 / $25 / "Pay what works"?
-3. **Perks** (if any): name in CONTRIBUTORS.md? early-access builds?
-   custom plugin requests?
-4. **Cadence**: recurring-only? one-off-only? both?
-5. **Goals page**: list specific funding goals (e.g. "$50/mo unlocks
-   Linux build") or keep it vague?
-
-Once decided, populate the README badge block:
-
-```markdown
-[![GitHub Sponsors](https://img.shields.io/github/sponsors/{username}?label=Sponsor&logo=GitHub)](https://github.com/sponsors/{username})
-[![Ko-fi](https://img.shields.io/badge/Ko--fi-Tip-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/{username})
+```
+GitHub Sponsors:  https://github.com/sponsors/jacquesvniekerk-eng
+Ko-fi:            https://ko-fi.com/jacquesvniekerk
 ```
 
-And add a `.github/FUNDING.yml` so the "Sponsor" button appears on the
-repo page:
+*(The Ko-fi handle above is a placeholder — register the actual handle
+before the badge goes live.)*
 
-```yaml
-github: [{username}]
-ko_fi: {username}
-```
+---
+
+## How donations are used (in priority order)
+
+1. **App infrastructure** — keep the OblivionPluginRegistry hosted +
+   keep code-signing certificates renewed once we get one.
+2. **Server time** — pay for an EU + a US tournament server occasionally
+   so the smoke-test rig isn't always running on my home connection.
+3. **Plugin authors** — bounties for the upstream plugins we depend on
+   (MetaMod, CounterStrikeSharp, MatchZy, NightFuryPrime Warcraft).  If
+   their projects accept donations, a portion of each month's intake
+   forwards there.
+4. **Development time** — the rest is just time on the keyboard.
+
+No promise of features tied to dollar amounts — that's a fundraising
+trap.  Goals stay vague on purpose; specific features stay driven by
+real use, not by a paywall.
+
+---
+
+## What I won't do
+
+- No corporate sponsorship tiers / logos in the README.
+- No exclusive features for donors; everything in the repo stays open
+  under BSL / Apache (post Change Date).
+- No "donation reminder" popups in the app.  Discovery happens via the
+  GitHub repo and README only.
+
+---
+
+## Recognition
+
+Donors show up under the GitHub Sponsors / Ko-fi pages already; no
+separate `CONTRIBUTORS.md` is maintained.  If you'd rather not be
+listed publicly, both platforms support anonymous donation modes.
 
 ---
 
 ## Pre-v1.0
 
-Don't enable any donation links before v1.0 ships under BSL.  Soliciting
-money for an MIT project that the operator can't legally restrict from
-SaaS clones is a bad look — wait until the license + posture is set.
+The donation links above are **not active** until v1.0 ships with the
+BSL license in force.  Soliciting money for an MIT-only project that
+can't legally restrict SaaS clones is a bad look — we wait for the
+license flip and the launch tag together.

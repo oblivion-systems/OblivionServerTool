@@ -1,0 +1,12 @@
+# GitHub repo sponsor card configuration.
+# Once the repo is public AND the v1.0 BSL tag ships, uncomment the two
+# entries below to surface the "Sponsor" button on the repo page.
+#
+# Until then this file exists to anchor the decision (see DONATIONS.md)
+# without actually triggering the sponsor card on a private/MIT repo.
+#
+# Replace `jacquesvniekerk` placeholders with the real handles before
+# going live.
+
+# github: [jacquesvniekerk-eng]
+# ko_fi: jacquesvniekerk

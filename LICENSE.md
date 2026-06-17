@@ -1,43 +1,78 @@
 # LICENSE — Oblivion Server Tool
 
-**Status: DRAFT for v1.0 launch.** Currently MIT in README; flipping to
-Business Source License 1.1 (BSL) is task #89.
+> **Defaults filled** — review every line marked **`[REVIEW]`** before
+> the v1.0 tag.  Once accepted, this file's body should be replaced with
+> the canonical Business Source License 1.1 text from
+> <https://mariadb.com/bsl11/>, with the Parameters block below
+> substituted in.  The reference-only form below is legally weaker than
+> embedding the full BSL text; do that swap before going public.
 
 ---
 
-## Plan
+## Business Source License 1.1 — Parameters
 
-Adopt **BSL 1.1** with these terms (TBD by maintainer):
+```
+Licensor:               Jacques van Niekerk                            [REVIEW]
+Licensed Work:          Oblivion Server Tool, version 1.0.0 and later  [REVIEW]
+                        (commits prior to the v1.0 tag remain under MIT
+                        per the README — no retroactive relicensing.)
 
-| Field | Proposed value | Decision needed |
-|---|---|---|
-| Licensor | Jacques van Niekerk | confirm name/handle |
-| Licensed Work | Oblivion Server Tool v1.0+ | confirm starting version |
-| Additional Use Grant | "non-commercial use is unrestricted; commercial use up to N CS2 servers per organisation" | pick N (typical: 1 or 3) |
-| Change Date | 2030-06-17 (4 years from v1.0) | typical 4y; could be 3y |
-| Change License | Apache License, Version 2.0 | confirm |
+Additional Use Grant:   You may use the Licensed Work for any
+                        non-production use without limit.
 
-When filled in, replace this file with the full BSL 1.1 text from
-<https://mariadb.com/bsl11/> with the four parameters substituted.
+                        For production use, you may operate the Licensed
+                        Work to host up to three (3) Counter-Strike 2
+                        dedicated servers per organisation.  Operating
+                        more than three production CS2 servers, or
+                        offering the Licensed Work as a hosted service
+                        to third parties, requires a commercial license
+                        from the Licensor.                              [REVIEW]
 
----
+Change Date:            2030-06-17                                      [REVIEW]
+                        (Four years from the v1.0 tag date.)
 
-## Why BSL not MIT for v1.0
-
-BSL stops a SaaS clone from undercutting the maintainer during the
-non-compete window while still letting:
-- individual operators use it freely (commercial or not, under the cap)
-- the source remain readable + auditable
-- the project auto-revert to a permissive license (Apache 2.0) at the
-  Change Date so it never disappears behind a paywall.
-
-This mirrors the approach Sentry, MariaDB, Cockroach, and Sourcegraph
-use.
+Change License:         Apache License, Version 2.0                     [REVIEW]
+                        (On the Change Date, this work auto-relicenses
+                        under Apache 2.0 in perpetuity.)
+```
 
 ---
 
-## Pre-v1.0 (everything before this file is committed)
+## Terms (summary — full text governs)
 
-All commits prior to the BSL-effective tag remain under MIT (the README's
-existing terms).  No retroactive relicensing — anyone who forked while
-MIT was in force keeps MIT rights to that snapshot.
+The full **Business Source License 1.1** (BSL) terms govern this work
+and are available at <https://mariadb.com/bsl11/>.  A summary of the
+operative rules under the Parameters above:
+
+1. **Source remains readable and forkable** by anyone, at any time.
+2. **Non-production use is unrestricted** — try it, study it, modify it
+   for personal projects with no obligations.
+3. **Production use is limited** to the Additional Use Grant above
+   (three CS2 servers per organisation).  Operating more, or offering
+   this as a managed service to third parties, requires a commercial
+   license from the Licensor.
+4. **On the Change Date** (`2030-06-17`), this version automatically
+   converts to the Apache License 2.0 — a permissive license that
+   imposes none of the above restrictions.  This conversion is
+   irrevocable.
+5. **Modifications must carry the same BSL terms** until the Change
+   Date, at which point they too convert under Apache 2.0.
+
+If the summary above conflicts with the canonical BSL 1.1 text, the
+canonical text governs.
+
+---
+
+## Pre-v1.0
+
+All commits prior to the v1.0 tag remain under the **MIT License** as
+originally documented in `README.md`.  Forks made under MIT keep MIT
+rights to that snapshot — no retroactive relicensing.
+
+---
+
+## Commercial licensing
+
+For production use exceeding the Additional Use Grant, or to negotiate
+a different license entirely, contact the Licensor via the GitHub
+profile linked from the [project README](README.md).
