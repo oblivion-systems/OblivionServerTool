@@ -24,11 +24,8 @@ Both accept any amount.  There are no tiers, no perks, no obligations.
 
 ```
 GitHub Sponsors:  https://github.com/sponsors/jacquesvn
-Ko-fi:            https://ko-fi.com/jacquesvniekerk
+Ko-fi:            https://ko-fi.com/jacquesvn
 ```
-
-*(The Ko-fi handle above is a placeholder — register the actual handle
-before the badge goes live.)*
 
 ---
 
@@ -74,6 +71,6 @@ listed publicly, both platforms support anonymous donation modes.
 account is registered and the Sponsors program is enabled.  The badge
 in the README is wired up; the "Sponsor" button on the repo page works.
 
-**Ko-fi** — not yet registered.  The handle in this file is a
-placeholder; the README Ko-fi badge stays out of the markup until the
-account exists.  Pending decision after v1.0 ships.
+**Ko-fi (`@jacquesvn`)** — live.  Same handle as GitHub Sponsors for
+cross-platform discoverability.  Badge wired into the README; donations
+are open.

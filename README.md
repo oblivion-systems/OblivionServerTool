@@ -4,6 +4,7 @@ A desktop application for managing a **Counter-Strike 2 dedicated server** on Wi
 Built with Python + Flask + pywebview (Edge WebView2). Ships as a single `.exe` with an optional installer.
 
 [![GitHub Sponsors](https://img.shields.io/github/sponsors/jacquesvn?label=Sponsor&logo=GitHub)](https://github.com/sponsors/jacquesvn)
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-Tip-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/jacquesvn)
 [![License: BSL 1.1](https://img.shields.io/badge/license-BSL_1.1-purple)](LICENSE.md)
 [![Tests](https://img.shields.io/badge/tests-300%2F300-brightgreen)](tests/)
 
