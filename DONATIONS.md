@@ -68,9 +68,12 @@ listed publicly, both platforms support anonymous donation modes.
 
 ---
 
-## Pre-v1.0
+## Activation status
 
-The donation links above are **not active** until v1.0 ships with the
-BSL license in force.  Soliciting money for an MIT-only project that
-can't legally restrict SaaS clones is a bad look — we wait for the
-license flip and the launch tag together.
+**GitHub Sponsors (`@jacquesvn`)** — live now that the personal
+account is registered and the Sponsors program is enabled.  The badge
+in the README is wired up; the "Sponsor" button on the repo page works.
+
+**Ko-fi** — not yet registered.  The handle in this file is a
+placeholder; the README Ko-fi badge stays out of the markup until the
+account exists.  Pending decision after v1.0 ships.

@@ -2,6 +2,62 @@
 
 ---
 
+## v0.16.15 — 2026-06-17 (Discord bot resilience hardening, #159)
+
+Closes the last v1.0 "must" item.  When Discord wobbles mid-veto, the
+operator needs to know WHY — perms revoked vs. channel deleted vs.
+rate-limited vs. network blip.  v0.11.0's bot wrappers caught
+everything as a generic `Exception` and logged at `info`, leaving the
+operator staring at "bot_dm_user(123…) failed: …" with no hint.
+
+New `_classify_discord_op_error(label, target, exc)` helper promotes
+the four categories:
+- `discord.Forbidden`     → WARNING with "check role/channel perms"
+- `discord.NotFound`      → WARNING with "channel/message/user deleted"
+- `discord.HTTPException` → WARNING with `.status` code (429s self-evident)
+- anything else           → ERROR with full traceback
+
+Applied to `bot_dm_user`, `bot_post_embed`, `bot_edit_embed`.  Plus
+`bot_edit_embed` timeout 8s → 12s so discord.py's internal rate-limit
+retry can complete on a fast-veto burst before our outer timer fires.
+
+Tests: 300/300 green.
+
+---
+
+## v0.16.14 — 2026-06-17 (Spectator URL polish #170 — broadcast-grade)
+
+Closes the last v1.0 wishlist item.  v0.11.1's `/spectate` worked for
+caster checks but wasn't a broadcast-grade overlay — small fonts,
+3 s polling lag, no OBS controls, no active-team highlight.
+
+Backend
+- New `/api/veto/spectator/stream` SSE endpoint, token-gated like
+  `/state`, emits the SANITIZED snapshot (Discord IDs stripped,
+  SteamIDs masked, captain tokens never sent).
+- `_veto_spec_subs` parallel subscriber list — kept separate from the
+  main `_veto_subs` so a stalled spectator stream can't backpressure
+  the captain/admin stream.
+- `_veto_broadcast()` now also dispatches the sanitized payload.
+
+SPA (spectator page)
+- Complete typographic rewrite: 56px team-name scoreline, 20px team
+  names in roster cards, 14px sequence chips, 44px decider hero.
+- Live updates via SSE primary + 5s polling fallback (corporate
+  proxies that strip SSE fall through automatically).
+- Active-team highlight: accent-coloured border + slow pulse on the
+  team whose step is next.
+- Query-param OBS controls: `?bg=transparent|green|blue|dark`,
+  `?compact=1`, `?theme=light`.
+- Foot text auto-hides on chroma backgrounds.
+- Mobile/720p responsive: scoreline shrinks to 32px, teams stack.
+
+Tests: 297/297 green (+3 new — HTML includes OBS controls + SSE
+endpoint, SSE rejects bad token + no-session, sanitization strips
+Discord IDs through both polling and streaming paths).
+
+---
+
 ## v0.16.13 — 2026-06-17 (Warcraft plugin: 4 main-thread safety fixes)
 
 Source-side re-audit of `D:\warcraft-build\src\` after CSS shipped v1.0.369.

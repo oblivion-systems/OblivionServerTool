@@ -1,0 +1,176 @@
+# CREDITS — Oblivion Server Tool
+
+> Every plugin and runtime this app bundles, downloads, or hard-depends on
+> belongs to the people listed below.  None of this work is mine.  My
+> contribution sits at the **management layer** — discovering, deploying,
+> configuring, cleaning up.  When you use this app and run any of these
+> plugins on your server, **you are running their work**.
+>
+> If you are one of the authors below and something here is wrong —
+> missing, misspelled, the wrong license, the wrong link, or you want
+> your name listed differently — please open an issue or a PR.  I will
+> fix it the same day.
+
+---
+
+## CS2 server runtime (auto-installed by the app)
+
+| Project | Author / Maintainer | Upstream | License | Role |
+|---|---|---|---|---|
+| **MetaMod : Source 2** | AlliedMods team | <https://www.sourcemm.net/> | GPLv3 | Engine-level plugin loader.  Every CSS plugin below depends on it. |
+| **CounterStrikeSharp** | roflmuffin et al. | <https://github.com/roflmuffin/CounterStrikeSharp> | MIT | C# host that runs every modern CS2 plugin in this bundle. |
+
+The app downloads both at install time from the canonical upstream URLs
+(see `cs2servergui/config.py` → `RUNTIME_METAMOD_DEFAULT_URL` and
+`RUNTIME_CSS_DEFAULT_URL`).  Operators can override either to pin a
+different build.  Nothing is repackaged; the upstream zip is extracted
+verbatim into `csgo/addons/`.
+
+---
+
+## Plugins bundled in this repository
+
+These ship as binary blobs inside `cs2servergui/plugins/<slug>/` and are
+deployed into the operator's CS2 server when they activate the
+corresponding mode.  Every blob is the upstream author's compiled
+release unless explicitly noted otherwise.
+
+| Mode(s) | Plugin | Author | Upstream | License | Notes |
+|---|---|---|---|---|---|
+| 5v5 / 4v4 / 3v3 / Practice | **MatchZy** | shobhit-pathak | <https://github.com/shobhit-pathak/MatchZy> | MIT | Competitive match controller.  Bundled binary is the upstream release. |
+| Deathmatch | **CounterStrikeSharp-Deathmatch** | shobhit-pathak | <https://github.com/shobhit-pathak/CS2-Deathmatch> | MIT | Instant respawn + spawn protection. |
+| Retakes | **CS2 Retakes** | B3none | <https://github.com/B3none/cs2-retakes> | MIT | Bombsite retake controller. |
+| Retakes | **RetakesAllocator** | yonilerner | <https://github.com/yonilerner/cs2-retakes-allocator> | MIT | Loadout allocator for Retakes. |
+| 1v1 / 2v2 | **K4-Arenas** | K4ryuu | <https://github.com/K4ryuu/CS2-K4-Arenas> | MIT (verify) | Duel ladder with elo + queue. |
+| 1v1 / 2v2 | **K4-Arenas-Bots** | K4ryuu | <https://github.com/K4ryuu/CS2-K4-Arenas-Bots> | MIT (verify) | Bot adapter for K4-Arenas. |
+| 1v1 / 2v2 | **K4-ArenaSharedApi** | K4ryuu | <https://github.com/K4ryuu/CS2-K4-Arenas> | MIT (verify) | Shared API surface. |
+| 1v1 / 2v2 | **KitsuneMenu** | Kxnrl-rk-Kitsune team | <https://github.com/Kxnrl-rk/CS2-KitsuneMenu> (verify) | MIT (verify) | Menu library K4-Arenas depends on. |
+| Jailbreak | **CSS-Jailbreak** | community (multi-author) | <https://github.com/edgegamers/Jailbreak> (verify the upstream actually used) | varies | T-vs-CT prison roleplay.  Upstream authorship is community-maintained; if a specific maintainer wants attribution please open an issue. |
+| Warcraft | **WarcraftPlugin** | **NightFuryPrime** | <https://github.com/NightFuryPrime/CS2-Warcraft-Plugin> | MIT (verify) | **Custom-patched build by Oblivion.**  See "Modifications" below. |
+| Warcraft | **ModelPrecacher** | Oblivion (this project) | this repo | BSL 1.1 / MIT (per ROADMAP) | Original work to precache class models server-side. |
+| Zombie modes | **CS2Fixes** | Source2ZE | <https://github.com/Source2ZE/CS2Fixes> | GPLv3 | Engine fixes that unlock ZombieMod-style gameplay. |
+| Zombie Escape | **MultiAddonManager** | Source2ZE | <https://github.com/Source2ZE/MultiAddonManager> | GPLv3 | Mounts the ZombieReborn workshop pack. |
+| Zombie Escape | **ZombieReborn** | Source2ZE | <https://github.com/Source2ZE/ZombieReborn> | GPLv3 | Loaded as a workshop addon, not bundled directly. |
+
+**License confidence — please verify before relying.**  I have made a
+best-effort match between plugin and upstream, but I'm not a lawyer and
+not every CS2 plugin author publishes a clean SPDX header in their repo.
+If you are an author and the license column above is wrong for your
+project, **please file an issue and I will correct it immediately**.
+
+---
+
+## Modifications by Oblivion
+
+### WarcraftPlugin (NightFuryPrime fork, custom-patched build)
+
+The `WarcraftPlugin.dll` shipped at
+`cs2servergui/plugins/warcraft/addons/counterstrikesharp/plugins/WarcraftPlugin/`
+is **not** a direct upstream release.  It is built from a local fork
+with the following patches on top of NightFuryPrime's v4.1.1 base:
+
+| Patch | What it fixes |
+|---|---|
+| Chat-command 1.5 s cooldown per `(SteamID, command)` | Prevents recv-queue overflow + `SteamNetworkingSockets lock held for 263 ms ... thread starvation` under chat-spam |
+| Menu-open dispatcher with frame-time budget guard | Defers menu opens when previous frame ran >20 ms, avoids stacking long-frames |
+| `AbilityBenefitAnnouncer` chat-broadcast throttle | Rate-limited from every-kill to every-N to prevent recv overflow |
+| `Database.ResetClients` no longer blocks main thread | `ResetClientsAsync()` + `FireAndForget` at map-start / map-end |
+| `OnClientPutInServerAsync` entity-list race fix | Native entity lookups moved back to main thread |
+| `MenuTypeManager.GetPlayerMenuType` MySQL block removed | Fire-and-forget cache populate instead of `.GetAwaiter().GetResult()` |
+| `_commandCooldowns` race fix | `Dictionary<>` → `ConcurrentDictionary<>` |
+| `Plugin.Unload` hardening | Timers + queues cleared deterministically |
+| Localised English help text | `lang/en.json` updated to list all `!class !skills !shop !ult !info !reset` |
+
+**The source for these patches lives at `D:\warcraft-build\src\` on
+the maintainer's machine and is NOT in this repository.**  Source will
+be published once it has been rebased onto NightFuryPrime's latest
+release; until then, every patch is documented in this repo's
+`CHANGELOG.md` (tasks #38–43, #144, v0.16.13).  If NightFuryPrime
+prefers a different distribution arrangement — patches as a separate
+fork, attribution moved entirely off this repo, or any other ask —
+please open an issue and we will accommodate.
+
+The bundled DLL ships under the same license as NightFuryPrime's
+upstream.
+
+### ModelPrecacher
+
+This is **original work** developed by Oblivion (this project) for the
+Warcraft pack.  Pre-caches class-specific player models at map start so
+class changes don't cause first-spawn stutters.  Licensed under the
+same terms as this repository (currently MIT pre-v1.0, BSL 1.1 v1.0+).
+Source at `_plugins_src/ModelPrecacher/` in this repo.
+
+### All other plugins
+
+Shipped as their upstream author's compiled release.  No source
+modifications.
+
+---
+
+## Third-party .NET dependencies bundled with WarcraftPlugin
+
+The `cs2servergui/plugins/warcraft/addons/counterstrikesharp/plugins/WarcraftPlugin/`
+folder ships ~60 .NET dependency DLLs alongside `WarcraftPlugin.dll`,
+inherited from NightFuryPrime's release zip.  Notable licenses:
+
+- **Newtonsoft.Json.dll** — © James Newton-King, MIT
+- **Dapper.dll** — © Stack Exchange, Apache 2.0
+- **MySqlConnector.dll** — © Bradley Grainger et al., MIT
+- **Serilog.dll**, **Serilog.Sinks.Console.dll**, **Serilog.Sinks.File.dll** — © Serilog Contributors, Apache 2.0
+- **Microsoft.\*.dll** — © Microsoft, MIT (most) / Apache 2.0 (some)
+- **SQLitePCLRaw.\*.dll** — © Eric Sink & SourceGear LLC, Apache 2.0
+- **McMaster.NETCore.Plugins.dll** — © Nate McMaster, Apache 2.0
+- **Tomlyn.dll** — © Alexandre Mutel, BSD 2-clause
+- **System.\*.dll** — © .NET Foundation, MIT / Apache 2.0
+- **e_sqlite3.dll** (native, `runtimes/win-x64/native/`) — © D. Richard Hipp, **public domain (SQLite)**
+
+This list is non-exhaustive; the canonical list is the file contents of
+the WarcraftPlugin folder.  The NightFuryPrime upstream release zip
+preserves each DLL's bundled license metadata (where the author embeds
+it); the same DLLs are shipped here verbatim.  No re-signing, no
+re-packaging.
+
+---
+
+## Other dependencies
+
+Python packages (`requirements.txt`):
+
+- **Flask** — © Armin Ronacher & Pallets, BSD 3-clause
+- **werkzeug**, **jinja2**, **itsdangerous**, **click**, **markupsafe** — Pallets, BSD 3-clause
+- **pywebview** — © Roman Sirokov, BSD 3-clause
+- **discord.py** — © Rapptz, MIT
+- **segno** — © Lars Heuer, BSD 3-clause
+- **keyring** — © Jason R. Coombs et al., MIT
+
+JavaScript / browser:
+- No bundled JS dependencies — the SPA is hand-written vanilla JS + CSS
+  with no npm chain.
+
+Tools used during build:
+- **PyInstaller** — © PyInstaller Development Team, GPL with exception
+- **Inno Setup** — © Jordan Russell, Inno Setup License (BSD-style)
+- **Microsoft Edge WebView2 Evergreen Bootstrapper** — © Microsoft,
+  redistributable per Microsoft's distribution agreement.  Downloaded
+  on demand by `tools/fetch_webview2.ps1`; never modified, never
+  re-signed.
+
+---
+
+## How to report a credit problem
+
+Open an issue at the project's GitHub repo with the title
+**"Attribution fix: \<your project name\>"** and I will respond within
+24 hours.  Acceptable resolutions include:
+
+- Correcting the upstream URL
+- Correcting the license
+- Correcting the author name or preferred display
+- Adding a previously-missed contributor
+- Removing the plugin entirely from this distribution if you prefer not
+  to be associated with it
+
+The maintainer's intent is for every plugin author to feel **clearly
+credited** and to have **easy recourse if anything here misrepresents
+their work**.

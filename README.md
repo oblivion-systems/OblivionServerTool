@@ -4,27 +4,23 @@ A desktop application for managing a **Counter-Strike 2 dedicated server** on Wi
 Built with Python + Flask + pywebview (Edge WebView2). Ships as a single `.exe` with an optional installer.
 
 [![GitHub Sponsors](https://img.shields.io/github/sponsors/jacquesvn?label=Sponsor&logo=GitHub)](https://github.com/sponsors/jacquesvn)
-<!-- Ko-fi badge — uncomment when the Ko-fi handle is registered.
-[![Ko-fi](https://img.shields.io/badge/Ko--fi-Tip-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/jacquesvniekerk)
--->
+[![License: BSL 1.1](https://img.shields.io/badge/license-BSL_1.1-purple)](LICENSE.md)
+[![Tests](https://img.shields.io/badge/tests-300%2F300-brightgreen)](tests/)
 
 
-> **Status: v0.16.13 (released 2026-06-17).**  v1.0 first-run UX audit
-> (task #157) shipped — v0.16.5 → v0.16.13 closes the heaviest fresh-install
-> friction points: one-click MetaMod + CSS runtime install (no more "find
-> the addons/ folder and extract it yourself"), Edge WebView2 bundled into
-> the installer (Win10 friends no longer get a blank window), a Getting
-> Started card on the Status page that walks a brand-new operator through
-> the three things they need to do before their first tournament, a
-> one-click Discord setup check, actionable "→ Fix" buttons on every
-> Pre-flight row, and a 5-bug self-review pass on the same stream (1
-> critical: missing `_patch_gameinfo` call that would have silently broken
-> MetaMod for fresh installs).  v0.16.13 also lands 4 main-thread safety
-> fixes in the Warcraft plugin source — caught by an adversarial re-audit
-> of the C# code, rebuilt + bundled.  The
+> **Status: v0.16.15 (released 2026-06-17).**  All v1.0 must/should/wishlist
+> items closed; the last v0.16.x stream wrapped up with #170 (spectator URL
+> polish, v0.16.14) and #159 (Discord bot resilience hardening, v0.16.15).
+> v0.16.5 → v0.16.13 closed the heaviest fresh-install friction points
+> (one-click MetaMod + CSS runtime install, Edge WebView2 bundled into the
+> installer, Getting Started card on Status page, one-click Discord setup
+> check, actionable "→ Fix" buttons on every Pre-flight row, plus a 5-bug
+> self-review pass and 4 main-thread safety fixes in the Warcraft plugin
+> source).  The
 > [`OblivionPluginRegistry`](https://github.com/oblivion-systems/OblivionPluginRegistry)
 > repo is live and every running .exe fetches its `catalog.json` on a
-> 24h TTL.  **294/294 backend tests green.**
+> 24h TTL.  **300/300 backend tests green.**  Only the v1.0 launch
+> posture remains (LICENSE + repo public + tag).
 >
 > **What's new since v0.11.0**:
 > - **Warcraft plugin: 4 main-thread safety fixes** *(v0.16.13)* —
@@ -581,14 +577,20 @@ Versions below `1.0.0` are considered work-in-progress.
 
 ## License
 
-- **Pre-v1.0** — MIT (everything currently in this repo)
-- **v1.0+** — Business Source License 1.1, reverting to Apache 2.0 on
-  the Change Date (~4 years post-release).  See [LICENSE.md](LICENSE.md)
-  for the rationale + parameters under review.
+- **Every commit up to (but not including) the `v1.0.0` tag** — MIT.
+  Forks made from any of those commits keep MIT rights to that snapshot.
+- **From the `v1.0.0` tag onwards** — Business Source License 1.1.
+  Production use limited to three CS2 servers per organisation.
+  Auto-converts to Apache 2.0 four years after the v1.0 release.
+  Full text, parameters, and rationale in **[LICENSE.md](LICENSE.md)**.
 
-The relicense is driven by task #89 (v1.0 launch posture); MIT
-remains in force on every commit before the BSL-effective tag, and
-forks made under MIT keep MIT rights to that snapshot.
+The bundled CS2 plugins and runtime (MetaMod, CounterStrikeSharp,
+MatchZy, WarcraftPlugin, Retakes, etc.) **stay under their original
+authors' licenses regardless of this app's license**.  Every plugin
+author is credited individually in **[CREDITS.md](CREDITS.md)** with
+the upstream repo URL and license.  If you're an author and something
+in CREDITS.md is wrong, please open an issue — fixes ship the same
+day.
 
 ## Donations
 
