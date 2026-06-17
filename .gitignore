@@ -26,6 +26,8 @@ oblivion_plugins.json
 # v0.16.1 / v0.16.3 — persisted teams + templates (runtime state)
 oblivion_teams.json
 oblivion_templates.json
+# v0.11.3 — persisted veto session (runtime state, survives Ctrl+Q)
+oblivion_veto_active.json
 # v0.16.0 auto-snapshots of oblivion_config.json — dev-mode writes them to project root
 backups/
 # v0.15.1 registry catalog cache (24h TTL, fetched at runtime)
