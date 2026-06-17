@@ -305,7 +305,9 @@ becomes a matter of subclassing `GameDriver` rather than rewriting the
 app.  Post-v1.0 priorities:
 
 - **Linux + headless mode** — Windows-only today; the `platform.py` seam
-  is already drafted for cross-OS work
+  is already drafted for cross-OS work.  Tracked in the public
+  **[v1.1 — Linux + Headless](https://github.com/orgs/oblivion-systems/projects/1)**
+  roadmap board.
 - **Second game driver** — TF2 is the proof point on the abstraction;
   community contributions for other Source engines (CS:GO, L4D2) welcome
 - **First non-Source game driver** — to validate the abstraction beyond
