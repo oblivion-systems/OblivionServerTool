@@ -204,85 +204,392 @@ SPECTATOR_HTML = """<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Veto · Spectator</title>
 <style>
-  body { margin:0; padding:24px; font-family: 'Space Grotesk', system-ui, sans-serif;
-         background:#0f1115; color:#eaeaea; min-height:100vh; }
-  h1 { margin:0 0 4px; font-size:22px; letter-spacing:.04em; }
-  .sub { color:#888; font-size:13px; margin-bottom:18px; }
-  .err { color:#ff6b6b; padding:14px; border:1px solid #ff6b6b; border-radius:6px; }
-  .grid { display:grid; gap:16px; max-width:920px; }
-  .row { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
-  .card { background:#171a21; border:1px solid #2a2f3a; border-radius:8px; padding:14px 16px; }
-  .card h2 { margin:0 0 8px; font-size:14px; letter-spacing:.08em;
-             text-transform:uppercase; color:#aaa; font-weight:600; }
-  ul { list-style:none; padding:0; margin:0; }
-  li { font-size:13px; padding:3px 0; color:#ccc; }
-  li.cap { color:#fff; font-weight:600; }
-  li small { color:#666; font-family:'JetBrains Mono', monospace; margin-left:6px; font-size:11px; }
-  .mode-pill { display:inline-block; background:#262d3a; padding:2px 8px;
-               border-radius:99px; font-size:11px; font-family:'JetBrains Mono', monospace; }
-  .seq { display:flex; flex-wrap:wrap; gap:6px; }
-  .seq .step { font-family:'JetBrains Mono', monospace; font-size:11px;
-               padding:3px 8px; border-radius:3px; background:#262d3a; color:#bbb; }
-  .seq .step.ban  { background:rgba(255,107,107,.18); color:#ff8e8e; }
-  .seq .step.pick { background:rgba(64,180,140,.22); color:#7cdcb0; }
-  .seq .step.decider { background:#3a4a2c; color:#c8e3a0; font-weight:600; }
-  .foot { color:#555; font-size:11px; margin-top:18px; text-align:center; }
-  @media (max-width: 640px) { .row { grid-template-columns:1fr; } }
+  /* v0.16.14 / task #170 — broadcast-grade spectator surface.
+     OBS-friendly query params:
+       ?bg=transparent  →  no background (chroma over OBS scene)
+       ?bg=green        →  solid #00b140 chroma key
+       ?bg=blue         →  solid #0047bb chroma key
+       ?bg=dark         →  the default dark UI (also bare /spectate)
+       ?compact=1       →  tighter spacing for 720p / smaller overlays
+       ?theme=light     →  light theme (for printable / projector use)
+  */
+  :root {
+    --bg: #0b0e14;
+    --panel: #131822;
+    --panel-2: #1a2030;
+    --line: #2a2f3a;
+    --text-1: #ffffff;
+    --text-2: #cfd3dc;
+    --text-3: #7d8595;
+    --accent: #a03af5;
+    --ok: #4ade80;
+    --warn: #fbbf24;
+    --bad: #ef4444;
+    --ban-bg: rgba(239, 68, 68, 0.18);
+    --ban-fg: #f87171;
+    --pick-bg: rgba(74, 222, 128, 0.18);
+    --pick-fg: #86efac;
+    --decider-bg: linear-gradient(135deg, #4ade80 0%, #a03af5 100%);
+    --pulse: 0 0 0 0 rgba(160, 58, 245, 0.55);
+  }
+  html, body { margin:0; padding:0; min-height:100vh; }
+  body {
+    font-family: 'Inter', 'Space Grotesk', system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text-1);
+    padding: 32px;
+    min-height: 100vh;
+    box-sizing: border-box;
+  }
+  body[data-bg="transparent"] { background: transparent; }
+  body[data-bg="green"]       { background: #00b140; }
+  body[data-bg="blue"]        { background: #0047bb; }
+  body[data-theme="light"] {
+    --bg: #f4f5f7;
+    --panel: #ffffff;
+    --panel-2: #f8f9fb;
+    --line: #d4d8df;
+    --text-1: #1a1d23;
+    --text-2: #4a4f5a;
+    --text-3: #7d8595;
+    background: #f4f5f7;
+  }
+  body[data-compact="1"] { padding: 16px; }
+  body[data-compact="1"] .scoreline { font-size: 36px; }
+  body[data-compact="1"] .team-card { padding: 14px 18px; }
+  body[data-compact="1"] .player { font-size: 14px; padding: 4px 0; }
+  body[data-compact="1"] .seq-step { font-size: 13px; padding: 6px 10px; }
+
+  .scoreline {
+    display: flex; align-items: center; justify-content: center;
+    gap: 24px;
+    font-size: 56px; font-weight: 700; letter-spacing: -0.01em;
+    text-align: center; margin-bottom: 8px;
+    line-height: 1.1;
+  }
+  .scoreline .vs {
+    font-size: 0.5em; color: var(--text-3); font-weight: 400;
+    letter-spacing: 0.4em;
+  }
+  .scoreline .team-name { color: var(--text-1); }
+  .submeta {
+    display: flex; align-items: center; justify-content: center;
+    gap: 12px; margin-bottom: 32px;
+    color: var(--text-3); font-size: 13px;
+    letter-spacing: 0.08em; text-transform: uppercase;
+  }
+  .mode-pill {
+    display: inline-flex; align-items: center;
+    background: var(--accent); color: white;
+    padding: 4px 12px; border-radius: 4px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px; font-weight: 600;
+    letter-spacing: 0.1em;
+  }
+  .state-pill {
+    color: var(--text-2); font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; font-weight: 500;
+  }
+  .state-pill.active::before {
+    content: "● "; color: var(--ok);
+    animation: pulse-dot 1.4s ease-in-out infinite;
+  }
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.4; }
+  }
+
+  .teams {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 20px;
+    max-width: 1100px; margin: 0 auto 28px;
+  }
+  .team-card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 18px 24px;
+    transition: border-color 0.4s ease, box-shadow 0.4s ease;
+    position: relative;
+  }
+  .team-card.active {
+    border-color: var(--accent);
+    box-shadow: 0 0 32px -8px rgba(160, 58, 245, 0.5);
+    animation: pulse-card 2.4s ease-in-out infinite;
+  }
+  @keyframes pulse-card {
+    0%, 100% { box-shadow: 0 0 32px -8px rgba(160, 58, 245, 0.4); }
+    50%      { box-shadow: 0 0 32px -8px rgba(160, 58, 245, 0.7); }
+  }
+  .team-card .team-hdr {
+    display: flex; align-items: baseline; justify-content: space-between;
+    margin-bottom: 12px; padding-bottom: 10px;
+    border-bottom: 1px solid var(--line);
+  }
+  .team-card .team-hdr-name {
+    font-size: 20px; font-weight: 700; color: var(--text-1);
+  }
+  .team-card .team-hdr-cap {
+    font-size: 11px; color: var(--text-3);
+    letter-spacing: 0.08em; text-transform: uppercase;
+  }
+  .team-card .team-hdr-cap strong {
+    color: var(--accent); font-family: 'JetBrains Mono', monospace;
+  }
+  .roster { list-style: none; padding: 0; margin: 0; }
+  .player {
+    font-size: 15px; padding: 6px 0;
+    color: var(--text-2);
+    display: flex; align-items: baseline; gap: 8px;
+  }
+  .player.cap {
+    color: var(--text-1); font-weight: 600;
+  }
+  .player .cap-badge {
+    display: inline-block; width: 16px;
+    color: var(--accent); font-weight: 700; text-align: center;
+  }
+  .player .steam-id {
+    color: var(--text-3); font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; margin-left: auto;
+  }
+
+  .section {
+    max-width: 1100px; margin: 0 auto 24px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 18px 24px;
+  }
+  .section-title {
+    font-size: 11px; font-weight: 600; color: var(--text-3);
+    letter-spacing: 0.14em; text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+  .seq-list { display: flex; flex-wrap: wrap; gap: 8px; }
+  .seq-step {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px; font-weight: 500;
+    padding: 8px 12px; border-radius: 6px;
+    background: var(--panel-2);
+    color: var(--text-3);
+    display: inline-flex; align-items: center; gap: 6px;
+    transition: transform 0.2s ease;
+  }
+  .seq-step.ban  { background: var(--ban-bg);  color: var(--ban-fg); }
+  .seq-step.pick { background: var(--pick-bg); color: var(--pick-fg); }
+  .seq-step.current {
+    transform: scale(1.06);
+    box-shadow: 0 0 0 2px var(--accent);
+  }
+  .seq-step .step-n {
+    font-size: 11px; color: inherit; opacity: 0.7;
+    margin-right: 2px;
+  }
+
+  .decider {
+    max-width: 1100px; margin: 0 auto 24px;
+    text-align: center; padding: 28px;
+    background: var(--decider-bg);
+    border-radius: 12px;
+    color: white;
+    animation: decider-in 0.6s ease-out;
+  }
+  @keyframes decider-in {
+    from { transform: scale(0.92); opacity: 0; }
+    to   { transform: scale(1);    opacity: 1; }
+  }
+  .decider .label {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.2em;
+    text-transform: uppercase; opacity: 0.85; margin-bottom: 6px;
+  }
+  .decider .map-name {
+    font-size: 44px; font-weight: 700; letter-spacing: -0.01em;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .err {
+    max-width: 1100px; margin: 0 auto;
+    color: var(--bad); padding: 18px 22px;
+    border: 1px solid var(--bad); border-radius: 8px;
+    font-size: 14px; text-align: center;
+  }
+  .foot {
+    color: var(--text-3); font-size: 10px;
+    letter-spacing: 0.16em; text-transform: uppercase;
+    margin-top: 24px; text-align: center; opacity: 0.6;
+  }
+  body[data-bg="transparent"] .foot,
+  body[data-bg="green"] .foot,
+  body[data-bg="blue"] .foot { display: none; }
+
+  @media (max-width: 720px) {
+    body { padding: 16px; }
+    .scoreline { font-size: 32px; }
+    .teams { grid-template-columns: 1fr; }
+    .decider .map-name { font-size: 32px; }
+  }
 </style>
 </head><body>
-<h1 id="hdr">Veto</h1>
-<div class="sub" id="sub">Loading…</div>
-<div id="content"></div>
-<div class="foot">Read-only spectator view · refreshes every 3s</div>
+<div class="scoreline" id="scoreline">
+  <span class="team-name" id="team-a-name">—</span>
+  <span class="vs">VS</span>
+  <span class="team-name" id="team-b-name">—</span>
+</div>
+<div class="submeta" id="submeta">
+  <span class="mode-pill" id="mode-pill">—</span>
+  <span class="state-pill" id="state-pill">loading…</span>
+</div>
+<div id="decider-holder"></div>
+<div class="teams" id="teams"></div>
+<div id="sequence-holder"></div>
+<div id="final-holder"></div>
+<div id="err-holder"></div>
+<div class="foot" id="foot">Read-only spectator view · live updates via SSE</div>
 <script>
 const TOKEN = "__TOKEN__";
-async function tick() {
+// v0.16.14 — apply OBS query params before anything renders.
+(function applyQueryParams() {
+  const qs = new URLSearchParams(location.search);
+  ["bg", "theme", "compact"].forEach(k => {
+    const v = qs.get(k);
+    if (v) document.body.setAttribute("data-" + k, v);
+  });
+})();
+function esc(s) {
+  return String(s == null ? "" : s)
+    .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+function renderErr(msg) {
+  document.getElementById("err-holder").innerHTML = '<div class="err">' + esc(msg) + '</div>';
+  document.getElementById("state-pill").textContent = "error";
+  document.getElementById("state-pill").classList.remove("active");
+}
+function render(s) {
+  document.getElementById("err-holder").innerHTML = "";
+  document.getElementById("team-a-name").textContent = s.team_a_name || "Team A";
+  document.getElementById("team-b-name").textContent = s.team_b_name || "Team B";
+  document.getElementById("mode-pill").textContent = s.mode || "—";
+  const statePill = document.getElementById("state-pill");
+  statePill.textContent = s.state || "—";
+  // Pulse the "● live" dot when a veto is actively in progress.
+  const live = s.state && !["idle","finalized","completed"].includes(s.state);
+  statePill.classList.toggle("active", !!live);
+
+  // Determine which team is "on the clock" — the team whose step is next.
+  const cur = (s.current_step != null && s.sequence && s.current_step < s.sequence.length)
+              ? s.sequence[s.current_step] : null;
+  const activeTeam = (cur && cur.team) || null;
+
+  // Teams panel.
+  const teamCard = (label, name, capName, team, isActive) => {
+    const players = (team || []).map(p => {
+      const isCap = (p.name === capName);
+      return '<li class="player ' + (isCap ? "cap" : "") + '">' +
+        (isCap ? '<span class="cap-badge">★</span>' : '<span class="cap-badge"></span>') +
+        '<span>' + esc(p.name) + '</span>' +
+        (p.steam_id ? '<span class="steam-id">' + esc(p.steam_id) + '</span>' : '') +
+        '</li>';
+    }).join("");
+    return '<div class="team-card ' + (isActive ? "active" : "") + '">' +
+      '<div class="team-hdr">' +
+        '<span class="team-hdr-name">' + esc(name) + '</span>' +
+        (capName ? '<span class="team-hdr-cap">captain <strong>' + esc(capName) + '</strong></span>' : '') +
+      '</div>' +
+      '<ul class="roster">' + (players || '<li class="player">(no roster)</li>') + '</ul>' +
+    '</div>';
+  };
+  document.getElementById("teams").innerHTML =
+    teamCard("A", s.team_a_name, s.captain_a, s.team_a, activeTeam === "A") +
+    teamCard("B", s.team_b_name, s.captain_b, s.team_b, activeTeam === "B");
+
+  // Veto sequence.
+  if (s.sequence && s.sequence.length) {
+    const seq = s.sequence.map((st, i) => {
+      const cls = (st.kind === "ban" ? "ban" : "pick") +
+                  (i === s.current_step ? " current" : "");
+      const mapLabel = st.map ? (' · ' + esc(st.map)) : (i === s.current_step ? ' · ?' : '');
+      return '<span class="seq-step ' + cls + '">' +
+        '<span class="step-n">' + (i + 1) + '</span>' +
+        esc(st.team) + ' ' + esc(st.kind) + mapLabel +
+      '</span>';
+    }).join("");
+    document.getElementById("sequence-holder").innerHTML =
+      '<div class="section">' +
+        '<div class="section-title">Veto sequence</div>' +
+        '<div class="seq-list">' + seq + '</div>' +
+      '</div>';
+  } else {
+    document.getElementById("sequence-holder").innerHTML = "";
+  }
+
+  // Final map list (post-veto) — keep visible even after finalize.
+  if (s.final_maps && s.final_maps.length) {
+    const fin = s.final_maps.map((m, i) => {
+      const isDec = (m === s.decider);
+      return '<span class="seq-step ' + (isDec ? "pick current" : "pick") + '">' +
+        '<span class="step-n">' + (i + 1) + '</span>' +
+        (isDec ? "🏁 " : "") + esc(m) +
+      '</span>';
+    }).join("");
+    document.getElementById("final-holder").innerHTML =
+      '<div class="section">' +
+        '<div class="section-title">Final maplist</div>' +
+        '<div class="seq-list">' + fin + '</div>' +
+      '</div>';
+  } else {
+    document.getElementById("final-holder").innerHTML = "";
+  }
+
+  // Decider hero (only for BO1 finalize) — big celebratory banner.
+  if (s.decider && (s.mode === "BO1" || s.state === "finalized")) {
+    document.getElementById("decider-holder").innerHTML =
+      '<div class="decider">' +
+        '<div class="label">Decider</div>' +
+        '<div class="map-name">' + esc(s.decider) + '</div>' +
+      '</div>';
+  } else {
+    document.getElementById("decider-holder").innerHTML = "";
+  }
+}
+
+// v0.16.14 — prefer SSE for instant updates; fall back to 5s polling
+// if the EventSource fails (corporate proxy stripping SSE, etc.).
+let pollTimer = null;
+async function pollOnce() {
   try {
     const r = await fetch("/api/veto/spectator/state?token=" + encodeURIComponent(TOKEN),
                           {cache:"no-store"});
     if (r.status === 401) { renderErr("Spectator link is invalid or has been rotated."); return; }
-    if (r.status === 404) { renderErr("No active veto session."); return; }
+    if (r.status === 404) { renderErr("No active veto session yet."); return; }
     if (!r.ok) { renderErr("HTTP " + r.status); return; }
     render(await r.json());
   } catch (e) { renderErr("Network: " + e.message); }
 }
-function esc(s) { return String(s == null ? "" : s)
-  .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
-function renderErr(msg) {
-  document.getElementById("content").innerHTML = '<div class="err">' + esc(msg) + '</div>';
-  document.getElementById("sub").textContent = "—";
+function startPolling() {
+  if (pollTimer) return;
+  pollOnce();
+  pollTimer = setInterval(pollOnce, 5000);
 }
-function render(s) {
-  document.getElementById("hdr").textContent = esc(s.team_a_name) + "  vs  " + esc(s.team_b_name);
-  document.getElementById("sub").innerHTML =
-    '<span class="mode-pill">' + esc(s.mode) + '</span> · state: ' + esc(s.state);
-  const c = document.getElementById("content");
-  const players = (team, capName) => '<ul>' + (team || []).map(p =>
-    '<li class="' + (p.name === capName ? 'cap' : '') + '">' +
-    (p.name === capName ? '★ ' : '') + esc(p.name) +
-    (p.steam_id ? '<small>' + esc(p.steam_id) + '</small>' : '') + '</li>'
-  ).join('') + '</ul>';
-  const seq = (s.sequence || []).map((st, i) => {
-    const cls = (st.kind === "ban" ? "ban" : "pick") +
-                (s.decider && st.map === s.decider ? " decider" : "");
-    return '<span class="step ' + cls + '">' + (i+1) + '. ' + esc(st.team) + ' ' +
-           esc(st.kind) + ' · ' + esc(st.map || '?') + '</span>';
-  }).join('');
-  const finalMaps = (s.final_maps || []).map((m, i) => {
-    const isDec = (m === s.decider);
-    return '<span class="step ' + (isDec ? 'decider' : 'pick') + '">' +
-           (isDec ? '🏁 ' : (i+1) + '. ') + esc(m) + '</span>';
-  }).join('');
-  c.innerHTML = '<div class="grid">' +
-    '<div class="row">' +
-      '<div class="card"><h2>' + esc(s.team_a_name) + (s.captain_a ? ' · cap: ' + esc(s.captain_a) : '') + '</h2>' + players(s.team_a, s.captain_a) + '</div>' +
-      '<div class="card"><h2>' + esc(s.team_b_name) + (s.captain_b ? ' · cap: ' + esc(s.captain_b) : '') + '</h2>' + players(s.team_b, s.captain_b) + '</div>' +
-    '</div>' +
-    (seq ? '<div class="card"><h2>Veto sequence</h2><div class="seq">' + seq + '</div></div>' : '') +
-    (finalMaps ? '<div class="card"><h2>Final maplist</h2><div class="seq">' + finalMaps + '</div></div>' : '') +
-  '</div>';
+function startSSE() {
+  let es;
+  try {
+    es = new EventSource("/api/veto/spectator/stream?token=" + encodeURIComponent(TOKEN));
+  } catch (e) { startPolling(); return; }
+  es.onmessage = (ev) => {
+    try { render(JSON.parse(ev.data)); }
+    catch (e) { /* ignore malformed frame */ }
+  };
+  es.onerror = () => {
+    // EventSource auto-reconnects on transient drops; only fall through
+    // to polling if it can't establish a connection at all.
+    if (es.readyState === EventSource.CLOSED) {
+      if (pollTimer == null) startPolling();
+    }
+  };
 }
-tick(); setInterval(tick, 3000);
+// Kick off SSE.  pollOnce primes the page in case SSE is slow to connect.
+pollOnce();
+if ("EventSource" in window) startSSE(); else startPolling();
 // Refresh immediately when the OBS browser source / phone gets focus.
 document.addEventListener("visibilitychange", () => { if (!document.hidden) tick(); });
 </script>
@@ -2188,6 +2495,13 @@ def create_flask(core: AppCore) -> Flask:
     # broadcasts a JSON snapshot to all of them.
     _veto_subs: list[queue.Queue] = []
     _veto_subs_lock = threading.Lock()
+    # v0.16.14 / task #170 — parallel subscriber list for the spectator
+    # SSE stream.  Same pattern but receives the SANITIZED snapshot
+    # (Discord IDs stripped, SteamIDs masked, captain claim tokens never
+    # sent).  Kept separate from _veto_subs so a spectator stream stall
+    # can't backpressure the captain/admin stream.
+    _veto_spec_subs: list[queue.Queue] = []
+    _veto_spec_subs_lock = threading.Lock()
     # v0.12.2 — broadcast observability (audit finding #10 / task #143).
     # Track total events dropped due to subscriber-queue overflow + total
     # broadcast attempts.  Surfaces in the diagnostic snapshot so a real
@@ -2739,6 +3053,25 @@ def create_flask(core: AppCore) -> Flask:
                 q.put_nowait(payload)
             except Exception:
                 drops_this_event += 1
+        # v0.16.14 / task #170 — also broadcast the sanitized snapshot to
+        # spectator subscribers.  Sanitization is cheap (single dict walk)
+        # so we do it on the broadcast thread rather than per-subscriber.
+        # Wrapped in try because veto.build_spectator_snapshot needs a
+        # session and we want to fail-soft if state is mid-mutation.
+        try:
+            sess = core._veto_session
+            if sess is not None:
+                spec = _veto.build_spectator_snapshot(sess)
+                spec_payload = "data: " + __import__("json").dumps(spec) + "\n\n"
+                with _veto_spec_subs_lock:
+                    spec_subs = list(_veto_spec_subs)
+                for q in spec_subs:
+                    try:
+                        q.put_nowait(spec_payload)
+                    except Exception:
+                        drops_this_event += 1
+        except Exception as exc:
+            core.log(f"[veto] spectator broadcast failed: {exc!r}")
         # v0.12.2 — record drops for /api/diag/snapshot visibility.
         with _veto_broadcast_stats_lock:
             _veto_broadcast_stats["events_total"] += 1
@@ -4193,6 +4526,39 @@ def create_flask(core: AppCore) -> Flask:
         # SSE on the SPA broadcast so the operator's own UI updates.
         _veto_broadcast()
         return jsonify({"token": token, "urls": urls, "rotated": rotate})
+
+    # v0.16.14 / task #170 — Spectator SSE stream.  Same shape as
+    # /api/veto/stream but token-gated and sanitized.  HTML page prefers
+    # this over polling; polling stays as a 5s fallback in case SSE is
+    # blocked by a reverse proxy / corporate firewall.
+    @app.route("/api/veto/spectator/stream")
+    def veto_spectator_stream():
+        token = request.args.get("token", "").strip()
+        with core._veto_lock:
+            sess = core._veto_session
+            if sess is None or not token:
+                return jsonify({"error": "no session"}), 404
+            if not secrets.compare_digest(sess.spectator_token or "", token):
+                return jsonify({"error": "invalid spectator token"}), 401
+            initial = _veto.build_spectator_snapshot(sess)
+        q: queue.Queue = queue.Queue(maxsize=128)
+        try:
+            q.put_nowait("data: " + __import__("json").dumps(initial) + "\n\n")
+        except Exception:
+            pass
+        with _veto_spec_subs_lock:
+            _veto_spec_subs.append(q)
+        def gen():
+            try:
+                while True:
+                    try: yield q.get(timeout=25)
+                    except queue.Empty: yield ": keepalive\n\n"
+            finally:
+                with _veto_spec_subs_lock:
+                    if q in _veto_spec_subs: _veto_spec_subs.remove(q)
+        return Response(gen(), mimetype="text/event-stream",
+                        headers={"Cache-Control": "no-cache",
+                                 "X-Accel-Buffering": "no"})
 
     @app.route("/api/veto/spectator/state")
     def veto_spectator_state():

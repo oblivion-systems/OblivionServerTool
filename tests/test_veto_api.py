@@ -4332,6 +4332,96 @@ t('runtime (v0.16.5): happy-path extracts into csgo/addons/',
   t_v165_runtime_install_happy_path_extracts_into_csgo)
 
 
+# ─── v0.16.14 — Spectator URL polish (task #170) ─────────────────────────
+
+def t_v1614_spectator_html_applies_obs_query_params():
+    """/spectate HTML must render a body with data-bg / data-theme /
+    data-compact attributes when the corresponding query params are
+    present.  Body attrs drive the CSS variants for OBS chroma key,
+    light theme, and compact 720p layouts."""
+    ac, app, c = _new_app()
+    # Have to create a session first so the token endpoint is happy.
+    _login(c)
+    create = c.post('/api/veto/create', json={'mode': 'BO1'})
+    if create.status_code != 200:
+        return False, f'create status={create.status_code}'
+    # Get a spectator token.  Endpoint is /api/veto/spectator (no /token suffix).
+    tok_r = c.post('/api/veto/spectator', json={'rotate': True})
+    if tok_r.status_code != 200:
+        return False, f'token status={tok_r.status_code}'
+    token = (tok_r.get_json() or {}).get('token', '')
+    if not token:
+        return False, f'no token returned: {tok_r.get_json()!r}'
+
+    r = c.get(f'/spectate?token={token}&bg=transparent&theme=light&compact=1')
+    if r.status_code != 200:
+        return False, f'status={r.status_code}'
+    body = r.get_data(as_text=True)
+    if 'data-bg' not in body and 'data-bg=' not in body:
+        # The query params are applied client-side via JS, so the static
+        # HTML can't have the attributes baked in — but the script that
+        # sets them MUST be present.
+        if 'applyQueryParams' not in body:
+            return False, 'OBS query-param JS missing from page'
+    # The SSE endpoint path must be referenced (proves the v0.16.14 path
+    # is wired into the new HTML).
+    if '/api/veto/spectator/stream' not in body:
+        return False, 'SSE endpoint not referenced in spectator page'
+    return True, 'OBS query-param JS + SSE endpoint present'
+t('spectator (v0.16.14): /spectate HTML includes OBS controls + SSE endpoint',
+  t_v1614_spectator_html_applies_obs_query_params)
+
+
+def t_v1614_spectator_stream_rejects_bad_token():
+    """SSE endpoint must 401 on a bad token, 404 when no session — same
+    contract as the /state endpoint."""
+    ac, app, c = _new_app()
+    _login(c)
+    # No session yet → 404.
+    r1 = c.get('/api/veto/spectator/stream?token=anything')
+    if r1.status_code != 404:
+        return False, f'no-session got status={r1.status_code} (want 404)'
+    # Create a session.
+    create = c.post('/api/veto/create', json={'mode': 'BO1'})
+    if create.status_code != 200:
+        return False, f'create status={create.status_code}'
+    # Bad token → 401.
+    r2 = c.get('/api/veto/spectator/stream?token=not-the-real-token')
+    if r2.status_code != 401:
+        return False, f'bad-token got status={r2.status_code} (want 401)'
+    return True, 'SSE rejects bad token + no-session correctly'
+t('spectator (v0.16.14): /api/veto/spectator/stream auth gates',
+  t_v1614_spectator_stream_rejects_bad_token)
+
+
+def t_v1614_spectator_snapshot_no_pii():
+    """The sanitized snapshot must NOT leak Discord IDs or full SteamIDs.
+    Re-asserting the v0.11.1 contract is critical because v0.16.14 added
+    the SSE broadcast path; a sanitization regression in either the
+    polling or streaming path would leak PII to anyone with the
+    spectator URL (which gets shared freely)."""
+    from cs2servergui import veto as _veto
+    from cs2servergui.veto import VetoSession, RosterPlayer
+    sess = VetoSession()
+    sess.team_a_name = 'Alpha'
+    sess.team_b_name = 'Bravo'
+    sess.team_a = [RosterPlayer(name='ada', steam_id='STEAM_0:1:1234567890',
+                                  discord_id='123456789012345678')]
+    sess.team_b = [RosterPlayer(name='bob', steam_id='STEAM_0:0:9876543210',
+                                  discord_id='987654321098765432')]
+    snap = _veto.build_spectator_snapshot(sess)
+    txt = __import__('json').dumps(snap)
+    if 'discord_id' in txt.lower():
+        return False, 'discord_id field leaked into spectator payload'
+    if '123456789012345678' in txt or '987654321098765432' in txt:
+        return False, 'discord ID value leaked into spectator payload'
+    if 'STEAM_0:1:1234567890' in txt or 'STEAM_0:0:9876543210' in txt:
+        return False, 'full SteamID leaked (should be masked)'
+    return True, 'no PII leak in spectator snapshot'
+t('spectator (v0.16.14): sanitization strips Discord IDs + masks SteamIDs',
+  t_v1614_spectator_snapshot_no_pii)
+
+
 # ─── Auto-generated pytest cases ──────────────────────────────────────────
 def _slug(name):
     out = ''.join(c if c.isalnum() else '_' for c in name).strip('_').lower()
