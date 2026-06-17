@@ -81,6 +81,11 @@ AUDIT.md
 TONIGHT.md
 FRIDAY_SMOKE.md
 MOBILE_CHECK.md
+# Planning / vision / strategy docs — not direct instructional guides.
+# Kept on the maintainer's disk; not redistributed.
+ROADMAP.md
+TODO.md
+PLATFORM.md
 
 # ── Nested clone (not a submodule) ────────────────────────────────────────────
 OblivionServerTool/
