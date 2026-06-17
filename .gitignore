@@ -65,6 +65,9 @@ downloads/
 # ── Claude Code session data ──────────────────────────────────────────────────
 .claude/
 
+# ── Local marketing assets — demos, mockups, draft posts (never publish) ────
+Marketing/
+
 # ── Private working docs (kept on disk, not in public repo) ──────────────────
 # Internal financial planning + revenue projections (pricing strategy is
 # not something every user needs to read on a tournament-tool repo).
