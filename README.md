@@ -290,6 +290,38 @@ Built with Python + Flask + pywebview (Edge WebView2). Ships as a single `.exe` 
 
 ---
 
+## Screenshots
+
+<a href="docs/screenshots/02-status-running.jpg"><img src="docs/screenshots/02-status-running.jpg" alt="Status page with server running, live match scoreline + connected-player count + tickrate, server controls and mode picker beneath" width="100%" /></a>
+
+<table>
+  <tr>
+    <td width="50%"><a href="docs/screenshots/05-plugins-packs.jpg"><img src="docs/screenshots/05-plugins-packs.jpg" alt="Plugins tab — Quick-Apply Packs strip (Competitive 5v5, Warcraft Night, Casual Deathmatch, Retakes, Vanilla Competitive)" width="100%" /></a><br/><sub><strong>One-click tournament setup.</strong> Quick-Apply Packs stage a mode + map + plugin set in a single click.</sub></td>
+    <td width="50%"><a href="docs/screenshots/06-veto-roster.jpg"><img src="docs/screenshots/06-veto-roster.jpg" alt="Veto roster stage — Team Alpha vs Team Bravo, 10 player slots with SteamID + Discord ID columns" width="100%" /></a><br/><sub><strong>Tournament workflow.</strong> Roster → random 5+5 → captain election → live veto board on captains' phones.</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><a href="docs/screenshots/09-veto-board.jpg"><img src="docs/screenshots/09-veto-board.jpg" alt="Veto board mid-flight — Team Alpha BAN step 1 of 6, map pool of 7 visible" width="100%" /></a><br/><sub><strong>Map veto.</strong> BO1 / BO3 / BO5 with single-use captain links, QR codes for phone scanning, MatchZy handoff at finale.</sub></td>
+    <td width="50%"><a href="docs/screenshots/11-plugins-readiness.jpg"><img src="docs/screenshots/11-plugins-readiness.jpg" alt="Plugins tab — Server Readiness panel (CS2 install, MetaMod, CSS, gameinfo.gi) + Quick-Apply Packs grid" width="100%" /></a><br/><sub><strong>Server readiness.</strong> Continuous check of the four things that make a plugin actually load — green if and only if it works.</sub></td>
+  </tr>
+</table>
+
+<details>
+<summary>More screenshots</summary>
+
+- [Status — Getting Started card](docs/screenshots/01-status-getting-started.jpg) — first-run guidance, 2-of-3 done
+- [Maps — official 10](docs/screenshots/03-maps-official.jpg)
+- [Maps — workshop browser](docs/screenshots/04-maps-workshop.jpg)
+- [Veto — random 5+5 team draw](docs/screenshots/07-veto-teams.jpg)
+- [Veto — captain vote stage](docs/screenshots/08-veto-vote.jpg)
+- [Match history](docs/screenshots/10-match-history.jpg)
+- [Logs page](docs/screenshots/12-logs.jpg) — searchable in-memory ring buffer
+- [Appearance & Settings](docs/screenshots/13-appearance.jpg) — theme, accent, keybinds
+- [Config — Setup wizard](docs/screenshots/14-config-setup.jpg)
+
+</details>
+
+---
+
 ## What it does
 
 Running a CS2 dedicated server normally means juggling command-line arguments, steamcmd windows, and RCON clients. Oblivion Server Tool puts everything in one place — start the server, manage players, change maps, download workshop content, and administer remotely from your phone, all from a single window.
