@@ -575,4 +575,19 @@ Versions below `1.0.0` are considered work-in-progress.
 
 ## License
 
-MIT
+- **Pre-v1.0** — MIT (everything currently in this repo)
+- **v1.0+** — Business Source License 1.1, reverting to Apache 2.0 on
+  the Change Date (~4 years post-release).  See [LICENSE.md](LICENSE.md)
+  for the rationale + parameters under review.
+
+The relicense is driven by task #89 (v1.0 launch posture); MIT
+remains in force on every commit before the BSL-effective tag, and
+forks made under MIT keep MIT rights to that snapshot.
+
+## Donations
+
+Once v1.0 ships, GitHub Sponsors + Ko-fi will be the two links — see
+[DONATIONS.md](DONATIONS.md) for the platform comparison + decisions
+still pending.  No links live yet; soliciting money for an MIT-only
+project that can't legally restrict SaaS clones is a bad look — we
+wait for the license + posture flip together.
