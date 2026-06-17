@@ -2384,8 +2384,7 @@ class AppCore:
         sites in this file keep working unchanged.  New code should
         call ``self.driver.install_root(self)`` directly.  Each call
         site migrates over time; when the last one switches over the
-        shim disappears.  See PLATFORM.md § 5 for the migration
-        pattern.
+        shim disappears.
         """
         return self.driver.install_root(self)
 

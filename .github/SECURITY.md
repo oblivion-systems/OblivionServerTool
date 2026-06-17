@@ -32,8 +32,8 @@ This app handles the following sensitive material:
 
 The app itself is a Windows desktop application listening on `127.0.0.1`
 and on the LAN IP only.  No remote attack surface exists unless the
-operator deliberately exposes it (e.g. via a Cloudflare quick tunnel
-documented in `TONIGHT.md`).
+operator deliberately exposes it (e.g. via a Cloudflare quick tunnel,
+as documented in the README's Off-LAN access section).
 
 The threat-model walkthrough lives in **[TROUBLESHOOTING.md](../TROUBLESHOOTING.md)**
 under "Security: PIN auth + remote exposure".

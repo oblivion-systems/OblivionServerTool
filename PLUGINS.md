@@ -141,4 +141,4 @@ Drop the folder, restart Oblivion Server Tool, open the **Plugins** tab → your
 
 For now: zip up the folder (the `plugin.json` + the `addons/` and `cfg/` subdirs) and share the zip. The recipient drops it into their `%APPDATA%\Oblivion Server Tool\plugins\` and restarts.
 
-A future slice will add an in-app **Browse Community Plugins** tab fetching from a separate `OblivionPluginRegistry` repo, with one-click install. Until that ships, manual distribution is the path.
+For shareable distribution, the **Browse Community Plugins** tab on the Plugins page fetches a curated catalog from the separate [`OblivionPluginRegistry`](https://github.com/oblivion-systems/OblivionPluginRegistry) repo (24h TTL, SHA-256 verified, Zip-Slip protected) — operators can one-click install your plugin from there once it's been added to that catalog. To get a plugin into the registry, open a PR against `OblivionPluginRegistry/catalog.json`.

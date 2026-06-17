@@ -1,9 +1,5 @@
 # DONATIONS — Oblivion Server Tool
 
-> **Defaults filled** for v1.0 launch — review each section, then
-> uncomment the badges in [README.md](README.md#donations) and ship
-> `.github/FUNDING.yml`.
-
 This app is donation-funded.  No ads, no paid tiers, no telemetry.  If
 you host a recurring tournament on it and want to help keep it going,
 the options below are how.

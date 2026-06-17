@@ -3847,7 +3847,7 @@ def t_v161_teams_crud_happy_path():
     _config.TEAMS_FILE = _os.path.join(test_dir, 'oblivion_teams.json')
     try:
         saved = team_profiles.save_team(
-            team_id=None, name='Cobras', tag='COB',
+            team_id=None, name='Team Alpha', tag='ALPHA',
             players=[
                 {'name': 'P1', 'steam_id': 'STEAM_1', 'discord_id': ''},
                 {'name': 'P2', 'steam_id': '',         'discord_id': '12345'},
@@ -3859,14 +3859,14 @@ def t_v161_teams_crud_happy_path():
         if 'id' not in saved or len(saved['players']) != 5:
             return False, f'unexpected save result: {saved!r}'
         listed = team_profiles.list_teams()
-        if len(listed) != 1 or listed[0]['name'] != 'Cobras':
+        if len(listed) != 1 or listed[0]['name'] != 'Team Alpha':
             return False, f'list mismatch: {listed!r}'
         updated = team_profiles.save_team(
-            team_id=saved['id'], name='Cobras Renamed', tag='COB',
+            team_id=saved['id'], name='Team Alpha Renamed', tag='ALPHA',
             players=saved['players'])
         if updated['id'] != saved['id']:
             return False, f'update changed id: {saved["id"]} → {updated["id"]}'
-        if updated['name'] != 'Cobras Renamed':
+        if updated['name'] != 'Team Alpha Renamed':
             return False, f'update did not apply name change'
         if not team_profiles.delete_team(saved['id']):
             return False, 'delete returned False'
@@ -4002,7 +4002,7 @@ def t_v163_template_crud_happy_path():
     _cfg.TEMPLATES_FILE = _os.path.join(test_dir, 'oblivion_templates.json')
     try:
         saved = template_store.save_template(
-            template_id=None, name='Cobras Wed',
+            template_id=None, name='Friday Pugs',
             payload={'mode': '5v5', 'map': 'de_dust2',
                      'pack_id': 'competitive_5v5',
                      'discord_veto_channel_id': '12345',
@@ -4016,10 +4016,10 @@ def t_v163_template_crud_happy_path():
             return False, 'allowlist failed to strip non-allowlist key'
         # Update path
         updated = template_store.save_template(
-            template_id=saved['id'], name='Cobras Wed (renamed)',
+            template_id=saved['id'], name='Friday Pugs (renamed)',
             payload={'mode': '3v3', 'pack_id': 'casual_deathmatch'},
         )
-        if updated['id'] != saved['id'] or updated['name'] != 'Cobras Wed (renamed)':
+        if updated['id'] != saved['id'] or updated['name'] != 'Friday Pugs (renamed)':
             return False, f'update mismatch: {updated!r}'
         if updated['payload'].get('mode') != '3v3':
             return False, f'update did not change mode: {updated!r}'

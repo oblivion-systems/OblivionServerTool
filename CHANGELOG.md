@@ -2486,7 +2486,7 @@ button that gave them an error toast.  Fixed:
 ### Public URL override (the bigger online-primary fix)
 v0.10.0's "Public" captain URL was built from `core.public_ip + port`,
 which assumes port-forward.  Operators using Cloudflare tunnel (the
-recommended remote-access path per [TONIGHT.md](TONIGHT.md)) had a URL
+recommended remote-access path per TONIGHT.md) had a URL
 that couldn't reach their captains at all.
 
 * New config field `public_share_url` in the new "Veto / Match Setup"
@@ -3410,8 +3410,8 @@ commands CS2 otherwise blocks). The tool now:
 
 ### 📚 Documentation
 
-- Added [BIBLE.md](BIBLE.md), [ROADMAP.md](ROADMAP.md), [TODO.md](TODO.md), and
-  [INGEST.md](INGEST.md) — project vision, phased plan, working checklist, and a structural
+- Added BIBLE.md, ROADMAP.md, TODO.md, and
+  INGEST.md — project vision, phased plan, working checklist, and a structural
   index of the source tree.
 - README plugin table reflects B3none Retakes and the full per-mode plugin set.
 

@@ -9,8 +9,8 @@ Operators running recurring tournaments save a complete bundle under a name:
   - auto-move + round-summaries toggles
   - optional team profile IDs from team_profiles.py for one-click roster load
 
-Click Apply → everything stages.  "Cobras Wednesdays", "Friday Warcraft Night",
-"Saturday Sandbox" become single-click selections.
+Click Apply → everything stages.  "Friday Night Pugs", "Saturday Warcraft Night",
+"Sunday Practice" become single-click selections.
 
 Persistence mirrors team_profiles.py: atomic JSON file in %APPDATA% via
 tmp + os.replace; stable UUIDs per entry; created_at / updated_at metadata.

@@ -1151,7 +1151,7 @@ def create_flask(core: AppCore) -> Flask:
             return False, 409, {"error": f"A veto session is active (state={sess.state}). Reset or complete it first."}
         # csgo/ existence is what actually matters for deploy_plugins() —
         # don't gate on server_dir separately since drivers compute csgo/
-        # differently per game (PLATFORM.md § driver.install_root).
+        # differently per game (each GameDriver.install_root impl).
         if not os.path.isdir(core._csgo_dir() or ""):
             return False, 503, {"error": "CS2 install not found. Set the server directory in Config first."}
         return True, 200, None
@@ -3485,8 +3485,8 @@ def create_flask(core: AppCore) -> Flask:
         # 2. Edit through three simulated stages.  Embed edits use the
         # same code path as Layer 1C live updates during real matches.
         stages = [
-            ("Teams formed", "Cobras (5) vs Vipers (5)"),
-            ("Map veto in progress", "Cobras ban de_overpass · Vipers ban de_nuke · Cobras pick de_inferno"),
+            ("Teams formed", "Team Alpha (5) vs Team Bravo (5)"),
+            ("Map veto in progress", "Team Alpha ban de_overpass · Team Bravo ban de_nuke · Team Alpha pick de_inferno"),
             ("Veto complete",
              "Final maps: de_inferno, de_mirage, de_anubis (decider)\n"
              "Connect: connect 192.168.0.103:27015"),

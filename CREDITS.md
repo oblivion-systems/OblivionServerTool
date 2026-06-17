@@ -47,10 +47,11 @@ release unless explicitly noted otherwise.
 | 1v1 / 2v2 | **KitsuneMenu** | Kxnrl / Kitsune team | upstream not currently locatable on GitHub | unknown (please open an issue if you are the author) | Menu library K4-Arenas depends on.  Bundled binary is the upstream release pinned at the time K4-Arenas was packaged. |
 | Jailbreak | **CSS-Jailbreak** | EdgeGamers community | <https://github.com/edgegamers/Jailbreak> | GPL-3.0 | T-vs-CT prison roleplay.  Upstream is community-maintained at edgegamers/Jailbreak; per the upstream README, the binary was built for EdgeGamers infrastructure and may need configuration adjustments for independent deployment. |
 | Warcraft | **WarcraftPlugin** | **NightFuryPrime** (fork of Wngui/CS2WarcraftMod) | <https://github.com/NightFuryPrime/CS2-Warcraft-Plugin> | GPL-3.0 (inherited from original Wngui/CS2WarcraftMod) | **Custom-patched build by Oblivion** — see "Modifications" below.  NightFuryPrime's fork does not ship a LICENSE file; the GPL-3.0 terms inherit from the original at <https://github.com/Wngui/CS2WarcraftMod>. |
-| Warcraft | **ModelPrecacher** | Oblivion (this project) | this repo | BSL 1.1 / MIT (per ROADMAP) | Original work to precache class models server-side. |
-| Zombie modes | **CS2Fixes** | Source2ZE | <https://github.com/Source2ZE/CS2Fixes> | GPLv3 | Engine fixes that unlock ZombieMod-style gameplay. |
-| Zombie Escape | **MultiAddonManager** | Source2ZE | <https://github.com/Source2ZE/MultiAddonManager> | GPLv3 | Mounts the ZombieReborn workshop pack. |
-| Zombie Escape | **ZombieReborn** | Source2ZE | <https://github.com/Source2ZE/ZombieReborn> | GPLv3 | Loaded as a workshop addon, not bundled directly. |
+| Warcraft | **ModelPrecacher** | Oblivion (this project) | this repo | BSL 1.1 (pre-v1.0 commits remain MIT per [LICENSE.md](LICENSE.md)) | Original work to precache class models server-side. |
+| Zombie modes | **CS2Fixes** | Source2ZE | <https://github.com/Source2ZE/CS2Fixes> | GPL-3.0 | Engine fixes that unlock ZombieMod-style gameplay. |
+| Zombie modes | **ZombieMod** | JayCroghan (fork of Source2ZE/CS2Fixes) | <https://github.com/JayCroghan/ZombieMod> | GPL-3.0 (inherited from CS2Fixes) | The actual zombie-game variant bundled with the app — JayCroghan's content fork on top of CS2Fixes.  Attribution to JayCroghan is in `cs2servergui/plugins/zombie/README.txt` and `LICENSE.md`. |
+| Zombie Escape | **MultiAddonManager** | Source2ZE | <https://github.com/Source2ZE/MultiAddonManager> | GPL-3.0 | Mounts the ZombieReborn workshop pack. |
+| Zombie Escape | **ZombieReborn** | Source2ZE | <https://github.com/Source2ZE/ZombieReborn> | GPL-3.0 | Loaded as a workshop addon, not bundled directly. |
 
 **License confidence — please verify before relying.**  I have made a
 best-effort match between plugin and upstream, but I'm not a lawyer and
@@ -85,8 +86,8 @@ with the following patches on top of NightFuryPrime's v4.1.1 base:
 <https://github.com/oblivion-systems/CS2-Warcraft-Plugin> on the
 `oblivion-patches-4.1.1` branch, against NightFuryPrime's upstream
 commit `fda4fa3` ("Hotfix 4.1.1 #2").  Each patch is also documented
-in this repo's `CHANGELOG.md` (tasks #38–43, #144, v0.16.13) and in
-the fork's commit message.  If NightFuryPrime prefers a different
+in this repo's [`CHANGELOG.md`](CHANGELOG.md) under the v0.16.13 entry,
+and in the fork's commit message.  If NightFuryPrime prefers a different
 distribution arrangement — patches merged upstream, attribution moved
 entirely off this repo, the fork taken down, or any other ask —
 please open an issue and we will accommodate.
@@ -156,6 +157,28 @@ Tools used during build:
   redistributable per Microsoft's distribution agreement.  Downloaded
   on demand by `tools/fetch_webview2.ps1`; never modified, never
   re-signed.
+
+---
+
+## Visual assets + typefaces
+
+- **Counter-Strike 2 map thumbnails** (`cs2servergui/static/images/map_thumbs/*`)
+  — screenshots of official CS2 maps © Valve Corporation, used to
+  visually identify each map in the picker.  Valve permits fan use of
+  CS2 assets under their content usage rules; if Valve prefer a
+  different arrangement, open an issue and we will swap or remove
+  them.
+- **App logo / emblem / favicon** (`emblem.ico`, `cs2servergui/static/favicon.*`,
+  `cs2servergui/static/images/{emblem,logo}.png`) — original artwork
+  produced for this project by the maintainer.  BSL 1.1 / Apache 2.0
+  per the repo LICENSE.
+- **Typefaces** — the SPA loads two open-licensed fonts from Google
+  Fonts CDN:
+  - **Space Grotesk** — © Florian Karsten, SIL Open Font License 1.1
+  - **JetBrains Mono** — © JetBrains s.r.o., SIL Open Font License 1.1
+
+  Neither typeface is bundled in this repo; both are fetched on demand
+  from `fonts.googleapis.com` at runtime.
 
 ---
 

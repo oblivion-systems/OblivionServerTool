@@ -187,7 +187,7 @@ MATCH_HISTORY_FILE = os.path.join(_APP_DIR, "oblivion_matches.json")
 MATCH_HISTORY_KEEP = 10        # how many recent matches to retain on disk
 
 # v0.16.1 / task #160 — Persistent team profiles.  Operators running recurring
-# tournaments save rosters under a name (e.g. "Cobras") + reuse across sessions
+# tournaments save rosters under a name (e.g. "Team Alpha") + reuse across sessions
 # instead of re-pasting 10 SteamIDs every week.  Each entry is a dict:
 #   {name, players: [{name, steam_id, discord_id}], created_at, updated_at}
 # Stored as a top-level array.

@@ -202,12 +202,12 @@ log text.  Or save to file and grep there.
 
 ---
 
-## Security: PIN auth + remote exposure (v0.16.0)
+## Security: PIN auth + remote exposure
 
 Oblivion's web panel uses a **4-8 digit PIN** for authentication.  That's
 fine for the **default LAN-only deployment**, but the threat model
-changes when you expose the panel to the public internet (the
-Cloudflare-tunnel flow in `TONIGHT.md`).
+changes when you expose the panel to the public internet via a
+Cloudflare quick tunnel or port-forward.
 
 ### What the PIN protects
 
@@ -247,8 +247,8 @@ Cloudflare-tunnel flow in `TONIGHT.md`).
 - Stop the tunnel when not in use (`Ctrl+C` on the `cloudflared` window).
   An unused public endpoint is an attack surface that adds zero value.
 
-**For v1.0 we may add** TOTP / magic-link / OAuth for the admin role —
-see TODO #166.  Until then, the above is the honest read.
+**Post-v1.0 we may add** TOTP / magic-link / OAuth for the admin role.
+Until then, the above is the honest read.
 
 ### What the diagnostic snapshot shows about your security posture
 

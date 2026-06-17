@@ -1,41 +1,17 @@
 # VETO — Map Veto / Match Setup
 
-> Quick-reference spec for the in-app **Veto** feature.
-> Status: **v0.11.1 RELEASED 2026-06-02.**
+> Reference spec for the in-app **Veto** feature: a guided match-setup
+> flow that ends in a CS2 map veto and writes the chosen rules + map
+> pool straight into MatchZy via RCON.
 >
-> Release history:
-> - **v0.10.0** — core veto state machine + MatchZy handoff (atomic match-config
->   write + `matchzy_loadmatch` RCON).
-> - **v0.10.0.1** — hotfix for QR bundling (`--collect-all segno` + multi-Python
->   `python -m PyInstaller`).
-> - **v0.10.1** — Captain Ready button (replaces the broken admin-only button
->   captains couldn't use), Public Share URL override (Cloudflare tunnel base
->   for captain links), Copy-for-Discord (pre-addressed paste-ready DM),
->   `pull-latest.bat` self-service updater.
-> - **v0.10.2** — online-primary audit closure: mobile-responsive SPA, captain
->   finale embeds the `connect <ip>` command + Copy buttons, mode pre-flight
->   on `/api/veto/finale`, role pill in header, unified `_oblivionSSE` transport
->   with re-arm, captain limbo screen, **rematch button** (preserves teams),
->   **last 10 matches persisted** to `oblivion_matches.json`, **Discord webhook**
->   on finale.
-> - **v0.11.0** — optional Discord bot (Layer 1): auto-DM captain links,
->   voice-channel roster pull, live veto embed (see [DISCORD.md](DISCORD.md)).
-> - **v0.11.1** — polish sweep: **📜 match history modal**, **"Go Online" banner**,
->   **bulk paste** (Name/SteamID/DiscordID columns), **roster presets**
->   (localStorage), **MatchZy cvar editor** (local-only), **📺 spectator URL**
->   (read-only `/spectate` page, token-gated, PII-stripped),
->   **Discord test buttons** (Test Embed / Test DM), real-device
->   [MOBILE_CHECK.md](MOBILE_CHECK.md) checklist.
->
-> Implementation lives in [`cs2servergui/veto.py`](cs2servergui/veto.py) (state
-> machine, now ~800 lines), the `/api/veto/*` routes in
+> Implementation lives in [`cs2servergui/veto.py`](cs2servergui/veto.py)
+> (state machine), the `/api/veto/*` routes in
 > [`cs2servergui/web.py`](cs2servergui/web.py), and the Veto tab in
 > [`cs2servergui/static/js/app.js`](cs2servergui/static/js/app.js) +
 > [`cs2servergui/static/css/app.css`](cs2servergui/static/css/app.css).
-> The original browser-only prototype is preserved at
-> [`_prototypes/veto.html`](_prototypes/veto.html) for reference.  See also:
-> [CHANGELOG.md](CHANGELOG.md), [ROADMAP.md](ROADMAP.md), [TODO.md](TODO.md),
-> [INGEST.md](INGEST.md) → "API — map veto" + "Frontend — Veto tab".
+> See also: [CHANGELOG.md](CHANGELOG.md) for what landed when, and
+> [DISCORD.md](DISCORD.md) for the optional bot integration that DMs
+> captain links + posts the live veto embed.
 
 ---
 

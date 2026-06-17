@@ -58,8 +58,9 @@ WHAT'S CS2-SPECIFIC (always in the driver)
 - ``cs2.exe -dedicated`` process detection
 - ``de_dust2`` / ``de_mirage`` / etc. map pool
 
-See ROADMAP.md "Phase 2 — Driver abstraction" and PLATFORM.md (TBD)
-for the longer narrative.
+The driver abstraction is the seam that lets us add a second game
+(TF2, L4D2, etc.) by subclassing ``GameDriver`` rather than rewriting
+the app.  ``CS2Driver`` is the concrete implementation today.
 """
 from .base import GameDriver
 from .cs2 import CS2Driver

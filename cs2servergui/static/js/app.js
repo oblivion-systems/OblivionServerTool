@@ -3232,7 +3232,7 @@ async function _openTemplatesModal() {
         <div class="field" style="margin-top:8px">
           <label>Template name</label>
           <input class="input" id="tpl-save-name" type="text" maxlength="40"
-                 placeholder="e.g. Cobras Wednesdays">
+                 placeholder="e.g. Friday Night Pugs">
         </div>
         <div class="field">
           <label>Description <span class="text-sub">(optional)</span></label>
@@ -4066,7 +4066,7 @@ pages['readiness'] = async function() {
  * v0.16.2 / task #161 — dedicated page for past tournaments.  The modal
  * version (👈 _vetoOpenHistoryModal) stays as a quick peek from the Veto
  * header; this page is the full surface with search/filter so operators
- * can dig into "what did Cobras play last month?". */
+ * can dig into "what did Team A play last month?". */
 pages['history'] = async function() {
   const root = el('content');
   if (typeof window._historySearch === 'undefined') window._historySearch = '';
@@ -4443,7 +4443,7 @@ async function _openTeamProfilesModal() {
         <div class="field" style="margin-top:8px">
           <label>Team name</label>
           <input class="input" id="tp-save-name" type="text" maxlength="40"
-                 placeholder="e.g. Cobras Wednesdays">
+                 placeholder="e.g. Team Alpha">
         </div>
         <div class="field">
           <label>Tag <span class="text-sub">(optional, short label)</span></label>
@@ -6443,7 +6443,7 @@ pages['config'] = async function() {
                    placeholder="https://random-words.trycloudflare.com">
             <small class="text-sub text-sm" style="display:block;margin-top:6px;line-height:1.5">
               When set, captain join URLs use this base instead of <code>http://&lt;public_ip&gt;:&lt;port&gt;</code>.
-              Paste your Cloudflare tunnel URL here (see <a href="https://github.com/oblivion-systems/OblivionServerTool/blob/master/TONIGHT.md">TONIGHT.md</a> for the tunnel setup).
+              Paste your Cloudflare tunnel URL here — run <code>cloudflared tunnel --url http://localhost:5050</code> and copy the printed HTTPS URL.
               Leave blank to fall back to <code>public_ip + port</code> (which requires a port-forward).
             </small>
           </div>

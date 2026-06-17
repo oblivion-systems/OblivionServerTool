@@ -2,11 +2,9 @@
 
 This folder bundles **Warcraft Plugin (Oblivion patched build)** by **NightFuryPrime — forked from Wngui/CS2WarcraftMod**.
 
-- **Upstream**: https://github.com/NightFuryPrime/CS2-Warcraft-Plugin (the bundled DLL is built from Oblivion's patched fork at https://github.com/oblivion-systems/CS2-Warcraft-Plugin, branch `oblivion-patches-4.1.1`)
-- **License**: `GPL-3.0` (full text below)
-- **Modifications**: None — the binary in this folder is the upstream author's release, redistributed unchanged. (Source modifications for any plugin we patch are documented in `CREDITS.md` at the repo root.)
-
-**Modifications**: this binary is **not** an unchanged upstream release — see `CREDITS.md` at the repo root for the full list of 9 main-thread-safety + UX patches applied on top of NightFuryPrime's v4.1.1 base.  The patched source is published at https://github.com/oblivion-systems/CS2-Warcraft-Plugin on branch `oblivion-patches-4.1.1`.  The license text below is GPL-3.0 from the original `Wngui/CS2WarcraftMod` (NightFuryPrime's fork does not ship a LICENSE file but inherits Wngui's licensing).
+- **Upstream**: https://github.com/NightFuryPrime/CS2-Warcraft-Plugin
+- **License**: `GPL-3.0` (full text below, inherited from the original `Wngui/CS2WarcraftMod`; NightFuryPrime's fork does not ship a LICENSE file)
+- **Modifications**: **yes — this binary is NOT an unchanged upstream release.**  Oblivion applies 9 main-thread-safety + UX patches on top of NightFuryPrime's v4.1.1 base.  Full patch list in [`CREDITS.md`](../../../../CREDITS.md) at the repo root.  Patched source is published at https://github.com/oblivion-systems/CS2-Warcraft-Plugin on branch `oblivion-patches-4.1.1`.
 
 ---
 

@@ -1,20 +1,19 @@
 # LICENSE — Oblivion Server Tool
 
-> **Defaults filled** — review every line marked **`[REVIEW]`** before
-> the v1.0 tag.  Once accepted, this file's body should be replaced with
-> the canonical Business Source License 1.1 text from
-> <https://mariadb.com/bsl11/>, with the Parameters block below
-> substituted in.  The reference-only form below is legally weaker than
-> embedding the full BSL text; do that swap before going public.
+The full **Business Source License 1.1** text governs this work and is
+available at <https://mariadb.com/bsl11/>.  The Parameters block below
+substitutes into that text; in the event of any conflict between this
+file and the canonical BSL 1.1 text, the canonical text governs.
 
 ---
 
 ## Business Source License 1.1 — Parameters
 
 ```
-Licensor:               Jacques van Niekerk                            [REVIEW]
-Licensed Work:          Oblivion Server Tool, version 1.0.0 and later  [REVIEW]
-                        (commits prior to the v1.0 tag remain under MIT
+Licensor:               Jacques van Niekerk
+
+Licensed Work:          Oblivion Server Tool, version 1.0.0 and later.
+                        (Commits prior to the v1.0 tag remain under MIT
                         per the README — no retroactive relicensing.)
 
 Additional Use Grant:   You may use the Licensed Work for any
@@ -26,12 +25,12 @@ Additional Use Grant:   You may use the Licensed Work for any
                         more than three production CS2 servers, or
                         offering the Licensed Work as a hosted service
                         to third parties, requires a commercial license
-                        from the Licensor.                              [REVIEW]
+                        from the Licensor.
 
-Change Date:            2030-06-17                                      [REVIEW]
+Change Date:            2030-06-17
                         (Four years from the v1.0 tag date.)
 
-Change License:         Apache License, Version 2.0                     [REVIEW]
+Change License:         Apache License, Version 2.0
                         (On the Change Date, this work auto-relicenses
                         under Apache 2.0 in perpetuity.)
 ```

@@ -2,7 +2,7 @@
 cs2servergui/team_profiles.py — Persistent team rosters (task #160).
 
 Operators running recurring tournaments save rosters under a name (e.g.
-"Cobras") + reuse across sessions instead of re-pasting 10 SteamIDs every
+"Team Alpha") + reuse across sessions instead of re-pasting 10 SteamIDs every
 week.  Same persistence pattern as MATCH_HISTORY_FILE — JSON file in
 %APPDATA%, atomic writes via tmp + os.replace.
 
@@ -10,8 +10,8 @@ Schema (oblivion_teams.json):
     [
       {
         "id":         "<uuid>",
-        "name":       "Cobras",
-        "tag":        "COB",          (optional, displayed on roster card)
+        "name":       "Team Alpha",
+        "tag":        "ALPHA",          (optional, displayed on roster card)
         "players":    [
             {"name": "...", "steam_id": "...", "discord_id": "..."},
             ...

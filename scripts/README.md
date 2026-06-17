@@ -70,7 +70,8 @@ everything is already explicitly pinned.  Lag spike eliminated.
 
 ### Related future work
 
-In v0.12 the plan is to bake this into Oblivion itself — a Config
-toggle that auto-pins the server process when Oblivion starts it.
-For now, the standalone scripts work and don't require any Python
-changes.  See [PLAN.md](../PLAN.md).
+Oblivion's Config tab includes an in-app **Gaming Mode** toggle
+(v0.12) that wraps these scripts — one click for ON / OFF / Status.
+The standalone scripts here remain available for operators who prefer
+running them outside the app (e.g. from a desktop shortcut or scheduled
+task).

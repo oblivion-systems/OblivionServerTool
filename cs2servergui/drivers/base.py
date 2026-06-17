@@ -94,8 +94,7 @@ class GameDriver(abc.ABC):
 
     # ─── Filesystem layout ─────────────────────────────────────────
     # The dedicated-server install root.  All driver path operations
-    # (addons, cfg, logs) are children of this.  v0.13.1 — first
-    # migration target.  See PLATFORM.md § 5.
+    # (addons, cfg, logs) are children of this.
 
     @abc.abstractmethod
     def install_root(self, core: "AppCore") -> str:

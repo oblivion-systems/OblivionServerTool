@@ -1,12 +1,20 @@
-# License — CS2Fixes
+# License — CS2Fixes + ZombieMod
 
-This folder bundles **CS2Fixes** by **Source2ZE**.
+This folder bundles two related works that share GPL-3.0 licensing:
 
+### CS2Fixes
+- **Author**: **Source2ZE**
 - **Upstream**: https://github.com/Source2ZE/CS2Fixes
 - **License**: `GPL-3.0` (full text below)
-- **Modifications**: None — the binary in this folder is the upstream author's release, redistributed unchanged. (Source modifications for any plugin we patch are documented in `CREDITS.md` at the repo root.)
+- **Modifications**: None — the bundled binaries are the upstream author's release, redistributed unchanged.
 
-Bundled with **ZombieMod** (community fork — see `README.txt` inside the plugin folder for the specific fork attribution).
+### ZombieMod (the actual zombie-game variant bundled here)
+- **Author**: **JayCroghan** — a community content fork of Source2ZE/CS2Fixes
+- **Upstream**: https://github.com/JayCroghan/ZombieMod (see `README.txt` inside this plugin folder for the specific fork version)
+- **License**: `GPL-3.0` (inherited from CS2Fixes; full text below)
+- **Modifications**: None — the bundled binaries are the upstream author's release, redistributed unchanged.
+
+If either author would prefer a different attribution arrangement, please open an issue at the OblivionServerTool repo and we will accommodate.
 
 ---
 
