@@ -73,6 +73,14 @@ MONETIZATION.md
 # Post-mortems contain operator-side detail (timing, location, who was
 # online) that isn't useful in a public repo.
 RETROSPECTIVE_*.md
+# Internal working docs — not direct instructional guides for users.
+# Kept on the maintainer's disk; not redistributed.
+INGEST.md
+BIBLE.md
+AUDIT.md
+TONIGHT.md
+FRIDAY_SMOKE.md
+MOBILE_CHECK.md
 
 # ── Nested clone (not a submodule) ────────────────────────────────────────────
 OblivionServerTool/
