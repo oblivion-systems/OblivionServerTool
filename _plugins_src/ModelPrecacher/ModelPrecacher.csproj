@@ -8,8 +8,11 @@
     <AssemblyName>ModelPrecacher</AssemblyName>
     <RootNamespace>ModelPrecacher</RootNamespace>
     <!-- Build against the server's own CounterStrikeSharp assemblies so the
-         plugin is ABI-identical to the installed runtime (CSS 1.0.368). -->
-    <CssApi>D:\steamcmd\steamapps\common\Counter-Strike Global Offensive\game\csgo\addons\counterstrikesharp\api</CssApi>
+         plugin is ABI-identical to the installed runtime (CSS 1.0.368).
+         Override CssApi at build time via MSBuild property or env-var, e.g.:
+           dotnet build /p:CssApi="C:\path\to\counterstrikesharp\api"
+         Default below assumes steamcmd installed at C:\steamcmd. -->
+    <CssApi Condition="'$(CssApi)' == ''">C:\steamcmd\steamapps\common\Counter-Strike Global Offensive\game\csgo\addons\counterstrikesharp\api</CssApi>
   </PropertyGroup>
 
   <ItemGroup>

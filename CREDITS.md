@@ -38,15 +38,15 @@ release unless explicitly noted otherwise.
 | Mode(s) | Plugin | Author | Upstream | License | Notes |
 |---|---|---|---|---|---|
 | 5v5 / 4v4 / 3v3 / Practice | **MatchZy** | shobhit-pathak | <https://github.com/shobhit-pathak/MatchZy> | MIT | Competitive match controller.  Bundled binary is the upstream release. |
-| Deathmatch | **CounterStrikeSharp-Deathmatch** | shobhit-pathak | <https://github.com/shobhit-pathak/CS2-Deathmatch> | MIT | Instant respawn + spawn protection. |
-| Retakes | **CS2 Retakes** | B3none | <https://github.com/B3none/cs2-retakes> | MIT | Bombsite retake controller. |
+| Deathmatch | **DeathmatchPlugin** | shobhit-pathak (Charles Thomson) | <https://github.com/shobhit-pathak/DeathmatchPlugin> | MIT | Instant respawn + spawn protection.  Originally published as `CS2-Deathmatch`. |
+| Retakes | **CS2 Retakes** | B3none | <https://github.com/B3none/cs2-retakes> | GPL-3.0 | Bombsite retake controller. |
 | Retakes | **RetakesAllocator** | yonilerner | <https://github.com/yonilerner/cs2-retakes-allocator> | MIT | Loadout allocator for Retakes. |
-| 1v1 / 2v2 | **K4-Arenas** | K4ryuu | <https://github.com/K4ryuu/CS2-K4-Arenas> | MIT (verify) | Duel ladder with elo + queue. |
-| 1v1 / 2v2 | **K4-Arenas-Bots** | K4ryuu | <https://github.com/K4ryuu/CS2-K4-Arenas-Bots> | MIT (verify) | Bot adapter for K4-Arenas. |
-| 1v1 / 2v2 | **K4-ArenaSharedApi** | K4ryuu | <https://github.com/K4ryuu/CS2-K4-Arenas> | MIT (verify) | Shared API surface. |
-| 1v1 / 2v2 | **KitsuneMenu** | Kxnrl-rk-Kitsune team | <https://github.com/Kxnrl-rk/CS2-KitsuneMenu> (verify) | MIT (verify) | Menu library K4-Arenas depends on. |
-| Jailbreak | **CSS-Jailbreak** | community (multi-author) | <https://github.com/edgegamers/Jailbreak> (verify the upstream actually used) | varies | T-vs-CT prison roleplay.  Upstream authorship is community-maintained; if a specific maintainer wants attribution please open an issue. |
-| Warcraft | **WarcraftPlugin** | **NightFuryPrime** | <https://github.com/NightFuryPrime/CS2-Warcraft-Plugin> | MIT (verify) | **Custom-patched build by Oblivion.**  See "Modifications" below. |
+| 1v1 / 2v2 | **K4-Arenas** | K4ryuu | <https://github.com/K4ryuu/K4-Arenas-SwiftlyS2> (originally `CS2-K4-Arenas`; upstream archived 2025) | GPL-3.0 | Duel ladder with elo + queue.  The bundled binary is the CSS-targeting build from the original upstream; the maintainer has since archived it and moved development to the SwiftlyS2 branch. |
+| 1v1 / 2v2 | **K4-Arenas-Bots** | K4ryuu | upstream archived/removed | GPL-3.0 (inferred — author's other plugins are GPL-3.0) | Bot adapter for K4-Arenas.  Bundled binary preserved from prior K4ryuu release.  If author prefers different attribution, please open an issue. |
+| 1v1 / 2v2 | **K4-ArenaSharedApi** | K4ryuu | upstream archived/removed | GPL-3.0 (inferred) | Shared API surface for the Arenas plugin family. |
+| 1v1 / 2v2 | **KitsuneMenu** | Kxnrl / Kitsune team | upstream not currently locatable on GitHub | unknown (please open an issue if you are the author) | Menu library K4-Arenas depends on.  Bundled binary is the upstream release pinned at the time K4-Arenas was packaged. |
+| Jailbreak | **CSS-Jailbreak** | EdgeGamers community | <https://github.com/edgegamers/Jailbreak> | GPL-3.0 | T-vs-CT prison roleplay.  Upstream is community-maintained at edgegamers/Jailbreak; per the upstream README, the binary was built for EdgeGamers infrastructure and may need configuration adjustments for independent deployment. |
+| Warcraft | **WarcraftPlugin** | **NightFuryPrime** (fork of Wngui/CS2WarcraftMod) | <https://github.com/NightFuryPrime/CS2-Warcraft-Plugin> | GPL-3.0 (inherited from original Wngui/CS2WarcraftMod) | **Custom-patched build by Oblivion** — see "Modifications" below.  NightFuryPrime's fork does not ship a LICENSE file; the GPL-3.0 terms inherit from the original at <https://github.com/Wngui/CS2WarcraftMod>. |
 | Warcraft | **ModelPrecacher** | Oblivion (this project) | this repo | BSL 1.1 / MIT (per ROADMAP) | Original work to precache class models server-side. |
 | Zombie modes | **CS2Fixes** | Source2ZE | <https://github.com/Source2ZE/CS2Fixes> | GPLv3 | Engine fixes that unlock ZombieMod-style gameplay. |
 | Zombie Escape | **MultiAddonManager** | Source2ZE | <https://github.com/Source2ZE/MultiAddonManager> | GPLv3 | Mounts the ZombieReborn workshop pack. |

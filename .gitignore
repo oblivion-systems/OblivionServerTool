@@ -65,6 +65,15 @@ downloads/
 # ── Claude Code session data ──────────────────────────────────────────────────
 .claude/
 
+# ── Private working docs (kept on disk, not in public repo) ──────────────────
+# Internal financial planning + revenue projections (pricing strategy is
+# not something every user needs to read on a tournament-tool repo).
+PLAN.md
+MONETIZATION.md
+# Post-mortems contain operator-side detail (timing, location, who was
+# online) that isn't useful in a public repo.
+RETROSPECTIVE_*.md
+
 # ── Nested clone (not a submodule) ────────────────────────────────────────────
 OblivionServerTool/
 
@@ -74,3 +83,7 @@ OblivionServerTool/
 # .NET build artifacts for bundled plugin source (keep the .cs/.csproj, not bin/obj)
 _plugins_src/**/bin/
 _plugins_src/**/obj/
+
+# Debug symbols for bundled third-party plugin binaries (PDBs are build output,
+# not redistributable artefacts; 44 MB cs2fixes.pdb was accidentally tracked once).
+*.pdb

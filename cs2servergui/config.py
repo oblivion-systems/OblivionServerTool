@@ -127,8 +127,11 @@ APP_REPO         = "oblivion-systems/OblivionServerTool"
 APP_RELEASES_URL = f"https://github.com/{APP_REPO}/releases/latest"
 APP_API_URL      = f"https://api.github.com/repos/{APP_REPO}/releases/latest"
 
-# Defaults — overridden at runtime by AppCore.update_server_dir()
-CS2_SERVER_DIR = r"D:\steamcmd"
+# Defaults — overridden at runtime by AppCore.update_server_dir() from
+# whatever the operator configured during first-run setup. The empty
+# string here is just a placeholder so the os.path.join() calls below
+# don't error at import time; nothing should read these values directly.
+CS2_SERVER_DIR = ""
 STEAMCMD_PATH  = os.path.join(CS2_SERVER_DIR, "steamcmd.exe")
 CS2_PATH       = os.path.join(CS2_SERVER_DIR, "steamapps", "common",
                                "Counter-Strike Global Offensive",
