@@ -35,6 +35,9 @@ registry_cache.json
 # v0.16.5 WebView2 bootstrapper — downloaded artefact, not source.
 # tools/fetch_webview2.ps1 re-downloads on demand before each installer build.
 MicrosoftEdgeWebview2Setup.exe
+# Raw screenshot intake + intermediate redaction work-folder.
+# Public-facing prepared shots live in docs/screenshots/ instead.
+screenshots/
 # v0.11.0 — operator may stash a Discord bot token / webhook URL locally
 # before pasting into the SPA.  Keep secrets out of git regardless of name.
 bot_token.txt
