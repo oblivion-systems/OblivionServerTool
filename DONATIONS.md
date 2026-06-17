@@ -23,7 +23,7 @@ fee; recurring is 5%.
 Both accept any amount.  There are no tiers, no perks, no obligations.
 
 ```
-GitHub Sponsors:  https://github.com/sponsors/jacquesvniekerk-eng
+GitHub Sponsors:  https://github.com/sponsors/jacquesvn
 Ko-fi:            https://ko-fi.com/jacquesvniekerk
 ```
 

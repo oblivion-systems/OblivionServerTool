@@ -14,7 +14,7 @@ REM ==========================================================================
 setlocal
 pushd "%~dp0"
 
-set "REPO=jacquesvniekerk-eng/OblivionServerTool"
+set "REPO=oblivion-tech/OblivionServerTool"
 set "EXE_NAME=OblivionServerTool.exe"
 set "DEST_DIR=dist"
 set "DEST=%DEST_DIR%\%EXE_NAME%"
