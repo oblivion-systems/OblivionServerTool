@@ -8,20 +8,18 @@ the options below are how.
 
 ## Where to send money
 
-**GitHub Sponsors** is the primary channel — recurring or one-off,
-0% platform fee, and the "Sponsor" button appears right on the repo
-page so the discovery cost is zero for anyone who finds the project.
-
-**Ko-fi** is the fallback for people who don't have a GitHub account
-or who prefer a gaming-adjacent tip jar.  One-off donations are 0%
-fee; recurring is 5%.
-
-Both accept any amount.  There are no tiers, no perks, no obligations.
+**Ko-fi** is the active channel — gaming-adjacent tip jar, one-off
+donations are 0% fee, recurring is 5%.  Any amount works; no tiers,
+no perks, no obligations.
 
 ```
-GitHub Sponsors:  https://github.com/sponsors/jacquesvn
-Ko-fi:            https://ko-fi.com/jacquesvn
+Ko-fi:  https://ko-fi.com/jacquesvn
 ```
+
+**GitHub Sponsors** will be added once the maintainer's Sponsors
+profile is approved (the application takes a few business days; the
+"Sponsor" button on the repo page will light up automatically once
+it's live and the entry is re-added to `.github/FUNDING.yml`).
 
 ---
 
@@ -63,10 +61,11 @@ listed publicly, both platforms support anonymous donation modes.
 
 ## Activation status
 
-**GitHub Sponsors (`@jacquesvn`)** — live now that the personal
-account is registered and the Sponsors program is enabled.  The badge
-in the README is wired up; the "Sponsor" button on the repo page works.
+**Ko-fi (`@jacquesvn`)** — live.  Donations are open.
 
-**Ko-fi (`@jacquesvn`)** — live.  Same handle as GitHub Sponsors for
-cross-platform discoverability.  Badge wired into the README; donations
-are open.
+**GitHub Sponsors (`@jacquesvn`)** — application in progress.  The
+profile is registered but GitHub's Sponsors program approval is still
+pending (it's a separate review that takes a few business days and
+requires bank + tax details).  The README's Sponsors badge and the
+`.github/FUNDING.yml` `github:` entry will be re-enabled once the
+approval lands.

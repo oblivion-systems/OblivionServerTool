@@ -1,6 +1,9 @@
 # Surfaces the "Sponsor" button on the repo page.
 # See DONATIONS.md at the repo root for what donations fund + how
 # allocations are made.
+#
+# Note: GitHub Sponsors will be added here once the maintainer's
+# Sponsors profile is approved by GitHub.  Until then, Ko-fi is the
+# active channel.
 
-github: [jacquesvn]
 ko_fi: jacquesvn

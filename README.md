@@ -3,7 +3,6 @@
 A desktop application for managing a **Counter-Strike 2 dedicated server** on Windows.  
 Built with Python + Flask + pywebview (Edge WebView2). Ships as a single `.exe` with an optional installer.
 
-[![GitHub Sponsors](https://img.shields.io/github/sponsors/jacquesvn?label=Sponsor&logo=GitHub)](https://github.com/sponsors/jacquesvn)
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-Tip-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/jacquesvn)
 [![License: BSL 1.1](https://img.shields.io/badge/license-BSL_1.1-purple)](LICENSE.md)
 [![Tests](https://img.shields.io/badge/tests-300%2F300-brightgreen)](tests/)
@@ -348,10 +347,11 @@ day.
 This app is donation-funded — no ads, no paid tiers, no telemetry.  If
 you'd like to support development:
 
-- **[GitHub Sponsors @jacquesvn](https://github.com/sponsors/jacquesvn)**
-  — recurring or one-off, 0% platform fee
 - **[Ko-fi @jacquesvn](https://ko-fi.com/jacquesvn)** — gaming-adjacent
   tip jar; one-off 0% fee, recurring 5%
+- **GitHub Sponsors** — application is in approval with GitHub; the
+  Sponsor button will light up on this page automatically once it's
+  enrolled
 
 See [DONATIONS.md](DONATIONS.md) for the platform comparison and how
 donations are allocated.  No tiers, no perks, no obligations.
