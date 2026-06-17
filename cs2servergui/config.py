@@ -66,7 +66,7 @@ DEPOTDL_RELEASE_URL = (
 # ── App self-update ────────────────────────────────────────────────────────────
 # Bump APP_VERSION before each release tag, then push and create a GitHub
 # release tagged "v<APP_VERSION>" — all connected clients will see the update.
-APP_VERSION      = "0.16.15"
+APP_VERSION      = "1.0.0"
 
 # ── Plugin registry (v0.15 slice 2) ────────────────────────────────────────────
 # Where the community plugin catalog lives.  Repo: OblivionPluginRegistry.
