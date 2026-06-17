@@ -7,11 +7,52 @@
 
 ---
 
-## Where We Are — v0.15.2 (released 2026-06-12)
+## Where We Are — v0.16.13 (released 2026-06-17)
 
-**Forty-one releases.**  The **"easy for anyone to add new plugins"**
-thread is complete (closes tasks #90 + #91 + #92).  The Plugin Manager
-now covers the whole arc:
+**Forty-nine releases.**  Two big arcs closed since v0.15.2:
+
+### v0.16 — first-run UX audit (task #157)
+- **v0.16.0–v0.16.3** prep waves: config backup/restore, persistent team
+  profiles, dedicated History + Pre-flight + Logs pages, tournament
+  templates, in-app demo browser, Discord mock-veto smoke button.
+- **v0.16.4 hotfix** — `+ip 0.0.0.0` so RCON binds on all interfaces
+  even on hosts with Hyper-V / WSL virtual NICs.
+- **v0.16.5 / item #163** — auto-install MetaMod + CSS runtime.  No more
+  "find the addons/ folder and extract it yourself".
+- **v0.16.5 / item A** — Edge WebView2 bundled into the installer
+  (`#if FileExists` + `tools/fetch_webview2.ps1`).  Fresh Windows 10
+  friends no longer get a blank window on first launch.
+- **v0.16.6** — Getting Started card on Status page, primary "Run
+  Discord setup check" button, actionable "→ Fix" buttons on every
+  Pre-flight row.
+- **v0.16.7** — URL hotfix: the v0.16.5 hardcoded MetaMod + CSS URLs
+  were 404 against current upstream.  Refreshed to today's known-good
+  builds; operator override via `oblivion_config.json` still available.
+- **v0.16.8** — 5 self-review fixes (1 Critical — `_gameinfo_patch_metamod`
+  doesn't exist; the AttributeError was swallowed and `ok:true` returned;
+  a fresh-install friend would have watched MetaMod silently never load).
+- **v0.16.9 / v0.16.10** — button contrast pass after user feedback that
+  unhovered Apply buttons looked greyed-out; pack/template Apply buttons
+  promoted to filled accent CTAs.
+- **v0.16.11 / v0.16.12** — Demolition default-map list: CS:GO mini-maps
+  removed from CS2 official rotation; hybrid list now puts workshop ports
+  first (Shorttrain / Bank / Sugarcane / St. Marc) with CS2 official maps
+  as fallback.
+
+### v0.16.13 — Warcraft plugin main-thread safety
+Source-side adversarial re-audit of the patched WarcraftPlugin against
+CSS v1.0.369 caught 4 bugs not covered by the June 1 patches:
+Critical chat-command Dictionary corruption (silent freeze killer
+under tournament chat-spam), dispatcher backpressure on map start,
+`NativeAPI.GetEntityFromIndex` racing on a worker thread during
+tournament fill, and a dormant MySQL block in the menu manager.
+Source patched + DLL rebuilt + bundle refreshed.
+
+---
+
+## v0.15.2 milestone — "easy for anyone to add new plugins"
+
+The Plugin Manager now covers the whole arc:
 - **Self-describing plugins** via `plugin.json` (v0.15.0) — drop a folder
   into `%APPDATA%`, restart, plugin appears in the Library.
 - **Community registry** (v0.15.1) — every running .exe fetches

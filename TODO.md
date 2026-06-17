@@ -16,27 +16,34 @@
 |-------|-------|--------|
 | 0 | Groundwork | ✅ done |
 | 1 | Stabilise the foundation | ✅ done |
-| 2 | Verify every mode | 🟡 in flight — most modes proven in real sessions; **#29 stress test** still pending |
-| 3 | Harden & secure | 🟢 mostly done (Plugin Manager hardening added v0.14 + v0.15 audit fixes) |
-| 4 | Test & release engineering | 🟢 mostly done (276/276 tests; build pipeline + signing still open) |
-| 5 | Polish & 1.0 launch | 🟡 in flight — config restructure done; **#89 v1.0 posture** (BSL + donations + flip repo public) remains |
+| 2 | Verify every mode | ✅ done — all modes proven; #29 stress test deferred (source-side adversarial review in v0.16.13 replaced it for now) |
+| 3 | Harden & secure | ✅ done (Plugin Manager v0.14/v0.15 audit fixes; v0.16.8 self-review fixed 5 more bugs; v0.16.13 4 Warcraft main-thread fixes) |
+| 4 | Test & release engineering | 🟢 mostly done (294/294 tests; WebView2 bundling + build.bat wired in v0.16.5/v0.16.8; signing still open) |
+| 5 | Polish & 1.0 launch | 🟡 in flight — first-run UX audit (#157) shipped across v0.16.5→v0.16.13; **#89 v1.0 posture** (BSL + donations + flip repo public) remains |
 
-**Current release:** v0.15.2 (2026-06-12) — **276/276 tests green**.
-Forty-one releases.  v0.15.x closes the **"easy for anyone to add new
-plugins"** thread — self-describing manifests (`plugin.json`), community
-registry fetch + one-click install, uninstall + reload + URL install +
-update notifications + search.  The
+**Current release:** v0.16.13 (2026-06-17) — **294/294 tests green**.
+Forty-nine releases.  v0.16.x closes the **"fresh operator to running
+tournament"** thread — one-click MetaMod + CSS runtime install, Edge
+WebView2 bundled into the installer (Win10 friends no longer hit a
+blank window), Getting Started card on the Status page, one-click
+Discord setup check, actionable "→ Fix" buttons on every Pre-flight
+row, plus 4 Warcraft plugin main-thread safety fixes from a source-
+side adversarial audit (Dictionary corruption killer, dispatcher
+backpressure on map start, entity-list race on tournament fill, MySQL
+block in menu manager).  The
 [OblivionPluginRegistry](https://github.com/jacquesvniekerk-eng/OblivionPluginRegistry)
 repo is live; every running .exe trusts its `catalog.json` over a 24h
-cache with HTTPS + SHA-256 + Zip-Slip protection.  The Plugin Manager
-itself is complete pending operator feedback.
+cache with HTTPS + SHA-256 + Zip-Slip protection.
 
 The path to v1.0 is now:
-1. **#29 — stress test** (opportunistic, needs a real lobby).
-2. **#89 — v1.0 launch posture** — BSL license file, donations link in
+1. **#89 — v1.0 launch posture** — BSL license file, donations link in
    README, flip repo public.
-3. **#93/#94 — Linux + `platform.py` seam** for cross-OS support.
-4. **#87/#88 — TF2 / FiveM drivers** to prove the strangler-fig template
+2. **#170 — Spectator URL polish** — last v1.0 wishlist item still
+   pending.
+3. **#159 — Discord bot resilience soak** — workflow-driven (gateway
+   503s, perm changes, token rotation).
+4. **#93/#94 — Linux + `platform.py` seam** for cross-OS support.
+5. **#87/#88 — TF2 / FiveM drivers** to prove the strangler-fig template
    beyond CS2.
 5. **v1.0** — BSL license, donations live, repo public, 2-3 games supported.
 
