@@ -81,13 +81,14 @@ with the following patches on top of NightFuryPrime's v4.1.1 base:
 | `Plugin.Unload` hardening | Timers + queues cleared deterministically |
 | Localised English help text | `lang/en.json` updated to list all `!class !skills !shop !ult !info !reset` |
 
-**The source for these patches lives at `D:\warcraft-build\src\` on
-the maintainer's machine and is NOT in this repository.**  Source will
-be published once it has been rebased onto NightFuryPrime's latest
-release; until then, every patch is documented in this repo's
-`CHANGELOG.md` (tasks #38–43, #144, v0.16.13).  If NightFuryPrime
-prefers a different distribution arrangement — patches as a separate
-fork, attribution moved entirely off this repo, or any other ask —
+**The source for these patches is published as a fork at**
+<https://github.com/oblivion-systems/CS2-Warcraft-Plugin> on the
+`oblivion-patches-4.1.1` branch, against NightFuryPrime's upstream
+commit `fda4fa3` ("Hotfix 4.1.1 #2").  Each patch is also documented
+in this repo's `CHANGELOG.md` (tasks #38–43, #144, v0.16.13) and in
+the fork's commit message.  If NightFuryPrime prefers a different
+distribution arrangement — patches merged upstream, attribution moved
+entirely off this repo, the fork taken down, or any other ask —
 please open an issue and we will accommodate.
 
 The bundled DLL ships under the same license as NightFuryPrime's
