@@ -72,6 +72,10 @@ rights to that snapshot — no retroactive relicensing.
 
 ## Commercial licensing
 
-For production use exceeding the Additional Use Grant, or to negotiate
-a different license entirely, contact the Licensor via the GitHub
-profile linked from the [project README](README.md).
+For production use exceeding the Additional Use Grant, to operate the
+Licensed Work as a hosted service to third parties, or to negotiate a
+different license entirely, please reach out via **[GitHub Discussions](https://github.com/oblivion-systems/OblivionServerTool/discussions)**
+on the project repo.  Pick the *Business inquiries* category if one
+exists, otherwise *General* — either is fine.  Discussions can be
+moved to a private DM after the first ping if your team prefers not to
+negotiate in public.  Expect a reply within a few business days.

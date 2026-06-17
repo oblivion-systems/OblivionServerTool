@@ -355,3 +355,16 @@ you'd like to support development:
 
 See [DONATIONS.md](DONATIONS.md) for the platform comparison and how
 donations are allocated.  No tiers, no perks, no obligations.
+
+## Commercial licensing & partnerships
+
+Organisations that want to operate more than the three production CS2
+servers per organisation granted by the BSL Additional Use Grant, run
+this as a hosted service to third parties, or explore custom development
+/ integration / co-branding work, are welcome to reach out.
+
+Open a thread under **[GitHub Discussions](https://github.com/oblivion-systems/OblivionServerTool/discussions)**
+(category: *Business inquiries* once it exists, otherwise *General* —
+either is fine).  Discussions can be moved to a private DM after the
+first ping if your team prefers not to negotiate in public.  Expect a
+reply within a few business days.
