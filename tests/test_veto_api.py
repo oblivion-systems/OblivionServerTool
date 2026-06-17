@@ -4422,6 +4422,82 @@ t('spectator (v0.16.14): sanitization strips Discord IDs + masks SteamIDs',
   t_v1614_spectator_snapshot_no_pii)
 
 
+# ─── v0.16.15 — Discord bot resilience (task #159) ────────────────────────
+
+def t_v1615_classify_forbidden_logs_warning_with_perms_hint():
+    """`_classify_discord_op_error` must promote `discord.Forbidden` to
+    a WARNING log line that names the actionable fix (check perms)."""
+    import logging, io
+    from cs2servergui import discord_bot as _bot
+    if _bot.discord is None:
+        return True, 'discord lib not importable in this test env — skip'
+    # Capture log lines into an in-memory stream.
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setLevel(logging.DEBUG)
+    _bot._log.addHandler(handler)
+    try:
+        # Construct a minimal Forbidden-like (real Forbidden needs a
+        # Response; subclassing is enough for isinstance checks).
+        class _FakeForbidden(_bot.discord.Forbidden):
+            def __init__(self): pass
+            def __str__(self): return 'fake-forbidden'
+        _bot._classify_discord_op_error('test_op', 'channel-id', _FakeForbidden())
+        out = stream.getvalue()
+        if 'FORBIDDEN' not in out:
+            return False, f'no FORBIDDEN tag in log: {out!r}'
+        if 'permission' not in out.lower():
+            return False, f'no actionable hint: {out!r}'
+        return True, 'Forbidden classified with perm hint'
+    finally:
+        _bot._log.removeHandler(handler)
+t('discord (v0.16.15): Forbidden classified with actionable hint',
+  t_v1615_classify_forbidden_logs_warning_with_perms_hint)
+
+
+def t_v1615_classify_unexpected_logs_at_error():
+    """A non-Discord exception (e.g. our submit returns a TimeoutError
+    from concurrent.futures) must be logged at ERROR with traceback so
+    we can debug it post-mortem.  Important because the bare-except in
+    the old code was silently downgrading these to INFO."""
+    import logging, io
+    from cs2servergui import discord_bot as _bot
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setLevel(logging.DEBUG)
+    _bot._log.addHandler(handler)
+    try:
+        try: raise TimeoutError('mock timeout')
+        except Exception as exc:
+            _bot._classify_discord_op_error('test_op', 'x', exc)
+        out = stream.getvalue()
+        if 'unexpected' not in out:
+            return False, f'no "unexpected" tag: {out!r}'
+        # Traceback should be present (logger.exception includes it).
+        if 'Traceback' not in out and 'TimeoutError' not in out:
+            return False, f'no traceback info: {out!r}'
+        return True, 'unexpected exception logged with traceback'
+    finally:
+        _bot._log.removeHandler(handler)
+t('discord (v0.16.15): unexpected errors logged at ERROR with traceback',
+  t_v1615_classify_unexpected_logs_at_error)
+
+
+def t_v1615_bot_edit_embed_timeout_widened():
+    """The edit-embed timeout was bumped 8s → 12s in v0.16.15 so
+    discord.py's internal rate-limit retry has room to complete on a
+    fast-veto burst before our outer timer fires.  Regression guard."""
+    import inspect
+    from cs2servergui import discord_bot as _bot
+    sig = inspect.signature(_bot.bot_edit_embed)
+    tmo = sig.parameters['timeout'].default
+    if tmo < 10.0:
+        return False, f'bot_edit_embed timeout too tight: {tmo}'
+    return True, f'bot_edit_embed timeout = {tmo}s'
+t('discord (v0.16.15): bot_edit_embed timeout >= 10s for rate-limit headroom',
+  t_v1615_bot_edit_embed_timeout_widened)
+
+
 # ─── Auto-generated pytest cases ──────────────────────────────────────────
 def _slug(name):
     out = ''.join(c if c.isalnum() else '_' for c in name).strip('_').lower()

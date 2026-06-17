@@ -463,6 +463,40 @@ def bot_status() -> dict:
 # result with a short timeout.  Failure modes are returned as bool/None;
 # we never raise from these (Flask layer handles the fallback path).
 
+def _classify_discord_op_error(label: str, target: str, exc: BaseException) -> None:
+    """v0.16.15 / task #159 — promote Discord-op failures from `info`
+    swallow-everything to typed `warning`/`error` so the operator can
+    actually tell what's wrong from the log drawer.  Categories:
+
+      - discord.Forbidden     → bot lacks permission in this guild/channel.
+                                Actionable (fix perms in Discord server).
+      - discord.NotFound      → channel/message/user deleted (or wrong ID).
+                                Actionable (re-pick channel in Config).
+      - discord.HTTPException → other API failures, incl. rate limits that
+                                outlived discord.py's internal retry.  The
+                                .status code goes into the log so 429s are
+                                self-evident.
+      - Anything else         → unexpected; logged at ERROR with traceback.
+    """
+    if discord is not None:
+        if isinstance(exc, discord.Forbidden):
+            _log.warning("[discord] %s(%s) FORBIDDEN — bot lacks permission "
+                         "(check role/channel perms in Discord): %s",
+                         label, target, exc)
+            return
+        if isinstance(exc, discord.NotFound):
+            _log.warning("[discord] %s(%s) NOT FOUND — channel/message/user "
+                         "deleted or ID wrong: %s", label, target, exc)
+            return
+        if isinstance(exc, discord.HTTPException):
+            status = getattr(exc, "status", "?")
+            _log.warning("[discord] %s(%s) HTTP %s: %s",
+                         label, target, status, exc)
+            return
+    # Unexpected — full traceback so we can debug it later.
+    _log.exception("[discord] %s(%s) unexpected: %s", label, target, exc)
+
+
 def bot_dm_user(discord_id: str, message: str, *, timeout: float = 8.0) -> bool:
     """Send a DM to a Discord user by ID.  Returns True on success, False
     on any failure (bot not running, ID invalid, DM blocked, network).
@@ -482,7 +516,10 @@ def bot_dm_user(discord_id: str, message: str, *, timeout: float = 8.0) -> bool:
         fut = _runner.submit(_do())
         return bool(fut.result(timeout=timeout))
     except Exception as exc:
-        _log.info("bot_dm_user(%s) failed: %s", discord_id, exc)
+        # v0.16.15 — classified logging.  Operator can see the Forbidden
+        # case in the log drawer and know to grant the bot DM perms /
+        # advise the captain to enable DMs from server members.
+        _classify_discord_op_error("bot_dm_user", str(discord_id), exc)
         return False
 
 
@@ -780,12 +817,15 @@ def bot_post_embed(channel_id: str, embed_dict: dict, *,
         fut = _runner.submit(_do())
         return fut.result(timeout=timeout)
     except Exception as exc:
-        _log.info("bot_post_embed(%s) failed: %s", channel_id, exc)
+        # v0.16.15 — classified logging (Forbidden vs NotFound vs HTTP vs
+        # unexpected) so the operator knows whether to fix perms, re-pick
+        # the channel, or just wait out a rate limit.
+        _classify_discord_op_error("bot_post_embed", str(channel_id), exc)
         return None
 
 
 def bot_edit_embed(channel_id: str, message_id: str, embed_dict: dict, *,
-                   timeout: float = 8.0) -> bool:
+                   timeout: float = 12.0) -> bool:
     """Replace the embed on a previously-posted message.  Used by the
     live veto embed (Layer 1C) — one message per session, edited on
     each ban/pick.  Returns True on success."""
@@ -808,5 +848,11 @@ def bot_edit_embed(channel_id: str, message_id: str, embed_dict: dict, *,
         fut = _runner.submit(_do())
         return bool(fut.result(timeout=timeout))
     except Exception as exc:
-        _log.info("bot_edit_embed(%s/%s) failed: %s", channel_id, message_id, exc)
+        # v0.16.15 — bumped timeout 8s → 12s above so discord.py's internal
+        # rate-limit retry can complete on a fast-veto burst before our
+        # outer timer fires.  Classified logging surfaces the actual cause
+        # (Forbidden vs NotFound vs HTTP 429 vs network) instead of
+        # everything looking like a generic "failed".
+        _classify_discord_op_error(
+            "bot_edit_embed", f"{channel_id}/{message_id}", exc)
         return False
