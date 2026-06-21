@@ -2,6 +2,36 @@
 
 ---
 
+## v1.0.1 — 2026-06-21 (GSLT visibility — public hosting clarity)
+
+Public-hosting failure mode that burned a real tournament evening: with
+`+sv_lan 0` set but no GSLT, the server launches fine, accepts LAN
+clients fine, and looks healthy on every diagnostic surface — but
+Valve's auth backend silently rejects external client handshakes.  Zero
+log entries on either side.
+
+The SPA also lied about it: the Connect Popover badge read
+"Public · GSLT verified" whenever `public_ip` was detected, regardless
+of whether a GSLT was actually configured.
+
+Fixes:
+- **New `/api/state.gslt_set` field** — boolean, lets the SPA know the
+  truth without exposing the token to remote sessions.
+- **Truthful Connect Popover badge** — three states now: `GSLT set`
+  (green), `GSLT MISSING — remote clients will fail` (red), or
+  `detecting…` while waiting for public IP detection.
+- **Pre-Start modal warning** — Status-page Start button and preset
+  Start both surface a popup when GSLT is empty: explanation, link to
+  Steam's GSLT page (App ID 730), and an explicit "Start anyway (LAN
+  only)" escape hatch for operators who don't need public reach.
+- **`_preflight_checks` log warning** — same situation surfaces in the
+  log drawer too, with the GSLT registration URL inline.
+
+Files: [web.py](cs2servergui/web.py) (+1 field), [app.js](cs2servergui/static/js/app.js) (badge + `withGsltGuard` + 2 wire-up sites),
+[app.css](cs2servergui/static/css/app.css) (+1 line), [core.py](cs2servergui/core.py) (+5-line preflight warning).
+
+---
+
 ## v0.16.15 — 2026-06-17 (Discord bot resilience hardening, #159)
 
 Closes the last v1.0 "must" item.  When Discord wobbles mid-veto, the

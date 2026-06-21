@@ -1417,6 +1417,18 @@ class AppCore:
         if not os.path.isfile(_config.DEPOTDL_PATH):
             self.log(f"[preflight] ⚠  DepotDownloader missing: {_config.DEPOTDL_PATH} "
                      "(will auto-download on first workshop request)")
+        # v1.0.1: GSLT absent.  Launch args always include +sv_lan 0, so this
+        # server is being told to accept non-LAN clients — but without
+        # +sv_setsteamaccount, Valve's auth backend silently rejects external
+        # handshakes.  LAN players connect fine; remote players see "Connection
+        # failed" or a silent timeout with no log entry on either side.  Don't
+        # gate the start (an operator may legitimately want LAN-only) — just
+        # surface the situation in the log drawer so it's visible.
+        if not self.gslt_token:
+            self.log("[preflight] ⚠  No GSLT token — server is set to non-LAN "
+                     "but external clients will be silently rejected by Valve's "
+                     "auth backend. LAN clients will work. Get a GSLT at "
+                     "https://steamcommunity.com/dev/managegameservers (App ID 730).")
         return (not errors), errors
 
     def start_server(self, map_name: str, mode: str,

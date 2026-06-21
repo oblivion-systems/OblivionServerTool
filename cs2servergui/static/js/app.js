@@ -1270,10 +1270,12 @@ function buildStatusPage() {
     const mode = el('mode-select').value;
     if (!map) { toast('Select a map first', 'var(--bad)'); return; }
     withModeMatchGuard(mode, map, ws, (useMode) => {
-      (async () => {
-        try { await api.start(map, useMode, ws); toast('Server starting…', 'var(--ok)'); }
-        catch (e) { toast(e.message, 'var(--bad)'); }
-      })();
+      withGsltGuard(() => {
+        (async () => {
+          try { await api.start(map, useMode, ws); toast('Server starting…', 'var(--ok)'); }
+          catch (e) { toast(e.message, 'var(--bad)'); }
+        })();
+      });
     });
   });
   el('sp-restart-btn').addEventListener('click', doQuickRestart);
@@ -2168,8 +2170,16 @@ async function loadPresetCards() {
             await api.map(preset.map, preset.mode, isWorkshop);
             toast(`Loaded "${name}" — changing map…`);
           } else {
-            await api.start(preset.map, preset.mode, isWorkshop);
-            toast(`Loaded "${name}" — starting server…`);
+            // v1.0.1: guard preset-driven Starts with the same GSLT warning
+            // the main Start button fires — operator may load a preset they
+            // saved months ago and click straight through without realising
+            // the config no longer has a GSLT.
+            withGsltGuard(async () => {
+              try {
+                await api.start(preset.map, preset.mode, isWorkshop);
+                toast(`Loaded "${name}" — starting server…`);
+              } catch (err) { toast(err.message, 'var(--bad)'); }
+            });
           }
         } catch (err) { toast(err.message, 'var(--bad)'); }
       });
@@ -2282,6 +2292,31 @@ function withModeMatchGuard(mode, mapId, isWorkshop, run) {
     () => { setModeControl(target); run(target); },   // primary: switch & load
     `Switch to ${esc(target)} & load`,
     { secondaryLabel: 'Load anyway', onSecondary: () => run(mode) });
+}
+
+// v1.0.1: pre-flight modal for operators about to start the server without
+// a GSLT (Steam Game Server Login Token).  Without one, Valve's auth backend
+// silently rejects external client handshakes — LAN clients connect fine but
+// remote players fail with no error logged on either side.  Burned a full
+// evening of triage before this guard existed.  The modal is informational,
+// not gating — the operator can still proceed if they want LAN-only.
+function withGsltGuard(run) {
+  if (state.server && state.server.gslt_set) { run(); return; }
+  modal('Public hosting requires a GSLT',
+    `<p style="color:var(--text-3);font-size:.95rem;line-height:1.5">` +
+    `Your server has no <strong>Game Server Login Token (GSLT)</strong> set. ` +
+    `It will start fine and accept connections from your <strong>local network</strong>, ` +
+    `but <strong>remote players will silently fail to connect</strong> — Valve's auth ` +
+    `backend rejects external handshakes when <code>+sv_setsteamaccount</code> isn't passed.` +
+    `<br><br>` +
+    `Get a free GSLT at <a href="https://steamcommunity.com/dev/managegameservers" ` +
+    `target="_blank" rel="noopener" style="color:var(--accent)">steamcommunity.com/dev/managegameservers</a> ` +
+    `(App ID <code>730</code>), then paste it into the Config tab.</p>`,
+    () => { navigate('config'); setTimeout(() => {
+      const f = el('cfg-gslt'); if (f) { f.focus(); f.scrollIntoView({behavior:'smooth', block:'center'}); }
+    }, 100); },
+    'Open Config',
+    { secondaryLabel: 'Start anyway (LAN only)', onSecondary: () => run() });
 }
 
 async function loadWorkshopMapsGrid(grid, mode) {
@@ -7982,8 +8017,21 @@ window.ConnectPopover = {
     el('cp-pub-val').textContent = pub;
 
     const pubK = el('cp-pub-k');
-    if (s.public_ip) { pubK.textContent = 'Public · GSLT verified'; pubK.className = 'cp-k ok'; }
-    else             { pubK.textContent = 'Public · GSLT not set';  pubK.className = 'cp-k';   }
+    // v1.0.1: badge previously read s.public_ip as a proxy for "GSLT verified"
+    // which was wrong — public_ip is just "did we manage to detect our WAN IP",
+    // it says nothing about whether +sv_setsteamaccount was passed at launch.
+    // Operators saw a confident green badge while remote clients silently failed
+    // to connect (Valve auth rejects external handshakes without a GSLT).
+    if (s.public_ip && s.gslt_set) {
+      pubK.textContent = 'Public · GSLT set';
+      pubK.className = 'cp-k ok';
+    } else if (s.public_ip) {
+      pubK.textContent = 'Public · GSLT MISSING — remote clients will fail';
+      pubK.className = 'cp-k bad';
+    } else {
+      pubK.textContent = 'Public · detecting…';
+      pubK.className = 'cp-k';
+    }
 
     const warn = el('cp-warn');
     // /api/state doesn't expose the raw sv_password (would leak the secret to

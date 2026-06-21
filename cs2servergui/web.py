@@ -901,6 +901,13 @@ def create_flask(core: AppCore) -> Flask:
             # protected? yes/no" for the Connect popover without leaking the
             # password itself.  The ConnectPopover UI reads this.
             "sv_password_set":    bool(core.sv_password),
+            # v1.0.1 — boolean so the SPA can warn when the operator is about
+            # to host publicly without a GSLT.  Valve's auth backend silently
+            # rejects external client handshakes when +sv_setsteamaccount is
+            # missing — LAN connects still work, but remote players fail with
+            # no error logged on either side.  Burned a full evening of triage
+            # before this gap was caught — clear UX matters here.
+            "gslt_set":           bool(core.gslt_token),
             "dl_active":          core._active_dl_proc is not None,
             "dl_progress":        core._dl_progress or None,
             # v0.10.2: last "why did Start fail" string from the most recent
