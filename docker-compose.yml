@@ -1,0 +1,19 @@
+services:
+  oblivion:
+    build: .
+    image: oblivion-server-tool:latest
+    restart: unless-stopped
+    ports:
+      - "5050:5050"        # web panel (default flask_port)
+      - "27015:27015/tcp"  # RCON
+      - "27015:27015/udp"  # CS2 game traffic
+      - "27016:27016/udp"  # CS2 secondary game port
+    volumes:
+      - cs2_data:/srv/cs2          # CS2 server installation
+      - oblivion_config:/config    # app config (oblivion_config.json, logs)
+    environment:
+      - XDG_CONFIG_HOME=/config
+
+volumes:
+  cs2_data:
+  oblivion_config:

@@ -1,0 +1,10 @@
+flask>=3.0.0
+werkzeug>=3.0.0
+segno>=1.6.0
+discord.py>=2.3.0
+# keyring is optional — app falls back to config-file storage when no backend
+# is available (e.g. headless Docker with no D-Bus).  Include it so operators
+# running on a Linux desktop with SecretService get the secure store for free.
+keyring>=25.0.0
+# pywebview intentionally excluded — only needed for the desktop window,
+# which is skipped in --headless mode.

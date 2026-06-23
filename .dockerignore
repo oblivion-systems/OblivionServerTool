@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.pyo
+.git/
+dist/
+build/
+Marketing/
+Niche-Saturation-Analysis.pdf
+*.spec
+*.iss
+installer.iss
+scripts/
