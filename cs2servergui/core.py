@@ -1243,68 +1243,13 @@ class AppCore:
     def _list_dedicated_pids(self) -> list[int]:
         """Return PIDs of cs2.exe processes whose command line contains `-dedicated`.
 
-        Used by the pre-launch cleanup to kill stale dedicated servers that
-        survived a previous crash and would otherwise hold port 27015.  Uses
-        PowerShell's Get-CimInstance first (works on every Windows 10/11 build
-        including 24H2 where wmic was removed), falls back to wmic for older
-        systems.  Skips the user's CS2 game client (no `-dedicated` arg).
+        Delegates to platform.list_pids() so the OS-specific enumeration
+        (PowerShell/wmic on Windows, /proc on Linux) lives in one place.
         """
-        pids: list[int] = []
-
-        # Strategy 1 — PowerShell Get-CimInstance.  One-line script: filter
-        # processes named cs2.exe whose CommandLine mentions -dedicated, print PIDs.
-        ps_cmd = (
-            "Get-CimInstance Win32_Process -Filter \"Name='cs2.exe'\" | "
-            "Where-Object { $_.CommandLine -like '*-dedicated*' } | "
-            "Select-Object -ExpandProperty ProcessId"
-        )
-        ps_failed = False
-        try:
-            ps = subprocess.run(
-                ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
-                capture_output=True, text=True, timeout=8,
-                # CREATE_NO_WINDOW so the brief PS spawn doesn't flash a console.
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
-            if ps.returncode == 0:
-                for line in ps.stdout.splitlines():
-                    s = line.strip()
-                    if s.isdigit():
-                        pids.append(int(s))
-                return pids   # success path — even an empty list is valid
-            ps_failed = True
-        except Exception as exc:
-            ps_failed = True
-            self.log(f"[!] PowerShell process enumeration failed: {exc} — trying wmic")
-
-        # Strategy 2 — wmic fallback (deprecated; missing on Win 11 24H2).
-        wmic_failed = False
-        try:
-            res = subprocess.run(
-                ["wmic", "process", "where", "name='cs2.exe'",
-                 "get", "ProcessId,CommandLine", "/format:csv"],
-                capture_output=True, text=True, timeout=5,
-            )
-            for line in res.stdout.splitlines():
-                if "-dedicated" in line.lower():
-                    parts = line.strip().split(",")
-                    pid = parts[-1].strip()
-                    if pid.isdigit():
-                        pids.append(int(pid))
-        except FileNotFoundError:
-            wmic_failed = True
-            self.log("[!] Neither PowerShell nor wmic available — cannot identify "
-                     "stale dedicated cs2.exe.  Manually close any running "
-                     "dedicated server before starting.")
-        except Exception as exc:
-            wmic_failed = True
-            self.log(f"[!] wmic process enumeration failed: {exc}")
-        # If BOTH strategies failed and we found nothing, the operator gets
-        # zero context for why a stale server can't be killed.  Log it loudly.
-        if ps_failed and wmic_failed and not pids:
-            self.log("[!] Both PowerShell and wmic process enumeration failed — "
-                     "stale `cs2.exe -dedicated` (if any) WILL NOT be killed at pre-launch.")
-        return pids
+        from cs2servergui import platform as _plat
+        image = self.driver.process_image_name
+        marker = self.driver.process_args_marker
+        return _plat.list_pids(image, marker, log=self.log)
 
     # Port-holder enumeration lives in cs2servergui._netutils as plain
     # module-level functions.  We expose them as instance methods so the
@@ -1490,12 +1435,14 @@ class AppCore:
         if stale_pids:
             self.log(f"[!] Found {len(stale_pids)} lingering dedicated cs2.exe "
                      f"(PIDs: {', '.join(map(str, stale_pids))}) — killing…")
+            from cs2servergui import platform as _plat
             killed = 0
             for pid in stale_pids:
                 try:
-                    subprocess.run(["taskkill", "/F", "/PID", str(pid)],
-                                   capture_output=True, timeout=5)
-                    killed += 1
+                    if _plat.kill_pid(pid):
+                        killed += 1
+                    else:
+                        self.log(f"[!]   Could not kill PID {pid}")
                 except Exception as exc:
                     self.log(f"[!]   Could not kill PID {pid}: {exc}")
             if killed:
@@ -1749,25 +1696,16 @@ class AppCore:
                     time.sleep(1)
                 except Exception:
                     pass
-                # Confirm it's gone; if a dedicated cs2.exe is still running, kill it.
-                # IMPORTANT: filter on CommandLine containing "-dedicated" so we never
-                # accidentally kill the user's CS2 game client (same binary name) when
-                # both run on the same machine.
+                # Confirm it's gone; if a dedicated server is still running, kill it.
+                # IMPORTANT: filter on args_marker so we never accidentally kill the
+                # user's CS2 game client (same binary name) on the same machine.
                 try:
-                    res = subprocess.run(
-                        ["wmic", "process", "where", "name='cs2.exe'",
-                         "get", "ProcessId,CommandLine", "/format:csv"],
-                        capture_output=True, text=True, timeout=5,
-                    )
-                    for line in res.stdout.splitlines():
-                        if "-dedicated" in line.lower():
-                            parts = line.strip().split(",")
-                            pid = parts[-1].strip()
-                            if pid.isdigit():
-                                subprocess.run(
-                                    ["taskkill", "/F", "/PID", pid],
-                                    capture_output=True, timeout=5,
-                                )
+                    from cs2servergui import platform as _plat
+                    for pid in _plat.list_pids(
+                        self.driver.process_image_name,
+                        self.driver.process_args_marker,
+                    ):
+                        _plat.kill_pid(pid)
                 except Exception:
                     pass
             self.log("Server stopped")
@@ -1775,19 +1713,17 @@ class AppCore:
         threading.Thread(target=_terminate, daemon=True).start()
 
     def _dedicated_running(self) -> bool:
-        """True if a dedicated cs2.exe (our server, launched with -dedicated) is
-        still alive.  Filters on the -dedicated command line so the user's CS2
-        game client (same binary name) is never mistaken for the server."""
+        """True if a dedicated server process (our server, launched with -dedicated)
+        is still alive.  Delegates to platform.process_running() so the OS-specific
+        enumeration lives in one place.  Filters on args_marker so the game client
+        (same binary name) is never mistaken for the server."""
+        from cs2servergui import platform as _plat
         try:
-            res = subprocess.run(
-                ["wmic", "process", "where", "name='cs2.exe'",
-                 "get", "CommandLine", "/format:csv"],
-                capture_output=True, text=True, timeout=5,
+            return _plat.process_running(
+                self.driver.process_image_name,
+                self.driver.process_args_marker,
             )
-            return any("-dedicated" in line.lower()
-                       for line in res.stdout.splitlines())
         except Exception:
-            # If we can't tell, assume it's gone so a restart isn't blocked.
             return False
 
     def _restart_into(self, map_name: str, mode: str,

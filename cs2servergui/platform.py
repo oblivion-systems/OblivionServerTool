@@ -1,0 +1,334 @@
+"""
+platform.py — OS abstraction seam for v1.1 Linux support (Phase B).
+
+Every call that differs between Windows and Linux lives here.  Windows
+callers see the same API as Linux callers; only the implementations differ.
+
+Windows is the current production target — the Windows paths are battle-tested
+across hundreds of server sessions.  Linux paths are implemented now so Phase C
+(Linux runtime) only needs to add game paths and packaging, not re-plumb OS
+calls.
+
+Public API
+----------
+app_data_dir()                    → str
+no_window_flags()                 → int
+new_console_flags()               → int
+list_pids(image_name, args_marker, log) → list[int]
+kill_pid(pid)                     → bool
+process_running(image_name, args_marker) → bool
+listeners_on_port(port, log)      → list[tuple[str, int, str]]
+"""
+from __future__ import annotations
+
+import os
+import signal
+import subprocess
+import sys
+from typing import Callable
+
+_IS_WINDOWS = sys.platform == "win32"
+
+
+# ── Config directory ──────────────────────────────────────────────────────────
+
+def app_data_dir() -> str:
+    """Per-user app-data root.
+
+    Windows: %APPDATA%  (C:\\Users\\<name>\\AppData\\Roaming)
+    Linux:   $XDG_CONFIG_HOME or ~/.config
+    """
+    if _IS_WINDOWS:
+        return os.environ.get("APPDATA", os.path.expanduser("~"))
+    return os.environ.get("XDG_CONFIG_HOME",
+                          os.path.join(os.path.expanduser("~"), ".config"))
+
+
+# ── subprocess creation flags ─────────────────────────────────────────────────
+
+def no_window_flags() -> int:
+    """CREATE_NO_WINDOW on Windows; 0 on Linux (no console to hide)."""
+    return getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+
+def new_console_flags() -> int:
+    """CREATE_NEW_CONSOLE on Windows; 0 on Linux (caller uses a terminal
+    emulator instead when a visible window is needed)."""
+    if _IS_WINDOWS:
+        return getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+    return 0
+
+
+# ── Process enumeration and termination ──────────────────────────────────────
+
+def list_pids(
+    image_name: str,
+    args_marker: str,
+    log: Callable[[str], None] = print,
+) -> list[int]:
+    """PIDs of processes named `image_name` whose command line contains
+    `args_marker`.
+
+    Used to find dedicated-server instances while ignoring the client
+    (same binary name on the same machine — see user_setup memory).
+
+    Windows: PowerShell Get-CimInstance → wmic fallback.
+    Linux:   /proc/<pid>/cmdline scan.
+    """
+    if _IS_WINDOWS:
+        return _list_pids_windows(image_name, args_marker, log)
+    return _list_pids_linux(image_name, args_marker)
+
+
+def kill_pid(pid: int) -> bool:
+    """Force-kill process `pid`. Returns True if the signal was sent without
+    raising (the process may not have exited yet when this returns)."""
+    try:
+        if _IS_WINDOWS:
+            subprocess.run(
+                ["taskkill", "/F", "/PID", str(pid)],
+                capture_output=True, timeout=5,
+            )
+        else:
+            os.kill(pid, signal.SIGKILL)
+        return True
+    except Exception:
+        return False
+
+
+def process_running(image_name: str, args_marker: str) -> bool:
+    """True if at least one process matching image_name + args_marker is alive."""
+    return bool(list_pids(image_name, args_marker))
+
+
+# ── Port listener resolution ──────────────────────────────────────────────────
+
+def listeners_on_port(
+    port: int,
+    log: Callable[[str], None] = print,
+) -> list[tuple[str, int, str]]:
+    """(bound_address, pid, image_name_lower) for every process listening on
+    `port`.  Multiple entries when the same port is bound to several addresses
+    (IPv4 + IPv6, or 0.0.0.0 AND a specific IP).
+
+    Windows: netstat -ano → tasklist.
+    Linux:   ss -tlnp → /proc/<pid>/status.
+
+    Never raises — swallows subprocess errors and returns whatever was found.
+    """
+    if _IS_WINDOWS:
+        return _listeners_windows(port, log)
+    return _listeners_linux(port, log)
+
+
+# ── Windows implementations ───────────────────────────────────────────────────
+
+def _list_pids_windows(
+    image_name: str,
+    args_marker: str,
+    log: Callable[[str], None],
+) -> list[int]:
+    pids: list[int] = []
+
+    # Strategy 1 — PowerShell Get-CimInstance (works on all Windows 10/11,
+    # including 24H2 where wmic was removed).
+    ps_cmd = (
+        f"Get-CimInstance Win32_Process -Filter \"Name='{image_name}'\" | "
+        f"Where-Object {{ $_.CommandLine -like '*{args_marker}*' }} | "
+        "Select-Object -ExpandProperty ProcessId"
+    )
+    try:
+        ps = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
+            capture_output=True, text=True, timeout=8,
+            creationflags=no_window_flags(),
+        )
+        if ps.returncode == 0:
+            for line in ps.stdout.splitlines():
+                s = line.strip()
+                if s.isdigit():
+                    pids.append(int(s))
+            return pids
+    except Exception as exc:
+        log(f"[platform] PowerShell process enumeration failed: {exc} — trying wmic")
+
+    # Strategy 2 — wmic fallback (deprecated; absent on Win 11 24H2).
+    try:
+        res = subprocess.run(
+            ["wmic", "process", "where", f"name='{image_name}'",
+             "get", "ProcessId,CommandLine", "/format:csv"],
+            capture_output=True, text=True, timeout=5,
+        )
+        for line in res.stdout.splitlines():
+            if args_marker.lower() in line.lower():
+                parts = line.strip().split(",")
+                pid = parts[-1].strip()
+                if pid.isdigit():
+                    pids.append(int(pid))
+    except FileNotFoundError:
+        log(f"[platform] Neither PowerShell nor wmic available — cannot identify "
+            f"stale {image_name}.  Close any running dedicated server manually "
+            "before starting.")
+    except Exception as exc:
+        log(f"[platform] wmic fallback failed: {exc}")
+    return pids
+
+
+def _listeners_windows(
+    port: int,
+    log: Callable[[str], None],
+) -> list[tuple[str, int, str]]:
+    listeners: list[tuple[str, int, str]] = []
+    try:
+        net = subprocess.run(
+            ["netstat", "-ano"], capture_output=True, text=True, timeout=5,
+        )
+        for line in net.stdout.splitlines():
+            cols = line.split()
+            if len(cols) < 5 or cols[3] != "LISTENING":
+                continue
+            addr = cols[1]
+            if not addr.endswith(f":{port}"):
+                continue
+            pid_s = cols[4]
+            if not (pid_s.isdigit() and int(pid_s) > 0):
+                continue
+            tl = subprocess.run(
+                ["tasklist", "/FI", f"PID eq {pid_s}", "/FO", "CSV", "/NH"],
+                capture_output=True, text=True, timeout=5,
+            )
+            first = tl.stdout.splitlines()[0] if tl.stdout.strip() else ""
+            name = (first.split('","', 1)[0].strip('"').lower()
+                    if first.startswith('"') else "?")
+            listeners.append((addr, int(pid_s), name))
+    except Exception as exc:
+        log(f"[platform] listeners_on_port({port}) failed: {exc}")
+    return listeners
+
+
+# ── Linux implementations ─────────────────────────────────────────────────────
+
+def _list_pids_linux(image_name: str, args_marker: str) -> list[int]:
+    """Scan /proc for processes matching image_name + args_marker."""
+    pids: list[int] = []
+    try:
+        for entry in os.scandir("/proc"):
+            if not entry.name.isdigit():
+                continue
+            try:
+                cmdline_path = os.path.join(entry.path, "cmdline")
+                with open(cmdline_path, "rb") as f:
+                    cmdline = f.read().replace(b"\x00", b" ").decode(
+                        "utf-8", errors="replace"
+                    )
+                if image_name in cmdline and args_marker in cmdline:
+                    pids.append(int(entry.name))
+            except (PermissionError, FileNotFoundError, ProcessLookupError):
+                continue
+    except Exception:
+        pass
+    return pids
+
+
+def _listeners_linux(
+    port: int,
+    log: Callable[[str], None],
+) -> list[tuple[str, int, str]]:
+    """Use `ss -tlnp` to find listeners on `port`, then resolve PIDs via
+    /proc/<pid>/status for the image name.
+
+    ss output (relevant columns):
+      Netid State  Local Address:Port  Process
+      tcp   LISTEN 0.0.0.0:5000       users:(("python",pid=12345,fd=3))
+    """
+    listeners: list[tuple[str, int, str]] = []
+    try:
+        res = subprocess.run(
+            ["ss", "-tlnp", f"sport = :{port}"],
+            capture_output=True, text=True, timeout=5,
+        )
+        import re
+        pid_re = re.compile(r'pid=(\d+)')
+        for line in res.stdout.splitlines():
+            if "LISTEN" not in line:
+                continue
+            cols = line.split()
+            # Local address is the 4th column (0-indexed col 3)
+            addr = cols[3] if len(cols) > 3 else f"?:{port}"
+            for m in pid_re.finditer(line):
+                pid = int(m.group(1))
+                name = _proc_name(pid)
+                listeners.append((addr, pid, name))
+    except FileNotFoundError:
+        # ss not available — fall back to /proc/net/tcp parsing
+        listeners = _listeners_linux_proc(port, log)
+    except Exception as exc:
+        log(f"[platform] ss listeners_on_port({port}) failed: {exc}")
+    return listeners
+
+
+def _proc_name(pid: int) -> str:
+    try:
+        with open(f"/proc/{pid}/status") as f:
+            for line in f:
+                if line.startswith("Name:"):
+                    return line.split(":", 1)[1].strip().lower()
+    except Exception:
+        pass
+    return "?"
+
+
+def _listeners_linux_proc(
+    port: int,
+    log: Callable[[str], None],
+) -> list[tuple[str, int, str]]:
+    """Pure-Python fallback: parse /proc/net/tcp{,6} for the port,
+    then resolve inodes to PIDs via /proc/<pid>/fd/."""
+    import socket as _socket
+    listeners: list[tuple[str, int, str]] = []
+    port_hex = f"{port:04X}"
+    inode_to_pid: dict[str, int] = {}
+
+    # Build inode → pid map by scanning /proc/<pid>/fd/
+    try:
+        for entry in os.scandir("/proc"):
+            if not entry.name.isdigit():
+                continue
+            fd_dir = os.path.join(entry.path, "fd")
+            try:
+                for fd in os.scandir(fd_dir):
+                    try:
+                        target = os.readlink(fd.path)
+                        if target.startswith("socket:["):
+                            inode = target[8:-1]
+                            inode_to_pid[inode] = int(entry.name)
+                    except Exception:
+                        continue
+            except PermissionError:
+                continue
+    except Exception:
+        pass
+
+    for net_file in ("/proc/net/tcp", "/proc/net/tcp6"):
+        try:
+            with open(net_file) as f:
+                for line in f:
+                    cols = line.split()
+                    if len(cols) < 10:
+                        continue
+                    local = cols[1]          # hex "addr:port"
+                    state = cols[3]
+                    inode = cols[9]
+                    if state != "0A":        # 0A = LISTEN
+                        continue
+                    lport = local.rsplit(":", 1)[-1]
+                    if lport.upper() != port_hex:
+                        continue
+                    pid = inode_to_pid.get(inode, 0)
+                    name = _proc_name(pid) if pid else "?"
+                    listeners.append((local, pid, name))
+        except FileNotFoundError:
+            continue
+        except Exception as exc:
+            log(f"[platform] /proc/net/tcp parse failed: {exc}")
+    return listeners

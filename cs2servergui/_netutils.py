@@ -1,22 +1,16 @@
 """
-_netutils.py — small Windows port/process helpers shared by main.py + core.py.
+_netutils.py — port/process helpers shared by main.py + core.py.
 
-Pulled out so the netstat-based listener enumeration lives in exactly one
-place: previously `_holder_of_port` had two near-identical copies (Flask
-port-collision survivor at module level in main.py, and CS2 port-conflict
-detection as an AppCore method in core.py).  Two copies meant two places to
-fix bugs and two places to keep behaviour in sync; one canonical
-implementation is the lower-maintenance shape.
-
-All functions here are pure-stdlib, Windows-targeted (netstat + tasklist),
-and never raise — they swallow subprocess errors and log via the optional
-`log` callback.  AppCore passes `self.log`; main.py passes plain `print`.
+Pulled out so the listener enumeration lives in exactly one place.
+OS-specific implementations live in platform.py; this module is the
+thin, stable API that callers import.
 """
 from __future__ import annotations
 
 import socket
-import subprocess
 from typing import Callable
+
+from cs2servergui import platform as _plat
 
 # Default logger when none is provided — used by main.py's startup path
 # before AppCore.log exists.
@@ -29,6 +23,7 @@ def port_in_use(port: int, host: str = "127.0.0.1", timeout: float = 0.3) -> boo
 
     A successful TCP connect proves a listener exists; failure (refused or
     timeout) means the port is free for binding from this host's perspective.
+    Pure socket — no OS-specific calls, works on Windows and Linux.
     """
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.settimeout(timeout)
@@ -39,44 +34,10 @@ def listeners_on_port(
     port: int,
     log: Callable[[str], None] = _default_log,
 ) -> list[tuple[str, int, str]]:
-    """Return every (bound_address, pid, image_name_lower) listening on `port`.
-
-    Walks `netstat -ano` for lines in LISTENING state where the LocalAddress
-    ends with `:<port>`, then resolves each PID to its image name via
-    `tasklist /FI`.  Multiple entries are returned when the same port is
-    bound to multiple addresses (e.g. IPv4 + IPv6, or a server that explicitly
-    binds 0.0.0.0 AND ::).
-
-    Never raises — logs the failure and returns whatever was collected.
+    """(bound_address, pid, image_name_lower) for every process listening on
+    `port`.  Delegates to platform.listeners_on_port() for OS-specific impl.
     """
-    listeners: list[tuple[str, int, str]] = []
-    try:
-        net = subprocess.run(
-            ["netstat", "-ano"], capture_output=True, text=True, timeout=5,
-        )
-        for line in net.stdout.splitlines():
-            cols = line.split()
-            # Format: Proto  LocalAddress  ForeignAddress  State  PID
-            if len(cols) < 5 or cols[3] != "LISTENING":
-                continue
-            addr = cols[1]
-            # Strict suffix match so we don't pick up :270150 / :270159 etc.
-            if not addr.endswith(f":{port}"):
-                continue
-            pid_s = cols[4]
-            if not (pid_s.isdigit() and int(pid_s) > 0):
-                continue
-            tl = subprocess.run(
-                ["tasklist", "/FI", f"PID eq {pid_s}", "/FO", "CSV", "/NH"],
-                capture_output=True, text=True, timeout=5,
-            )
-            first = tl.stdout.splitlines()[0] if tl.stdout.strip() else ""
-            name = first.split('","', 1)[0].strip('"').lower() \
-                if first.startswith('"') else "?"
-            listeners.append((addr, int(pid_s), name))
-    except Exception as exc:
-        log(f"[netutils] listeners_on_port({port}) failed: {exc}")
-    return listeners
+    return _plat.listeners_on_port(port, log=log)
 
 
 def holder_of_port(

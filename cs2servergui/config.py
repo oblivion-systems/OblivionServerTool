@@ -171,10 +171,8 @@ def update_paths(server_dir: str) -> None:
 # Dev mode: project root (one level above this file).
 
 if getattr(sys, "frozen", False):
-    _APP_DIR = os.path.join(
-        os.environ.get("APPDATA", os.path.expanduser("~")),
-        "Oblivion Server Tool",
-    )
+    from cs2servergui.platform import app_data_dir as _app_data_dir
+    _APP_DIR = os.path.join(_app_data_dir(), "Oblivion Server Tool")
     os.makedirs(_APP_DIR, exist_ok=True)
 else:
     _APP_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
