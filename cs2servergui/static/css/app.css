@@ -131,10 +131,36 @@ input[type="text"], input[type="password"], input[type="number"], select, textar
 /* ═══════════════════════════════════════════════════════════════ LOGIN */
 #login-screen {
   display: flex; align-items: center; justify-content: center;
-  min-height: 100vh; background: var(--bg-0);
+  /* v1.1.0-alpha1: vertical breathing room + scroll fallback.  The login
+   * card is ~630px tall; on laptops + browser-with-devtools the viewport
+   * height drops below that, and without overflow:auto the keypad bottom
+   * row + Enter button get clipped behind the viewport edge with no way
+   * to reach them.  Headless mode means people WILL load this in random
+   * browser sizes (mobile, tiled side-by-side, etc.) so the screen has to
+   * handle short-and-tall viewports gracefully. */
+  min-height: 100vh;
+  padding: 24px 16px;
+  overflow-y: auto;
+  background: var(--bg-0);
   background-image:
     radial-gradient(ellipse 800px 600px at 50% 30%, oklch(0.65 0.21 305 / 0.10) 0%, transparent 60%),
     linear-gradient(180deg, var(--bg-0) 0%, oklch(0.10 0.020 290) 100%);
+}
+
+/* v1.1.0-alpha1: compact login card for short viewports — typical laptop
+ * window with browser chrome, devtools docked, or tiled side-by-side.
+ * Shrinks emblem, paddings, key sizes proportionally so the card fits
+ * under ~700px viewport height without losing legibility. */
+@media (max-height: 760px) {
+  .login-card     { padding: 24px 32px 20px; }
+  .login-emblem   { height: 64px; }
+  .login-emblem-frame { padding: 12px; }
+  .login-stage    { gap: 8px; margin-bottom: 18px; }
+  .login-divider  { margin-bottom: 16px; }
+  .pin-dots       { margin-bottom: 20px; gap: 8px; }
+  .pin-dot        { width: 32px; height: 40px; }
+  .keypad         { gap: 6px; }
+  .key            { padding: 12px 0; font-size: 16px; }
 }
 .login-card {
   position: relative;

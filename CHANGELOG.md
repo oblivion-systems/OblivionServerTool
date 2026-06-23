@@ -2,6 +2,45 @@
 
 ---
 
+## v1.1.0-alpha1 — 2026-06-21 (Headless mode — Linux foundation, Phase A)
+
+First slice of the v1.1 roadmap.  Adds a `--headless` CLI flag that
+runs the app without the embedded pywebview window — the web panel
+becomes the only UI.  Foundation for Linux support (Phase C); has no
+effect on the default desktop experience.
+
+### Added
+- **`--headless` flag** in [main.py](main.py).  Skips pywebview entirely, holds
+  the Flask process open via a `threading.Event` blocking on
+  SIGINT/SIGTERM, calls `core.save_config()` on graceful exit, then
+  `os._exit(0)`.
+- **`_run_headless(core, port, flask_thread)`** helper — mirrors the
+  desktop path's shutdown contract so an in-flight config write isn't
+  truncated when an operator sends Ctrl+C.
+- **Startup banner** — prints the local + LAN URLs to stdout so an
+  operator running over SSH knows where to point a browser.
+- **Startup-token gate** — skipped in headless mode (no desktop window
+  to consume the auto-auth URL, so PIN auth is mandatory; `/auth/auto`
+  already rejects when `startup_token` is empty, so no other code path
+  breaks).
+
+### Not yet
+- No Linux-specific process management (Phase B — platform.py seam).
+- No Linux srcds binary or path layout (Phase C — Linux runtime).
+- No AppImage / Docker packaging (Phase D).
+- No second `.exe` build flavour with `console=True` for stdout
+  visibility on Windows — for alpha, headless users on Windows should
+  run `python main.py --headless` from source.
+
+### Tested on
+- Windows 11 — `python main.py --headless` boots, serves the web panel,
+  Ctrl+C exits cleanly with config saved.
+
+This is a pre-release.  Default Windows desktop users should stay on
+v1.0.1.
+
+---
+
 ## v1.0.1 — 2026-06-21 (GSLT visibility — public hosting clarity)
 
 Public-hosting failure mode that burned a real tournament evening: with

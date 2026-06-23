@@ -6,8 +6,10 @@ Build: build.bat  →  dist\OblivionServerTool.exe
 """
 from __future__ import annotations
 
+import argparse
 import os
 import secrets
+import signal
 import subprocess
 import sys
 import threading
@@ -136,13 +138,76 @@ def _select_flask_port(configured: int) -> int | None:
     return chosen
 
 
+def _run_headless(core, port: int, flask_thread: threading.Thread) -> None:
+    """Hold the process open until SIGINT/SIGTERM, then save_config and exit.
+
+    The headless counterpart to pywebview's blocking event loop.  Same
+    shutdown contract as the desktop path: save_config runs once before
+    os._exit so an in-flight config write isn't truncated.  This is the
+    foundation for v1.1 Linux support — when the platform seam (Phase B)
+    + Linux runtime (Phase C) land, this same code path runs under
+    systemd / Docker / VPS without a desktop session.
+    """
+    print()
+    print(f"  Oblivion Server Tool is running headless (web panel is the UI).")
+    print(f"  Local:  http://localhost:{port}")
+    lan = _config._lan_ip()
+    if lan and lan != "127.0.0.1":
+        print(f"  LAN:    http://{lan}:{port}")
+    print(f"  PIN required — set in the SPA on first run, then sign in.")
+    print(f"  Press Ctrl+C to stop.")
+    print()
+
+    stop = threading.Event()
+
+    def _handle_signal(signum, _frame):
+        core.log(f"Received signal {signum} — shutting down…")
+        stop.set()
+
+    signal.signal(signal.SIGINT, _handle_signal)
+    if hasattr(signal, "SIGTERM"):
+        signal.signal(signal.SIGTERM, _handle_signal)
+
+    try:
+        stop.wait()
+    except KeyboardInterrupt:
+        # On Windows, Ctrl+C raises here BEFORE the signal handler fires;
+        # on Linux/macOS the handler fires first and stop.wait() returns
+        # normally.  Either way we fall through to save_config + exit.
+        pass
+
+    try:
+        core.save_config()
+    except Exception as exc:
+        print(f"[shutdown] Final save_config failed: {exc}")
+    os._exit(0)
+
+
 def main() -> None:
+    parser = argparse.ArgumentParser(
+        prog="OblivionServerTool",
+        description="CS2 dedicated server manager.  Default is desktop window; "
+                    "--headless skips the window and uses the web panel only.",
+    )
+    parser.add_argument(
+        "--headless",
+        action="store_true",
+        help="Run without the embedded desktop window. Web panel at "
+             "http://<host>:<port> becomes the only UI. PIN auth required. "
+             "Foundation for v1.1 Linux support — desktop users typically don't "
+             "need this flag.",
+    )
+    args = parser.parse_args()
+
     # ── Bootstrap AppCore ─────────────────────────────────────────────────────
     core = AppCore()
-    core.log(f"Oblivion Server Tool v{APP_VERSION}")
+    core.log(f"Oblivion Server Tool v{APP_VERSION}{' (headless)' if args.headless else ''}")
 
-    # One-time token for pywebview's auto-auth URL — invalidated on first use
-    core.startup_token = secrets.token_hex(32)
+    # One-time token for pywebview's auto-auth URL — invalidated on first use.
+    # Headless mode has no desktop window to consume it, so skip; /auth/auto
+    # already rejects when startup_token is empty so no other code path breaks.
+    if not args.headless:
+        core.startup_token = secrets.token_hex(32)
 
     # Start crash monitor (moved from gui.py; now lives in AppCore)
     core.start_monitor()
@@ -194,6 +259,14 @@ def main() -> None:
     if core.auto_start:
         from cs2servergui.config import OFFICIAL_MAPS
         core.start_server(OFFICIAL_MAPS[0], core.current_mode)
+
+    # ── Headless branch (v1.1) ────────────────────────────────────────────────
+    # No desktop window — hold the process open, wait for Ctrl+C / SIGTERM,
+    # save config on the way out.  Same Flask + AppCore are already running;
+    # the only difference is what blocks the main thread.
+    if args.headless:
+        _run_headless(core, port, flask_thread)
+        return
 
     # ── Open pywebview window ─────────────────────────────────────────────────
     # The window loads the local Flask server so auth / API / SSE all share
