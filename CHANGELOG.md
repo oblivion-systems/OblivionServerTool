@@ -2,6 +2,65 @@
 
 ---
 
+## v1.1.0-alpha3 — 2026-06-23 (Linux runtime paths — Phase C)
+
+Third slice of the v1.1 roadmap.  Wires the OS abstraction from Phase B
+into every place that constructs a path or identifies a process, so the
+app correctly targets the Linux CS2 dedicated-server binary and MetaMod
+layout out of the box.
+
+### Changed
+- **`platform.py`** — four new helpers: `server_binary_rel_path()`,
+  `steamcmd_filename()`, `metamod_bin_arch()`, `server_process_name()`.
+  Each returns the Windows value today; the Linux branch is live for
+  when Phase D (packaging) runs on an actual Linux host.
+- **`config.py`** — `CS2_PATH` and `STEAMCMD_PATH` now built via
+  `platform.server_binary_rel_path()` / `platform.steamcmd_filename()`
+  instead of hardcoded `win64/cs2.exe` / `steamcmd.exe`.
+- **`drivers/cs2/driver.py`** — `process_image_name` is now a
+  `@property` that calls `platform.server_process_name()` (`cs2.exe`
+  on Windows, `cs2` on Linux).
+- **`core.py` `_fix_metamod_dll_nesting()`** — arch folder (`win64` /
+  `linuxsteamrt64`) resolved via `platform.metamod_bin_arch()`;
+  extension filter switches between `.dll` and `.so` accordingly.
+- **`core.py` `_preflight_checks()`** — port-27015 conflict check now
+  uses `platform.list_pids()` instead of a Windows-only `tasklist`
+  subprocess to determine if the holder is CS2 or a foreign process.
+
+### Tests
+- `tests/test_drivers.py` — 6 new platform Phase C cases; existing
+  `process_image_name` assertion updated to use `server_process_name()`.
+
+### Not yet
+- No Linux packaging (Phase D — AppImage / Docker / systemd service).
+- No Linux smoke test (blocked on first Linux host).
+
+---
+
+## v1.1.0-alpha2 — 2026-06-23 (OS abstraction layer — Phase B)
+
+Second slice of the v1.1 roadmap.  Extracts every OS-specific call into
+`cs2servergui/platform.py`.  Windows paths are unchanged and
+battle-tested; the Linux paths are in place so Phase C only adds game
+paths and Phase D only adds packaging.
+
+### Added
+- **`cs2servergui/platform.py`** (new) — Windows + Linux implementations
+  for: `app_data_dir()`, `no_window_flags()`, `new_console_flags()`,
+  `list_pids()`, `kill_pid()`, `process_running()`,
+  `listeners_on_port()` (with `ss` + `/proc/net/tcp` fallback).
+
+### Changed
+- **`cs2servergui/_netutils.py`** — `listeners_on_port()` and
+  `listener_of_port()` delegate to `platform.listeners_on_port()`;
+  removed the duplicate Windows implementation.
+- **`cs2servergui/core.py`** — all `taskkill`, PowerShell, and `wmic`
+  calls replaced with `platform.kill_pid()` / `platform.list_pids()`.
+- **`cs2servergui/config.py`** — `_APP_DIR` (frozen path) uses
+  `platform.app_data_dir()` instead of raw `%APPDATA%`.
+
+---
+
 ## v1.1.0-alpha1 — 2026-06-21 (Headless mode — Linux foundation, Phase A)
 
 First slice of the v1.1 roadmap.  Adds a `--headless` CLI flag that

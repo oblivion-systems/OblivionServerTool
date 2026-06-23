@@ -1,13 +1,12 @@
 """
-platform.py — OS abstraction seam for v1.1 Linux support (Phase B).
+platform.py — OS abstraction seam for v1.1 Linux support (Phase B + C).
 
 Every call that differs between Windows and Linux lives here.  Windows
 callers see the same API as Linux callers; only the implementations differ.
 
 Windows is the current production target — the Windows paths are battle-tested
-across hundreds of server sessions.  Linux paths are implemented now so Phase C
-(Linux runtime) only needs to add game paths and packaging, not re-plumb OS
-calls.
+across hundreds of server sessions.  Linux paths are implemented now so Phase D
+(packaging) only needs to add the installer/service file, not re-plumb OS calls.
 
 Public API
 ----------
@@ -18,6 +17,10 @@ list_pids(image_name, args_marker, log) → list[int]
 kill_pid(pid)                     → bool
 process_running(image_name, args_marker) → bool
 listeners_on_port(port, log)      → list[tuple[str, int, str]]
+server_binary_rel_path()          → str   # relative from server_dir
+steamcmd_filename()               → str
+metamod_bin_arch()                → str   # "win64" | "linuxsteamrt64"
+server_process_name()             → str   # "cs2.exe" | "cs2"
 """
 from __future__ import annotations
 
@@ -99,6 +102,41 @@ def kill_pid(pid: int) -> bool:
 def process_running(image_name: str, args_marker: str) -> bool:
     """True if at least one process matching image_name + args_marker is alive."""
     return bool(list_pids(image_name, args_marker))
+
+
+# ── Game-path constants ───────────────────────────────────────────────────────
+
+def server_binary_rel_path() -> str:
+    """Relative path from server_dir to the CS2 dedicated-server binary.
+
+    Windows: steamapps/.../game/bin/win64/cs2.exe
+    Linux:   steamapps/.../game/bin/linuxsteamrt64/cs2
+    """
+    base = os.path.join("steamapps", "common",
+                        "Counter-Strike Global Offensive",
+                        "game", "bin")
+    if _IS_WINDOWS:
+        return os.path.join(base, "win64", "cs2.exe")
+    return os.path.join(base, "linuxsteamrt64", "cs2")
+
+
+def steamcmd_filename() -> str:
+    """SteamCMD launcher filename — differs by OS."""
+    return "steamcmd.exe" if _IS_WINDOWS else "steamcmd.sh"
+
+
+def metamod_bin_arch() -> str:
+    """Architecture subfolder name inside MetaMod's bin/ directory.
+
+    MetaMod mirrors the engine's binary layout: win64 on Windows,
+    linuxsteamrt64 on Linux.  Used by the DLL-nesting fix in core.py.
+    """
+    return "win64" if _IS_WINDOWS else "linuxsteamrt64"
+
+
+def server_process_name() -> str:
+    """CS2 dedicated-server process image name."""
+    return "cs2.exe" if _IS_WINDOWS else "cs2"
 
 
 # ── Port listener resolution ──────────────────────────────────────────────────

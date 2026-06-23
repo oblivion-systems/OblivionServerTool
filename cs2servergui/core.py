@@ -1164,12 +1164,15 @@ class AppCore:
 
         This method detects the nesting and silently moves DLLs up one level.
         """
-        mm_bin = os.path.join(self._csgo_dir(), "addons", "metamod", "bin", "win64")
-        nested = os.path.join(mm_bin, "win64")
+        from cs2servergui import platform as _plat
+        _arch  = _plat.metamod_bin_arch()
+        mm_bin = os.path.join(self._csgo_dir(), "addons", "metamod", "bin", _arch)
+        nested = os.path.join(mm_bin, _arch)
         if not os.path.isdir(nested):
             return  # layout already correct
 
-        dlls = [f for f in os.listdir(nested) if f.lower().endswith(".dll")]
+        _ext   = ".dll" if _plat._IS_WINDOWS else ".so"
+        dlls = [f for f in os.listdir(nested) if f.lower().endswith(_ext)]
         if not dlls:
             return
 
@@ -1331,16 +1334,18 @@ class AppCore:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 s.settimeout(0.3)
                 if s.connect_ex(("127.0.0.1", RCON_PORT)) == 0:
-                    # Held by SOMETHING. Check if it's our existing cs2.exe
-                    # (which the pre-launch cleanup will taskkill) or foreign.
-                    tl = subprocess.run(
-                        ["tasklist", "/FI", "IMAGENAME eq cs2.exe", "/NH", "/FO", "CSV"],
-                        capture_output=True, text=True, timeout=5,
+                    # Held by SOMETHING — check if it's our own dedicated
+                    # server process (which the pre-launch cleanup will kill)
+                    # or a foreign process that will prevent the bind.
+                    from cs2servergui import platform as _plat
+                    cs2_pids = _plat.list_pids(
+                        self.driver.process_image_name,
+                        self.driver.process_args_marker,
+                        log=self.log,
                     )
-                    if "cs2.exe" not in tl.stdout.lower():
+                    if not cs2_pids:
                         msg = (f"Port {RCON_PORT} is held by a non-CS2 process — "
-                               f"close it first (run `netstat -ano | findstr :{RCON_PORT}` "
-                               "to identify the owner)")
+                               f"close it first")
                         self.log(f"[preflight] ✗ {msg}")
                         errors.append(msg)
         except Exception as exc:

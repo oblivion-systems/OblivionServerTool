@@ -31,14 +31,17 @@ def t_cs2driver_identity_matches_legacy_hardcoded_values():
     """CS2Driver's identity props match what the rest of the codebase
     has been hardcoding.  Regression-guard: a future identity change
     here is a deliberate decision, not a typo."""
+    import sys
+    from cs2servergui.platform import server_process_name
     d = CS2Driver()
+    expected_image = server_process_name()   # "cs2.exe" on Windows, "cs2" on Linux
     return (d.game_name == "Counter-Strike 2"
             and d.short_name == "cs2"
             and d.default_port == 27015
-            and d.process_image_name == "cs2.exe"
+            and d.process_image_name == expected_image
             and d.process_args_marker == "-dedicated"
             and d.console_log_filename == "console.log"), \
-           f'd.game_name={d.game_name!r} d.short_name={d.short_name!r}'
+           f'd.process_image_name={d.process_image_name!r} expected={expected_image!r}'
 t('cs2driver: identity props match legacy hardcoded values',
   t_cs2driver_identity_matches_legacy_hardcoded_values)
 
@@ -178,6 +181,92 @@ def t_base_gamedriver_is_abstract():
         return ('abstract' in str(exc).lower()), f'expected abstract TypeError, got: {exc}'
 t('base: GameDriver is abstract (cannot instantiate directly)',
   t_base_gamedriver_is_abstract)
+
+
+# ─── platform.py Phase C tests ────────────────────────────────────────────
+
+def t_platform_server_binary_rel_path_matches_cs2_path():
+    """server_binary_rel_path() must match the relative portion of
+    config.CS2_PATH when joined with server_dir — ensures config.py and
+    platform.py agree on where the binary lives."""
+    import os as _os, sys as _sys
+    from cs2servergui.platform import server_binary_rel_path
+    rel = server_binary_rel_path()
+    if _sys.platform == "win32":
+        assert "win64" in rel and rel.endswith("cs2.exe"), rel
+    else:
+        assert "linuxsteamrt64" in rel and rel.endswith("/cs2"), rel
+    return True, f'rel={rel!r}'
+t('platform: server_binary_rel_path() matches expected OS layout',
+  t_platform_server_binary_rel_path_matches_cs2_path)
+
+
+def t_platform_steamcmd_filename():
+    """steamcmd_filename() returns the OS-appropriate launcher name."""
+    import sys as _sys
+    from cs2servergui.platform import steamcmd_filename
+    name = steamcmd_filename()
+    if _sys.platform == "win32":
+        return name == "steamcmd.exe", f'got={name!r}'
+    return name == "steamcmd.sh", f'got={name!r}'
+t('platform: steamcmd_filename() is OS-appropriate',
+  t_platform_steamcmd_filename)
+
+
+def t_platform_metamod_bin_arch():
+    """metamod_bin_arch() returns "win64" on Windows, "linuxsteamrt64" on Linux."""
+    import sys as _sys
+    from cs2servergui.platform import metamod_bin_arch
+    arch = metamod_bin_arch()
+    if _sys.platform == "win32":
+        return arch == "win64", f'got={arch!r}'
+    return arch == "linuxsteamrt64", f'got={arch!r}'
+t('platform: metamod_bin_arch() is OS-appropriate',
+  t_platform_metamod_bin_arch)
+
+
+def t_platform_server_process_name():
+    """server_process_name() is "cs2.exe" on Windows, "cs2" on Linux."""
+    import sys as _sys
+    from cs2servergui.platform import server_process_name
+    name = server_process_name()
+    if _sys.platform == "win32":
+        return name == "cs2.exe", f'got={name!r}'
+    return name == "cs2", f'got={name!r}'
+t('platform: server_process_name() is OS-appropriate',
+  t_platform_server_process_name)
+
+
+def t_config_cs2_path_uses_platform_binary():
+    """config.CS2_PATH must embed the platform-correct binary name so
+    that os.path.isfile() checks in _preflight_checks look at the
+    right path on both OSes."""
+    import sys as _sys
+    from cs2servergui import config as _cfg
+    from cs2servergui.platform import server_binary_rel_path
+    # join with a fake server_dir and compare
+    fake_dir = "/srv/cs2" if _sys.platform != "win32" else "C:\\cs2"
+    from cs2servergui.config import update_paths
+    update_paths(fake_dir)
+    import os as _os
+    expected = _os.path.join(fake_dir, server_binary_rel_path())
+    got = _cfg.CS2_PATH
+    # restore to empty string so later tests aren't affected
+    update_paths("")
+    return (got == expected), f'expected={expected!r} got={got!r}'
+t('config: CS2_PATH uses platform.server_binary_rel_path()',
+  t_config_cs2_path_uses_platform_binary)
+
+
+def t_cs2driver_process_image_name_is_platform_correct():
+    """CS2Driver.process_image_name is now a property; it must return
+    the same value as platform.server_process_name()."""
+    from cs2servergui.platform import server_process_name
+    d = CS2Driver()
+    return d.process_image_name == server_process_name(), \
+           f'd.process_image_name={d.process_image_name!r}'
+t('cs2driver: process_image_name property matches platform.server_process_name()',
+  t_cs2driver_process_image_name_is_platform_correct)
 
 
 # ─── Auto-generated pytest cases ──────────────────────────────────────────

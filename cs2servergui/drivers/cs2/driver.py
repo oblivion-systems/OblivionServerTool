@@ -52,7 +52,6 @@ class CS2Driver(GameDriver):
     game_name             = "Counter-Strike 2"
     short_name            = "cs2"
     default_port          = 27015
-    process_image_name    = "cs2.exe"
     # CRITICAL: -dedicated distinguishes the dedicated server process
     # from a client process with the same image name.  The operator
     # often runs both on the same machine; a broad "kill cs2.exe" by
@@ -60,6 +59,11 @@ class CS2Driver(GameDriver):
     # substring before any kill.  See MEMORY.md user_setup.md.
     process_args_marker   = "-dedicated"
     console_log_filename  = "console.log"
+
+    @property
+    def process_image_name(self) -> str:  # type: ignore[override]
+        from cs2servergui.platform import server_process_name
+        return server_process_name()
 
     # ─── Mode + map enumeration ────────────────────────────────────
 
