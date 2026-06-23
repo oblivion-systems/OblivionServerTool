@@ -94,8 +94,27 @@ class CS2Driver(GameDriver):
         import os as _os
         return _os.path.dirname(_cfg.CS2_ADDONS_DIR)
 
-    # console_log_dir uses the default (= install_root) — no override needed.
-    # CS2's console.log lives directly in csgo/.
+    def console_log_path(self, core) -> str | None:
+        """Return the freshest console log across the two known paths.
+
+        Valve/MetaMod moved the log from csgo/console.log to
+        csgo/addons/metamod/console.log in mid-2026.  Pick whichever
+        file is most recently modified so the diagnostic snapshot
+        always shows live data regardless of which layout is active.
+        Fall back to the canonical path if neither exists.
+        """
+        import os as _os
+        root = self.console_log_dir(core)
+        if not root:
+            return None
+        candidates = [
+            _os.path.join(root, "console.log"),
+            _os.path.join(root, "addons", "metamod", "console.log"),
+        ]
+        existing = [p for p in candidates if _os.path.isfile(p)]
+        if not existing:
+            return candidates[0]   # canonical — "NOT PRESENT" message is meaningful
+        return max(existing, key=_os.path.getmtime)
 
     # ─── Status-line formatter (mode-aware) ────────────────────────
 

@@ -5414,7 +5414,7 @@ def create_flask(core: AppCore) -> Flask:
         # session or stale leftovers from days ago.  Saves them from
         # wasting time reading data that doesn't apply to "now."
         try:
-            _cs2_log = os.path.join(core._csgo_dir(), "console.log")
+            _cs2_log = core.driver.console_log_path(core)
             if os.path.isfile(_cs2_log):
                 _age_s = time.time() - os.path.getmtime(_cs2_log)
                 if   _age_s < 90:     _age = f"{int(_age_s)}s ago"
@@ -5854,7 +5854,7 @@ def create_flask(core: AppCore) -> Flask:
         # dispatcher fix territory).
         hr("CS2 console.log (last 200 lines, anomalies + frame-drops prefixed `>`)")
         try:
-            csgo_log = os.path.join(core._csgo_dir(), "console.log")
+            csgo_log = core.driver.console_log_path(core)
             if os.path.isfile(csgo_log):
                 sz   = os.path.getsize(csgo_log)
                 mtss = os.path.getmtime(csgo_log)
