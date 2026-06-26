@@ -296,6 +296,23 @@ sudo journalctl -u oblivion-server-tool -f
 Full notes — hardening tweaks, ReadWritePaths, config locations — in
 [packaging/systemd/README.md](packaging/systemd/README.md).
 
+**Linux desktop window** *(v1.2.0)* — for operators running a desktop
+Linux session (Ubuntu workstation, etc.) who want the Windows-style
+in-app window instead of a browser tab.  Same `python main.py` entry
+point as Windows; needs WebKitGTK on the system:
+
+```bash
+sudo apt install python3-gi python3-gi-cairo \
+                 gir1.2-webkit2-4.1
+pip install -r requirements.txt
+python main.py
+```
+
+The app auto-falls-back to headless when `$DISPLAY` / `$WAYLAND_DISPLAY`
+are both unset (typical of SSH / systemd boxes), so the same command is
+safe on a server too.  To force the Qt backend instead of GTK, export
+`OBLIVION_WEBVIEW_GUI=qt`.
+
 ---
 
 ## Requirements

@@ -264,6 +264,15 @@ def main() -> None:
     # No desktop window — hold the process open, wait for Ctrl+C / SIGTERM,
     # save config on the way out.  Same Flask + AppCore are already running;
     # the only difference is what blocks the main thread.
+    #
+    # v1.2: also auto-fall-back to headless on Linux when $DISPLAY /
+    # $WAYLAND_DISPLAY are both unset — typical of SSH-only / systemd boxes
+    # where opening a window would silently fail.
+    from cs2servergui import platform as _plat
+    if not args.headless and not _plat.has_display():
+        core.log("[startup] No desktop session detected ($DISPLAY/$WAYLAND_DISPLAY unset) "
+                 "— falling back to headless mode.")
+        args.headless = True
     if args.headless:
         _run_headless(core, port, flask_thread)
         return
@@ -275,17 +284,15 @@ def main() -> None:
     try:
         import webview  # type: ignore
     except ImportError:
+        # v1.2: graceful fallback — keep Flask alive so the operator can
+        # still reach the web panel, instead of asking them to relaunch.
         print(
-            "[!] pywebview is not installed.\n"
-            "    Run:  pip install pywebview\n"
-            "    Or open the web panel manually at "
-            f"http://localhost:{port}"
+            "[!] pywebview is not installed — falling back to web-panel-only.\n"
+            f"    Open http://localhost:{port} in any browser, or install"
+            " pywebview (and on Linux, python3-gi + gir1.2-webkit2-4.1)"
+            " for the desktop window."
         )
-        # Fall back to keeping Flask alive so the remote web panel still works
-        try:
-            flask_thread.join()
-        except KeyboardInterrupt:
-            pass
+        _run_headless(core, port, flask_thread)
         return
 
     auto_url = (
@@ -311,10 +318,12 @@ def main() -> None:
         confirm_close = False,
     )
 
-    # Start the webview event loop (blocks until the window is closed)
+    # Start the webview event loop (blocks until the window is closed).
+    # GUI backend is per-OS: Edge WebView2 on Windows (ships with Win 11,
+    # 1-click install on Win 10), GTK / WebKitGTK on Linux.  Override the
+    # default Linux pick to "qt" by exporting OBLIVION_WEBVIEW_GUI=qt.
     webview.start(
-        gui          = "edgechromium",   # Edge WebView2 — ships with Windows 11,
-                                         # 1-click install on Win 10
+        gui          = _plat.webview_gui(),
         debug        = False,
         http_server  = False,            # we already have Flask
         icon         = _ico_path if os.path.isfile(_ico_path) else None,

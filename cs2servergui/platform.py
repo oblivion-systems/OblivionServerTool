@@ -24,6 +24,8 @@ server_process_name()             → str   # "cs2.exe" | "cs2"
 metamod_download_url()            → str   # alliedmods MetaMod default
 css_download_url()                → str   # CounterStrikeSharp default
 case_mismatch_hint(path)          → str | None  # Linux-only case diagnostic
+webview_gui()                     → str   # pywebview backend name
+has_display()                     → bool  # desktop session available?
 """
 from __future__ import annotations
 
@@ -184,6 +186,42 @@ def css_download_url() -> str:
 # case in its parent dir, and returns a one-line hint pointing the
 # operator at the exact mismatch.  Returns None on Windows or when there
 # is no case-different match (i.e. the path really is missing).
+
+# ── Desktop window backend (v1.2 Linux non-headless) ─────────────────────────
+# pywebview wraps different native webview engines per OS.  Windows ships
+# Edge WebView2 with Win 11 (or 1-click install on Win 10); Linux operators
+# install WebKitGTK once (`apt install python3-gi gir1.2-webkit2-4.1`) and
+# pywebview's GTK backend uses it.  The single hardcoded "edgechromium" in
+# main.py becomes a platform-aware pick — Windows callers keep WebView2
+# unchanged.
+
+def webview_gui() -> str:
+    """pywebview's GUI backend name for `webview.start(gui=...)`.
+
+    Windows: "edgechromium"  ·  Linux: "gtk"
+    Override-able via `OBLIVION_WEBVIEW_GUI=<name>` for operators who want
+    to force "qt" instead of the GTK default on Linux.
+    """
+    override = os.environ.get("OBLIVION_WEBVIEW_GUI", "").strip()
+    if override:
+        return override
+    return "edgechromium" if _IS_WINDOWS else "gtk"
+
+
+def has_display() -> bool:
+    """True if a desktop session is available for a GUI window.
+
+    Windows: always True (the desktop is always there).
+    Linux:   True iff `$DISPLAY` or `$WAYLAND_DISPLAY` is set — SSH-only
+             headless boxes have neither.
+
+    Used to auto-fall-back to `--headless` behaviour when the operator
+    launches without `--headless` on a server that can't open a window.
+    """
+    if _IS_WINDOWS:
+        return True
+    return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+
 
 def case_mismatch_hint(path: str) -> str | None:
     """If `path` doesn't exist but does exist under a different case in

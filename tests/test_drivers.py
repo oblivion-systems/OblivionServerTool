@@ -355,6 +355,83 @@ t('platform: case_mismatch_hint() returns None when no case-sibling exists',
   t_platform_case_mismatch_hint_returns_none_when_no_sibling)
 
 
+def t_platform_webview_gui_default_per_os():
+    """webview_gui() returns 'edgechromium' on Windows, 'gtk' on Linux,
+    when no OBLIVION_WEBVIEW_GUI override is set."""
+    import sys as _sys, os as _os
+    from cs2servergui.platform import webview_gui
+    saved = _os.environ.pop("OBLIVION_WEBVIEW_GUI", None)
+    try:
+        got = webview_gui()
+        expected = "edgechromium" if _sys.platform == "win32" else "gtk"
+        return got == expected, f'got={got!r} expected={expected!r}'
+    finally:
+        if saved is not None:
+            _os.environ["OBLIVION_WEBVIEW_GUI"] = saved
+t('platform: webview_gui() picks edgechromium on Windows, gtk on Linux',
+  t_platform_webview_gui_default_per_os)
+
+
+def t_platform_webview_gui_respects_env_override():
+    """Operators can override the GUI backend via OBLIVION_WEBVIEW_GUI
+    (e.g. forcing 'qt' on Linux instead of GTK)."""
+    import os as _os
+    from cs2servergui.platform import webview_gui
+    saved = _os.environ.get("OBLIVION_WEBVIEW_GUI", "")
+    _os.environ["OBLIVION_WEBVIEW_GUI"] = "qt"
+    try:
+        return webview_gui() == "qt", f'override ignored: got={webview_gui()!r}'
+    finally:
+        if saved:
+            _os.environ["OBLIVION_WEBVIEW_GUI"] = saved
+        else:
+            _os.environ.pop("OBLIVION_WEBVIEW_GUI", None)
+t('platform: webview_gui() honours OBLIVION_WEBVIEW_GUI env override',
+  t_platform_webview_gui_respects_env_override)
+
+
+def t_platform_has_display_windows_always_true():
+    """has_display() is always True on Windows — there's no equivalent of
+    SSH-only / no-display servers in the Windows model."""
+    import sys as _sys
+    from cs2servergui.platform import has_display
+    if _sys.platform != "win32":
+        return True, 'skip: Linux host'
+    return has_display() is True, f'got={has_display()!r}'
+t('platform: has_display() returns True on Windows',
+  t_platform_has_display_windows_always_true)
+
+
+def t_platform_has_display_linux_checks_display_envs():
+    """On Linux, has_display() must return True iff $DISPLAY or
+    $WAYLAND_DISPLAY is set.  Skip on Windows (always True there)."""
+    import sys as _sys, os as _os
+    from cs2servergui.platform import has_display
+    if _sys.platform == "win32":
+        return True, 'skip: Windows host'
+    # Save + clear both env vars to test the no-display path.
+    saved_x   = _os.environ.pop("DISPLAY", None)
+    saved_w   = _os.environ.pop("WAYLAND_DISPLAY", None)
+    try:
+        if has_display():
+            return False, 'expected False with DISPLAY/WAYLAND_DISPLAY unset'
+        _os.environ["DISPLAY"] = ":0"
+        if not has_display():
+            return False, 'expected True with DISPLAY=:0'
+        _os.environ.pop("DISPLAY")
+        _os.environ["WAYLAND_DISPLAY"] = "wayland-0"
+        if not has_display():
+            return False, 'expected True with WAYLAND_DISPLAY set'
+        return True, 'has_display() matches env state'
+    finally:
+        _os.environ.pop("DISPLAY", None)
+        _os.environ.pop("WAYLAND_DISPLAY", None)
+        if saved_x is not None: _os.environ["DISPLAY"]         = saved_x
+        if saved_w is not None: _os.environ["WAYLAND_DISPLAY"] = saved_w
+t('platform: has_display() on Linux follows $DISPLAY / $WAYLAND_DISPLAY',
+  t_platform_has_display_linux_checks_display_envs)
+
+
 def t_platform_case_mismatch_hint_finds_sibling_on_linux():
     """When the expected component differs only by case from an existing
     sibling, the hint must mention both names so the operator can see

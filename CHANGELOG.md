@@ -2,6 +2,39 @@
 
 ---
 
+## v1.2.0-alpha1 — 2026-06-26 (Linux desktop window)
+
+First v1.2 slice.  Brings the Windows-style in-app window to Linux
+desktop sessions while keeping headless as the right default for
+servers.
+
+### Added
+- `platform.webview_gui()` — pywebview backend name per OS.
+  Windows: `"edgechromium"` (unchanged).  Linux: `"gtk"` (WebKitGTK).
+  Operator override via `OBLIVION_WEBVIEW_GUI=qt`.
+- `platform.has_display()` — `True` on Windows; on Linux, `True` iff
+  `$DISPLAY` or `$WAYLAND_DISPLAY` is set.
+- README quickstart for Linux desktop: install `python3-gi
+  gir1.2-webkit2-4.1`, run `python main.py`.
+
+### Changed
+- `main.py` — `webview.start()` now passes `gui=platform.webview_gui()`
+  instead of the hardcoded `"edgechromium"`.  Behaviour on Windows is
+  identical; Linux desktop sessions get a real in-app WebKitGTK window.
+- `main.py` — auto-fallback to `--headless` when launched without it
+  on a Linux box with no `$DISPLAY` / `$WAYLAND_DISPLAY` (typical SSH /
+  systemd scenario).  Log line names the reason.
+- `main.py` — pywebview `ImportError` no longer prints "install
+  pywebview" and exits.  Falls through to `_run_headless()` so the web
+  panel stays reachable.
+
+### Tests
+- +4 platform tests: per-OS GUI default, `OBLIVION_WEBVIEW_GUI` override,
+  `has_display()` Windows-always-True, `has_display()` Linux follows
+  display envs.  318 pass on Windows AND native Linux (was 314).
+
+---
+
 ## v1.1.0 — 2026-06-26 (Linux + headless)
 
 First multi-OS release.  Windows still ships as the single `.exe` with
