@@ -1,7 +1,8 @@
 # Oblivion Server Tool
 
-A desktop application for managing a **Counter-Strike 2 dedicated server** on Windows.  
-Built with Python + Flask + pywebview (Edge WebView2). Ships as a single `.exe` with an optional installer.
+A desktop application for managing a **Counter-Strike 2 dedicated server**.
+Windows ships as a single `.exe` (desktop window via Edge WebView2);
+Linux runs headless via Docker or systemd, administered from the web panel.
 
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-Tip-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/jacquesvn)
 [![License: BSL 1.1](https://img.shields.io/badge/license-BSL_1.1-purple)](LICENSE.md)
@@ -246,13 +247,56 @@ ISCC installer.iss
 # Output: dist\OblivionServerToolSetup-v<version>.exe
 ```
 
+### Option C — Linux *(v1.1.0, in progress)*
+
+The desktop window is Windows-only; on Linux the app runs **headless**
+(`--headless`) and is administered through the web panel only.
+
+**Docker (recommended)** — pulls the published image and brings up the
+panel on `:5050`:
+
+```bash
+# Until ghcr.io publish lands, build locally:
+git clone https://github.com/oblivion-systems/OblivionServerTool.git
+cd OblivionServerTool
+docker compose up -d
+
+# Web panel: http://<host>:5050
+# CS2 server dir: /srv/cs2 inside the container (set in the web UI)
+# Config persists in the oblivion_config volume
+```
+
+**Bare-metal (systemd)** — for operators who don't want Docker:
+
+```bash
+sudo useradd --system --home /opt/oblivion-server-tool \
+    --shell /usr/sbin/nologin oblivion
+sudo git clone https://github.com/oblivion-systems/OblivionServerTool.git \
+    /opt/oblivion-server-tool
+sudo chown -R oblivion:oblivion /opt/oblivion-server-tool
+sudo pip3 install -r /opt/oblivion-server-tool/requirements-headless.txt
+sudo mkdir -p /srv/cs2 && sudo chown oblivion:oblivion /srv/cs2
+
+sudo cp /opt/oblivion-server-tool/packaging/systemd/oblivion-server-tool.service \
+    /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now oblivion-server-tool
+
+# Status / logs
+sudo systemctl status oblivion-server-tool
+sudo journalctl -u oblivion-server-tool -f
+```
+
+Full notes — hardening tweaks, ReadWritePaths, config locations — in
+[packaging/systemd/README.md](packaging/systemd/README.md).
+
 ---
 
 ## Requirements
 
 | Requirement | Notes |
 |---|---|
-| Windows 10 / 11 (64-bit) | Edge WebView2 runtime required — ships with Windows 11, 1-click install on Windows 10 |
+| Windows 10 / 11 (64-bit) **or** Linux (x86_64) | Windows uses Edge WebView2 (ships with Win11); Linux runs `--headless` via Docker or systemd |
 | CS2 dedicated server | Can be installed by the tool if missing |
 | Steam account (dedicated) | For workshop downloads — **use a separate account**, not your personal one |
 | Port 27015 open (TCP + UDP) | For players to connect |

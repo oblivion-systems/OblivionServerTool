@@ -1326,6 +1326,13 @@ class AppCore:
         if not os.path.isfile(_config.CS2_PATH):
             msg = f"CS2 is not installed (expected at {_config.CS2_PATH})"
             self.log(f"[preflight] ✗ {msg}")
+            # v1.1: Linux is case-sensitive — surface case mismatches BEFORE
+            # the operator wastes time double-checking their install.
+            from cs2servergui import platform as _plat
+            hint = _plat.case_mismatch_hint(_config.CS2_PATH)
+            if hint:
+                self.log(f"[preflight]   → {hint}")
+                msg = f"{msg} — {hint}"
             self.log("[preflight]   → Config → Server Installation → Install / Reinstall")
             errors.append(msg)
 

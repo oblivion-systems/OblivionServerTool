@@ -1,0 +1,43 @@
+[Unit]
+Description=Oblivion Server Tool (CS2 server admin panel)
+Documentation=https://github.com/oblivion-systems/OblivionServerTool
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=oblivion
+Group=oblivion
+
+# App install location — adjust if you cloned elsewhere
+WorkingDirectory=/opt/oblivion-server-tool
+ExecStart=/usr/bin/python3 /opt/oblivion-server-tool/main.py --headless
+
+# Config lives under the service user's home (XDG default)
+Environment=XDG_CONFIG_HOME=%h/.config
+
+# Restart on crash, but don't thrash if the app refuses to start
+Restart=on-failure
+RestartSec=10s
+StartLimitBurst=5
+StartLimitIntervalSec=120
+
+# Logging — goes to journalctl -u oblivion-server-tool
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=oblivion-server-tool
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.config /srv/cs2
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

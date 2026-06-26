@@ -4274,9 +4274,13 @@ def t_v165_runtime_install_unzip_rejects_bad_layout():
         zf.writestr('README.txt', 'wrong layout, should be rejected')
     bad_zip = buf.getvalue()
     fake_csgo = tempfile.mkdtemp(prefix='oblivion_runtime_csgo_')
-    # Force registry_client to use our bytes by monkey-patching _http_fetch.
-    original_fetch = registry_client._http_fetch
-    registry_client._http_fetch = lambda url, **kw: bad_zip  # type: ignore
+    # Force registry_client to use our bytes + a .zip URL so the format
+    # dispatcher routes to _safe_extract_zip on Linux (where the default
+    # MetaMod URL is .tar.gz).  Tests zip-extract mechanics, not URL routing.
+    original_fetch  = registry_client._http_fetch
+    original_resolve = registry_client._resolve_runtime_url
+    registry_client._http_fetch          = lambda url, **kw: bad_zip  # type: ignore
+    registry_client._resolve_runtime_url = lambda c: 'https://example.invalid/stub.zip'  # type: ignore
     try:
         registry_client.install_runtime('metamod', fake_csgo)
     except registry_client.RegistryError as exc:
@@ -4290,7 +4294,8 @@ def t_v165_runtime_install_unzip_rejects_bad_layout():
     except Exception as exc:
         return False, f'unexpected error type: {exc!r}'
     finally:
-        registry_client._http_fetch = original_fetch
+        registry_client._http_fetch          = original_fetch
+        registry_client._resolve_runtime_url = original_resolve
         import shutil; shutil.rmtree(fake_csgo, ignore_errors=True)
     return False, 'expected RegistryError; got none'
 t('runtime (v0.16.5): rejects zip without expected addons/<component>/',
@@ -4310,8 +4315,12 @@ def t_v165_runtime_install_happy_path_extracts_into_csgo():
         zf.writestr('addons/metamod/bin/win64/loader.dll', b'\xDE\xAD\xBE\xEF')
     good_zip = buf.getvalue()
     fake_csgo = tempfile.mkdtemp(prefix='oblivion_runtime_happy_')
-    original_fetch = registry_client._http_fetch
-    registry_client._http_fetch = lambda url, **kw: good_zip  # type: ignore
+    # Pin URL to .zip so the dispatcher routes to _safe_extract_zip
+    # regardless of host OS (Linux default is .tar.gz).
+    original_fetch  = registry_client._http_fetch
+    original_resolve = registry_client._resolve_runtime_url
+    registry_client._http_fetch          = lambda url, **kw: good_zip  # type: ignore
+    registry_client._resolve_runtime_url = lambda c: 'https://example.invalid/stub.zip'  # type: ignore
     try:
         result = registry_client.install_runtime('metamod', fake_csgo)
         loader = _os.path.join(fake_csgo, 'addons', 'metamod', 'bin', 'win64', 'loader.dll')
@@ -4326,10 +4335,93 @@ def t_v165_runtime_install_happy_path_extracts_into_csgo():
             return False, f'files_written too low: {result!r}'
         return True, f'happy path extracted {result["files_written"]} files'
     finally:
-        registry_client._http_fetch = original_fetch
+        registry_client._http_fetch          = original_fetch
+        registry_client._resolve_runtime_url = original_resolve
         import shutil; shutil.rmtree(fake_csgo, ignore_errors=True)
 t('runtime (v0.16.5): happy-path extracts into csgo/addons/',
   t_v165_runtime_install_happy_path_extracts_into_csgo)
+
+
+def t_v11_runtime_install_handles_targz_for_linux_metamod():
+    """Linux MetaMod ships as .tar.gz (not .zip).  install_runtime must
+    dispatch on URL suffix and use _safe_extract_targz when the resolved
+    URL ends in .tar.gz.  Builds a synthetic tar.gz with the expected
+    addons/metamod/ layout, monkey-patches both the URL resolver and the
+    HTTP fetcher, and confirms files land where expected."""
+    import io as _io, tarfile as _tf, tempfile, os as _os
+    from cs2servergui import registry_client
+
+    # Build a valid addons/metamod/ tar.gz payload — same layout as the
+    # zip happy-path test, just a different container format.
+    buf = _io.BytesIO()
+    with _tf.open(fileobj=buf, mode='w:gz') as tar:
+        ini_data = b'; test\n'
+        ini = _tf.TarInfo('addons/metamod/metaplugins.ini')
+        ini.size = len(ini_data)
+        tar.addfile(ini, _io.BytesIO(ini_data))
+        so_data = b'\x7fELFstub'
+        so = _tf.TarInfo('addons/metamod/bin/linuxsteamrt64/libloader.so')
+        so.size = len(so_data)
+        tar.addfile(so, _io.BytesIO(so_data))
+    good_targz = buf.getvalue()
+
+    fake_csgo = tempfile.mkdtemp(prefix='oblivion_runtime_targz_')
+    original_fetch  = registry_client._http_fetch
+    original_resolve = registry_client._resolve_runtime_url
+    # Force a tar.gz URL regardless of the host OS — we're testing the
+    # extractor dispatch, not the per-OS URL picker.
+    fake_url = 'https://example.invalid/mmsource-stub-linux.tar.gz'
+    registry_client._http_fetch         = lambda url, **kw: good_targz  # type: ignore
+    registry_client._resolve_runtime_url = lambda component: fake_url   # type: ignore
+    try:
+        result = registry_client.install_runtime('metamod', fake_csgo)
+        so_path = _os.path.join(fake_csgo, 'addons', 'metamod',
+                                 'bin', 'linuxsteamrt64', 'libloader.so')
+        ini_path = _os.path.join(fake_csgo, 'addons', 'metamod', 'metaplugins.ini')
+        if not _os.path.isfile(so_path):
+            return False, f'.so not at expected Linux path: {so_path}'
+        if not _os.path.isfile(ini_path):
+            return False, f'metaplugins.ini not at expected path: {ini_path}'
+        if result.get('files_written', 0) < 2:
+            return False, f'files_written too low: {result!r}'
+        return True, f'tar.gz dispatch + extract OK ({result["files_written"]} files)'
+    finally:
+        registry_client._http_fetch          = original_fetch
+        registry_client._resolve_runtime_url = original_resolve
+        import shutil; shutil.rmtree(fake_csgo, ignore_errors=True)
+t('runtime (v1.1): tar.gz dispatch handles Linux MetaMod archive',
+  t_v11_runtime_install_handles_targz_for_linux_metamod)
+
+
+def t_v11_safe_extract_targz_rejects_path_traversal():
+    """_safe_extract_targz must reject tar entries with `..` escape
+    attempts before any files are written.  Mirrors the Zip Slip
+    protection already in _safe_extract_zip."""
+    import io as _io, tarfile as _tf, tempfile, os as _os
+    from cs2servergui import registry_client
+
+    buf = _io.BytesIO()
+    with _tf.open(fileobj=buf, mode='w:gz') as tar:
+        bad_data = b'evil\n'
+        bad = _tf.TarInfo('../../../etc/passwd-escape')
+        bad.size = len(bad_data)
+        tar.addfile(bad, _io.BytesIO(bad_data))
+    evil_targz = buf.getvalue()
+
+    dest = tempfile.mkdtemp(prefix='oblivion_targz_traversal_')
+    try:
+        try:
+            registry_client._safe_extract_targz(evil_targz, dest)
+        except registry_client.RegistryError as exc:
+            msg = str(exc).lower()
+            if 'traversal' in msg or 'absolute' in msg or 'slip' in msg:
+                return True, f'rejected as expected: {exc}'
+            return False, f'wrong error message: {exc!r}'
+        return False, 'expected RegistryError; got none'
+    finally:
+        import shutil; shutil.rmtree(dest, ignore_errors=True)
+t('runtime (v1.1): _safe_extract_targz rejects path traversal',
+  t_v11_safe_extract_targz_rejects_path_traversal)
 
 
 # ─── v0.16.14 — Spectator URL polish (task #170) ─────────────────────────

@@ -105,18 +105,19 @@ REGISTRY_FETCH_TIMEOUT_SECONDS = 12   # full fetch (connect + read)
 # "css_download_url") when a newer build lands before we ship an update.
 #
 # MetaMod's "latest snapshot" URL pattern: alliedmods publishes per-build
-# zips under mms.alliedmods.net.  Pin a known-stable git build rather
+# archives under mms.alliedmods.net.  Pin a known-stable git build rather
 # than a moving "latest" symlink — the friend benefits from reproducibility.
+# Windows gets .zip, Linux gets .tar.gz — picked by platform.metamod_download_url().
 #
 # CSS picks the "with-runtime" flavour: ships a bundled .NET 8 runtime so
 # the operator doesn't need a separate .NET install.  ~150 MB unpacked.
-RUNTIME_METAMOD_DEFAULT_URL = (
-    "https://mms.alliedmods.net/mmsdrop/2.0/mmsource-2.0.0-git1402-windows.zip"
+# Both OSes ship .zip; the Linux variant just has 'linux' in the filename.
+from cs2servergui.platform import (
+    metamod_download_url as _metamod_download_url,
+    css_download_url     as _css_download_url,
 )
-RUNTIME_CSS_DEFAULT_URL = (
-    "https://github.com/roflmuffin/CounterStrikeSharp/releases/download/"
-    "v1.0.369/counterstrikesharp-with-runtime-windows-1.0.369.zip"
-)
+RUNTIME_METAMOD_DEFAULT_URL = _metamod_download_url()
+RUNTIME_CSS_DEFAULT_URL     = _css_download_url()
 # Runtime zips are larger than regular plugin zips (CSS with-runtime is ~150 MB
 # unpacked), so the registry's 50 MB cap won't fit.  Use a 250 MB ceiling +
 # 90s timeout — comfortably above today's known builds.

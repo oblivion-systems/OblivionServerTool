@@ -269,6 +269,122 @@ t('cs2driver: process_image_name property matches platform.server_process_name()
   t_cs2driver_process_image_name_is_platform_correct)
 
 
+def t_platform_metamod_download_url_is_os_appropriate():
+    """metamod_download_url() returns a .zip URL on Windows and a .tar.gz
+    URL on Linux — alliedmods ships different formats per OS."""
+    import sys as _sys
+    from cs2servergui.platform import metamod_download_url
+    url = metamod_download_url()
+    if not url.startswith("https://mms.alliedmods.net/"):
+        return False, f'wrong host: {url!r}'
+    if _sys.platform == "win32":
+        ok = url.endswith("-windows.zip")
+    else:
+        ok = url.endswith("-linux.tar.gz")
+    return ok, f'url={url!r}'
+t('platform: metamod_download_url() picks correct archive per OS',
+  t_platform_metamod_download_url_is_os_appropriate)
+
+
+def t_platform_css_download_url_is_os_appropriate():
+    """css_download_url() returns a windows or linux variant — both are
+    .zip but the filename's OS tag must match the current platform."""
+    import sys as _sys
+    from cs2servergui.platform import css_download_url
+    url = css_download_url()
+    if "github.com/roflmuffin/CounterStrikeSharp" not in url:
+        return False, f'wrong repo: {url!r}'
+    if not url.endswith(".zip"):
+        return False, f'CSS download must be a .zip on both OSes: {url!r}'
+    if _sys.platform == "win32":
+        ok = "-windows-" in url
+    else:
+        ok = "-linux-" in url
+    return ok, f'url={url!r}'
+t('platform: css_download_url() picks correct OS tag',
+  t_platform_css_download_url_is_os_appropriate)
+
+
+def t_config_runtime_urls_match_platform():
+    """config.RUNTIME_METAMOD_DEFAULT_URL and RUNTIME_CSS_DEFAULT_URL must
+    track platform.metamod_download_url() / css_download_url() — this is
+    what closes the "Slice 5 was Windows-only" gap.  If the runtime URL
+    constants ever drift away from the platform functions, this catches it."""
+    from cs2servergui import config as _cfg
+    from cs2servergui.platform import metamod_download_url, css_download_url
+    if _cfg.RUNTIME_METAMOD_DEFAULT_URL != metamod_download_url():
+        return False, (f'metamod: cfg={_cfg.RUNTIME_METAMOD_DEFAULT_URL!r} '
+                        f'platform={metamod_download_url()!r}')
+    if _cfg.RUNTIME_CSS_DEFAULT_URL != css_download_url():
+        return False, (f'css: cfg={_cfg.RUNTIME_CSS_DEFAULT_URL!r} '
+                        f'platform={css_download_url()!r}')
+    return True, 'config URLs delegate to platform.*'
+t('config: runtime URLs match platform.metamod_download_url() / css_download_url()',
+  t_config_runtime_urls_match_platform)
+
+
+def t_platform_case_mismatch_hint_returns_none_when_path_exists():
+    """case_mismatch_hint() returns None for an existing path — only
+    fires when the path is missing AND a same-name-different-case sibling
+    exists."""
+    import tempfile, os as _os
+    from cs2servergui.platform import case_mismatch_hint
+    root = tempfile.mkdtemp(prefix='oblivion_case_ok_')
+    try:
+        existing = _os.path.join(root, 'real_dir')
+        _os.makedirs(existing)
+        return case_mismatch_hint(existing) is None, 'hint on existing path'
+    finally:
+        import shutil; shutil.rmtree(root, ignore_errors=True)
+t('platform: case_mismatch_hint() returns None for existing paths',
+  t_platform_case_mismatch_hint_returns_none_when_path_exists)
+
+
+def t_platform_case_mismatch_hint_returns_none_when_no_sibling():
+    """When a path component truly doesn't exist (no case-different
+    sibling), return None — don't fabricate hints."""
+    import tempfile, os as _os
+    from cs2servergui.platform import case_mismatch_hint
+    root = tempfile.mkdtemp(prefix='oblivion_case_miss_')
+    try:
+        bogus = _os.path.join(root, 'no_such_dir', 'no_such_file')
+        return case_mismatch_hint(bogus) is None, 'hint without sibling'
+    finally:
+        import shutil; shutil.rmtree(root, ignore_errors=True)
+t('platform: case_mismatch_hint() returns None when no case-sibling exists',
+  t_platform_case_mismatch_hint_returns_none_when_no_sibling)
+
+
+def t_platform_case_mismatch_hint_finds_sibling_on_linux():
+    """When the expected component differs only by case from an existing
+    sibling, the hint must mention both names so the operator can see
+    the exact mismatch.  No-op on Windows (case-insensitive FS) — assert
+    None there to confirm we don't false-positive on the host OS."""
+    import sys as _sys, tempfile, os as _os
+    from cs2servergui.platform import case_mismatch_hint
+    root = tempfile.mkdtemp(prefix='oblivion_case_sib_')
+    try:
+        # Real folder is lowercase; operator-typed path uses capital.
+        _os.makedirs(_os.path.join(root, 'counter-strike global offensive'))
+        wrong = _os.path.join(root, 'Counter-Strike Global Offensive', 'game')
+        hint = case_mismatch_hint(wrong)
+        if _sys.platform == 'win32':
+            # Windows FS is case-insensitive — Path 'Counter-Strike...' would
+            # actually resolve to the lowercase one, so no hint should fire.
+            return hint is None, f'unexpected hint on Windows: {hint!r}'
+        if hint is None:
+            return False, 'expected a case-mismatch hint on Linux, got None'
+        if 'case mismatch' not in hint.lower():
+            return False, f'hint missing "case mismatch": {hint!r}'
+        if 'counter-strike global offensive' not in hint.lower():
+            return False, f'hint missing sibling name: {hint!r}'
+        return True, f'hint: {hint}'
+    finally:
+        import shutil; shutil.rmtree(root, ignore_errors=True)
+t('platform: case_mismatch_hint() pinpoints case-different sibling on Linux',
+  t_platform_case_mismatch_hint_finds_sibling_on_linux)
+
+
 # ─── Auto-generated pytest cases ──────────────────────────────────────────
 def _slug(name):
     out = ''.join(c if c.isalnum() else '_' for c in name).strip('_').lower()

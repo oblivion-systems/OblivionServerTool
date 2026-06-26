@@ -21,6 +21,9 @@ server_binary_rel_path()          → str   # relative from server_dir
 steamcmd_filename()               → str
 metamod_bin_arch()                → str   # "win64" | "linuxsteamrt64"
 server_process_name()             → str   # "cs2.exe" | "cs2"
+metamod_download_url()            → str   # alliedmods MetaMod default
+css_download_url()                → str   # CounterStrikeSharp default
+case_mismatch_hint(path)          → str | None  # Linux-only case diagnostic
 """
 from __future__ import annotations
 
@@ -137,6 +140,94 @@ def metamod_bin_arch() -> str:
 def server_process_name() -> str:
     """CS2 dedicated-server process image name."""
     return "cs2.exe" if _IS_WINDOWS else "cs2"
+
+
+# ── Runtime download URLs (auto-install MetaMod + CSS) ────────────────────────
+# Pinned per OS so we ship a known-good combination.  Operators can override
+# in oblivion_config.json (keys: metamod_download_url, css_download_url) when
+# a newer build lands before we ship an app update.
+
+_METAMOD_BUILD = "2.0.0-git1402"
+_CSS_VERSION   = "1.0.369"
+
+
+def metamod_download_url() -> str:
+    """MetaMod : Source 2 archive URL for the current OS.
+
+    Windows: .zip  ·  Linux: .tar.gz  (alliedmods convention).
+    """
+    if _IS_WINDOWS:
+        return (f"https://mms.alliedmods.net/mmsdrop/2.0/"
+                f"mmsource-{_METAMOD_BUILD}-windows.zip")
+    return (f"https://mms.alliedmods.net/mmsdrop/2.0/"
+            f"mmsource-{_METAMOD_BUILD}-linux.tar.gz")
+
+
+def css_download_url() -> str:
+    """CounterStrikeSharp 'with-runtime' archive URL for the current OS.
+
+    Both OSes ship .zip — Linux variant just has 'linux' in the filename.
+    """
+    os_tag = "windows" if _IS_WINDOWS else "linux"
+    return (f"https://github.com/roflmuffin/CounterStrikeSharp/releases/"
+            f"download/v{_CSS_VERSION}/"
+            f"counterstrikesharp-with-runtime-{os_tag}-{_CSS_VERSION}.zip")
+
+
+# ── Case-mismatch diagnostic (Linux only) ─────────────────────────────────────
+# Windows is case-insensitive — a path lookup always works regardless of how
+# the operator typed it.  Linux is case-sensitive, so a CS2 install at
+# /srv/cs2/steamapps/Common/Counter-Strike Global Offensive (capital C in
+# Common) fails our os.path.isfile() pre-flight with a generic
+# "CS2 is not installed" error.  This helper walks the path components,
+# finds the FIRST one that doesn't exist but does exist with a different
+# case in its parent dir, and returns a one-line hint pointing the
+# operator at the exact mismatch.  Returns None on Windows or when there
+# is no case-different match (i.e. the path really is missing).
+
+def case_mismatch_hint(path: str) -> str | None:
+    """If `path` doesn't exist but does exist under a different case in
+    its parent dir, return a one-line operator-friendly hint.  Otherwise
+    None.  No-op on Windows."""
+    if _IS_WINDOWS or not path:
+        return None
+    if os.path.exists(path):
+        return None
+    # Walk from the root forwards, looking for the first missing component.
+    parts = []
+    head = path
+    while True:
+        head, tail = os.path.split(head)
+        if not tail:
+            if head:
+                parts.insert(0, head)
+            break
+        parts.insert(0, tail)
+    if not parts:
+        return None
+    cur = parts[0] if parts[0].startswith("/") else os.path.sep
+    if not parts[0].startswith("/"):
+        cur = parts[0]
+        rest = parts[1:]
+    else:
+        rest = parts[1:]
+    for part in rest:
+        candidate = os.path.join(cur, part)
+        if os.path.exists(candidate):
+            cur = candidate
+            continue
+        # Component is missing — scan siblings for case-insensitive match.
+        try:
+            siblings = os.listdir(cur)
+        except OSError:
+            return None
+        lower = part.lower()
+        for sib in siblings:
+            if sib != part and sib.lower() == lower:
+                return (f"case mismatch — expected {part!r} but found "
+                        f"{sib!r} in {cur} (Linux is case-sensitive)")
+        return None
+    return None
 
 
 # ── Port listener resolution ──────────────────────────────────────────────────

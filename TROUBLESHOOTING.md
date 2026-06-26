@@ -256,3 +256,47 @@ The snapshot's `Config (redacted)` section shows `admin_pin: ***` and
 `guest_pin: ***` so you can confirm the PINs are SET without leaking
 them.  If either shows `(none)` or empty, fix that before exposing
 the panel.
+
+## Linux: secret storage on headless servers
+
+The app uses the system `keyring` library to store sensitive values
+(Discord bot token, Steam workshop password, GSLT) in the OS secret
+store when one is available:
+
+- **Windows** — Credential Manager.  Always present.  Encrypted at rest
+  with the user's logon credentials.
+- **Linux desktop** — GNOME Keyring / KWallet via Secret Service (D-Bus).
+  Present on a normal desktop install.  Encrypted at rest with the
+  user's login password.
+- **Linux headless** (Docker, systemd, SSH-only servers) — no D-Bus,
+  no Secret Service, **no encrypted store available**.
+
+**On a headless Linux box, `keyring` fails to initialise and the app
+falls back to plaintext storage in `oblivion_config.json`.**  This is
+intentional: a headless tournament-host box has no way to interactively
+unlock a secret store every reboot, and a half-working secret store
+that prompts mid-server-start is worse than a plaintext config the
+operator already knows to protect.
+
+Practical consequences on a headless Linux deploy:
+
+1. **`oblivion_config.json` becomes sensitive** — back it up to a
+   private location, never paste its raw contents into a public log,
+   and keep file permissions tight (the systemd unit ships with
+   `User=oblivion` + `ProtectHome=read-only` precisely so the file is
+   `chmod 600` under the service user's home).
+2. **The diagnostic snapshot is safe to share** — it redacts every
+   secret (`discord_bot_token: ***`, `steam_password: ***`, etc.)
+   regardless of whether the underlying value came from keyring or
+   plaintext config.  Same `***` either way.
+3. **If you want encrypted-at-rest secrets on a headless Linux box**,
+   the options are: (a) deploy the app on a desktop session with the
+   user logged in (rare for a server), (b) run a full Secret Service
+   provider with an auto-unlock keyring under systemd (advanced; out
+   of scope for this app), or (c) full-disk encryption (LUKS) — which
+   is what most operators actually do, and which protects the plaintext
+   config the same way it'd protect the keyring DB.
+
+If `keyring` is installed AND a Secret Service IS available (you
+booted a desktop session, ran `systemctl --user start gnome-keyring`,
+etc.), the app uses it automatically.  No config flag.

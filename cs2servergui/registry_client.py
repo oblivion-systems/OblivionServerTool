@@ -38,6 +38,7 @@ import json
 import os
 import shutil
 import sys
+import tarfile
 import tempfile
 import threading
 import time
@@ -318,6 +319,59 @@ def _safe_extract_zip(zip_bytes: bytes, dest_dir: str) -> None:
             raise RegistryError(f"zip slip detected on entry {name!r}")
     zf.extractall(dest_dir)
     zf.close()
+
+
+def _safe_extract_targz(tar_bytes: bytes, dest_dir: str) -> None:
+    """Extract a tar.gz into dest_dir with path-traversal protection.
+
+    Used for the Linux MetaMod download (alliedmods ships .tar.gz on Linux,
+    .zip on Windows).  Same safety profile as _safe_extract_zip:
+
+        * Reject absolute paths and parent-dir escapes.
+        * Skip symlinks and hardlinks (MetaMod's archive doesn't need them;
+          allowing them opens a symlink-traversal attack where the link
+          points outside dest_dir).
+        * Skip device files and other special types — only regular files
+          and directories are extracted.
+    """
+    os.makedirs(dest_dir, exist_ok=True)
+    dest_norm = os.path.realpath(dest_dir)
+    try:
+        tf = tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:gz")
+    except tarfile.TarError as exc:
+        raise RegistryError(f"download is not a valid tar.gz: {exc}") from exc
+    try:
+        safe_members: list[tarfile.TarInfo] = []
+        for member in tf.getmembers():
+            name = member.name
+            if name.startswith("/") or name.startswith("\\"):
+                raise RegistryError(f"tar entry uses absolute path: {name!r}")
+            target = os.path.realpath(os.path.join(dest_dir, name))
+            if os.path.commonpath([dest_norm, target]) != dest_norm:
+                raise RegistryError(f"path traversal detected on entry {name!r}")
+            if member.issym() or member.islnk():
+                # MetaMod's tar.gz doesn't ship links — drop silently rather
+                # than fail, in case a future build adds harmless ones.
+                continue
+            if not (member.isreg() or member.isdir()):
+                continue
+            safe_members.append(member)
+        tf.extractall(dest_dir, members=safe_members)
+    finally:
+        tf.close()
+
+
+def _safe_extract_archive(data: bytes, dest_dir: str, url: str) -> None:
+    """Pick the right extractor based on `url`'s suffix.
+
+    `.tar.gz` / `.tgz` → tar.gz; anything else → zip.  Centralises the
+    routing so the install path doesn't have to know about formats.
+    """
+    low = url.lower()
+    if low.endswith(".tar.gz") or low.endswith(".tgz"):
+        _safe_extract_targz(data, dest_dir)
+    else:
+        _safe_extract_zip(data, dest_dir)
 
 
 # ─── Version comparison (semver-lite) ──────────────────────────────────────
@@ -601,15 +655,17 @@ def _install_runtime_locked(component: str, csgo_dir: str, meta: dict) -> dict:
     # other plugins — are preserved.
     staging = tempfile.mkdtemp(prefix=f"oblivion_runtime_{component}_")
     try:
-        _safe_extract_zip(data, staging)
+        # Format dispatch by URL suffix — MetaMod ships .tar.gz on Linux,
+        # everything else is .zip.  See platform.metamod_download_url().
+        _safe_extract_archive(data, staging, url)
 
-        # Expect addons/<component>/ at the zip root.  Both MetaMod and
-        # CSS zips ship this layout.  Reject zips that don't.
+        # Expect addons/<component>/ at the archive root.  Both MetaMod and
+        # CSS archives ship this layout on every OS.  Reject archives that don't.
         expected = os.path.join(staging, meta["expect_relpath"])
         if not os.path.isdir(expected):
             raise RegistryError(
-                f"runtime zip does not contain expected folder "
-                f"{meta['expect_relpath']!r} (rejecting — wrong zip?)")
+                f"runtime archive does not contain expected folder "
+                f"{meta['expect_relpath']!r} (rejecting — wrong archive?)")
 
         # Merge staging into csgo_dir, file by file.  shutil.copytree
         # with dirs_exist_ok=True does exactly this on 3.8+.
