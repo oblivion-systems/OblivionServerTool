@@ -2,6 +2,135 @@
 
 ---
 
+## v1.1.0 — 2026-06-26 (Linux + headless)
+
+First multi-OS release.  Windows still ships as the single `.exe` with
+the Edge WebView2 desktop window; Linux operators get headless via
+Docker (`ghcr.io/oblivion-systems/oblivion-server-tool:1.1.0`) or a
+systemd unit, administered through the same web panel.
+
+Tests: **314 pass on Windows AND native Linux** (was 306 at v1.0.1),
+and CI runs the matrix on every push.
+
+### Phases that landed under v1.1.0
+
+| Phase   | Tag                | Slice                                  |
+|---------|--------------------|----------------------------------------|
+| A       | `v1.1.0-alpha1`    | Headless mode (`--headless` skips pywebview) |
+| B       | `v1.1.0-alpha2`    | OS abstraction layer (`cs2servergui/platform.py`) |
+| C       | `v1.1.0-alpha3`    | Linux runtime paths (`linuxsteamrt64`, `cs2` binary, `steamcmd.sh`) |
+| D       | `v1.1.0-alpha4`    | Docker packaging (Dockerfile, compose, requirements-headless) |
+| Polish  | `v1.1.0-alpha5`    | CI matrix, GHCR publish, systemd unit, MetaMod tar.gz, case-mismatch hint, keyring docs |
+
+### What Linux operators get
+
+- **Docker**: `docker compose up -d` against the published image.
+- **systemd**: bare-metal install at `/opt/oblivion-server-tool` with
+  hardening defaults — see [packaging/systemd/README.md](packaging/systemd/README.md).
+- **Auto-install of MetaMod + CSS** picks the `.tar.gz` / `linux` artifact
+  variants automatically.  No manual extraction.
+- **Pre-flight diagnostics** call out case-mismatched CS2 install paths
+  (`expected 'X' but found 'x' in /srv/cs2`) instead of just
+  "CS2 is not installed".
+- **Keyring fallback** to plaintext `oblivion_config.json` is documented
+  and intentional on headless boxes — diagnostic snapshot still redacts.
+
+### Windows operators
+
+No behaviour change — same `.exe`, same installer, same WebView2 window.
+The OS abstraction is a no-op on Windows.
+
+---
+
+## v1.1.0-alpha5 — 2026-06-26 (Linux packaging polish)
+
+Closes the Linux-side gaps from Phases A-D so Linux operators reach
+Windows parity where it matters.
+
+### Added
+- **CI matrix** ([`.github/workflows/test.yml`](.github/workflows/test.yml))
+  runs pytest on `ubuntu-latest` + `windows-latest` × Python 3.11/3.12
+  on every push and PR to master.  First time `platform.py`'s Linux
+  branches execute against a real Ubuntu kernel.
+- **Docker image publish** ([`.github/workflows/docker-publish.yml`](.github/workflows/docker-publish.yml))
+  builds and pushes to `ghcr.io/oblivion-systems/oblivion-server-tool`
+  on every `v*.*.*` tag.  Tags: full version, `MAJOR.MINOR`, and
+  `latest` (skipped for pre-releases).
+- **systemd unit** + install README at
+  [`packaging/systemd/`](packaging/systemd/) — dedicated `oblivion` user,
+  `/opt/oblivion-server-tool` install location, `/srv/cs2` CS2 dir,
+  hardening defaults (`ProtectSystem=strict`, `ProtectHome=read-only`,
+  `NoNewPrivileges`).
+- **README Linux quickstart** — `docker compose up -d` recipe + bare-metal
+  systemd one-liner sequence.
+
+### Changed
+- `platform.metamod_download_url()` / `css_download_url()` — return the
+  per-OS archive URL.  MetaMod ships `.tar.gz` on Linux; CSS ships
+  `.zip` with `-linux-` in the filename.
+- `config.RUNTIME_METAMOD_DEFAULT_URL` / `RUNTIME_CSS_DEFAULT_URL` —
+  delegate to the platform helpers instead of hardcoded Windows literals.
+- `registry_client._safe_extract_archive(data, dest_dir, url)` —
+  dispatches by URL suffix between `_safe_extract_zip()` and the new
+  `_safe_extract_targz()`.  Same path-traversal / absolute-path
+  protection in both extractors; tar entries that are symlinks or
+  non-regular files are skipped.
+- `platform.case_mismatch_hint(path)` — Linux-only diagnostic; the
+  pre-flight uses it when `CS2_PATH` is missing so a wrong-case install
+  path surfaces "expected 'X' but found 'x' in /srv/cs2" instead of
+  the generic "CS2 is not installed" error.
+- `TROUBLESHOOTING.md` — new "Linux: secret storage on headless servers"
+  section explaining the keyring → plaintext fallback (no D-Bus = no
+  Secret Service = `oblivion_config.json` holds secrets), why it's
+  intentional, and how to keep the file safe.
+
+### Tests
+- +5 driver/platform tests: per-OS URL pickers, config-tracks-platform
+  invariant, case-mismatch hint behaviour (existing path, no sibling,
+  case-different sibling).
+- +2 runtime install tests: tar.gz happy-path on Linux MetaMod fixture,
+  tar.gz traversal rejection.
+- Existing v0.16.5 runtime tests now monkey-patch `_resolve_runtime_url`
+  so the zip-payload tests work regardless of host OS (Linux default
+  is `.tar.gz`).
+
+---
+
+## v1.1.0-alpha4 — 2026-06-23 (Docker packaging — Phase D)
+
+Fourth slice of the v1.1 roadmap.  Ships a self-contained Docker image
+so Linux operators get the panel running with `docker compose up -d`,
+no manual SteamCMD/CS2 wrangling on the host.
+
+### Added
+- **`Dockerfile`** — Ubuntu 22.04 base with i386 SteamCMD/CS2 deps
+  (`lib32gcc-s1`, `libstdc++6:i386`), `iproute2` for `ss` listener
+  parsing, `python3` + `pip`.  `XDG_CONFIG_HOME=/config` aligns with
+  `platform.app_data_dir()` on Linux; `/config` and `/srv/cs2` are
+  declared volumes.  Healthcheck hits `/api/state` on port 5050.
+- **`docker-compose.yml`** — exposes `5050` (web panel), `27015/tcp`
+  (RCON), `27015/udp` + `27016/udp` (CS2 game traffic); named volumes
+  `cs2_data` and `oblivion_config`.
+- **`requirements-headless.txt`** — Flask, segno, discord.py, keyring.
+  `pywebview` intentionally excluded; the `--headless` mode (Phase A)
+  skips the desktop window so no pywebview import runs.
+- **`.dockerignore`** — excludes `__pycache__/`, `dist/`, `build/`,
+  `Marketing/`, `*.spec`, `installer.iss`, `scripts/` from build context.
+
+### Fixed
+- Initial Dockerfile used `EXPOSE 5000` / healthcheck on port 5000;
+  smoke test caught Flask actually listening on `0.0.0.0:5050` (the
+  config default).  Corrected `EXPOSE` + healthcheck + compose port
+  mappings to 5050.
+
+### Smoke-tested
+- Build succeeds on Docker Desktop (Windows host).
+- Container starts; `GET /api/ping` returns
+  `{"build":"dev","ok":true,"version":"1.1.0-alpha1"}` from the Linux
+  container.
+
+---
+
 ## v1.1.0-alpha3 — 2026-06-23 (Linux runtime paths — Phase C)
 
 Third slice of the v1.1 roadmap.  Wires the OS abstraction from Phase B

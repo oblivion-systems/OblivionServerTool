@@ -1,7 +1,9 @@
 services:
   oblivion:
-    build: .
-    image: oblivion-server-tool:latest
+    # Pull the published image by default; uncomment `build: .` to build
+    # locally from the cloned source tree instead.
+    image: ghcr.io/oblivion-systems/oblivion-server-tool:latest
+    # build: .
     restart: unless-stopped
     ports:
       - "5050:5050"        # web panel (default flask_port)

@@ -9,10 +9,14 @@ Linux runs headless via Docker or systemd, administered from the web panel.
 [![Tests](https://img.shields.io/badge/tests-300%2F300-brightgreen)](tests/)
 
 
-> **Status: v1.0.0** — first formally-supported release.  Fifty releases
-> of evening + weekend work, dozens of live tournaments, 300+ backend
-> tests green, bundled patched WarcraftPlugin source published, every
-> plugin author credited.  Anything tagged before v1.0 was a draft.
+> **Status: v1.1.0** — Linux + headless support shipped.  Windows still
+> ships as the single `.exe` with the WebView2 desktop window; Linux
+> operators get headless via Docker (`ghcr.io/oblivion-systems/oblivion-server-tool:1.1.0`)
+> or a systemd unit, administered through the same web panel.  Fifty-plus
+> releases of evening + weekend work, dozens of live tournaments, 314
+> backend tests green on both Windows and Linux, bundled patched
+> WarcraftPlugin source published, every plugin author credited.
+> Anything tagged before v1.0 was a draft.
 >
 > Full per-release prose lives in [CHANGELOG.md](CHANGELOG.md); spec for
 > the map-veto feature in [VETO.md](VETO.md); plugin-author guide in
@@ -247,7 +251,7 @@ ISCC installer.iss
 # Output: dist\OblivionServerToolSetup-v<version>.exe
 ```
 
-### Option C — Linux *(v1.1.0, in progress)*
+### Option C — Linux *(v1.1.0)*
 
 The desktop window is Windows-only; on Linux the app runs **headless**
 (`--headless`) and is administered through the web panel only.
@@ -256,15 +260,17 @@ The desktop window is Windows-only; on Linux the app runs **headless**
 panel on `:5050`:
 
 ```bash
-# Until ghcr.io publish lands, build locally:
-git clone https://github.com/oblivion-systems/OblivionServerTool.git
-cd OblivionServerTool
+mkdir oblivion && cd oblivion
+curl -O https://raw.githubusercontent.com/oblivion-systems/OblivionServerTool/master/docker-compose.yml
 docker compose up -d
 
 # Web panel: http://<host>:5050
 # CS2 server dir: /srv/cs2 inside the container (set in the web UI)
 # Config persists in the oblivion_config volume
 ```
+
+The compose file pulls `ghcr.io/oblivion-systems/oblivion-server-tool:latest`;
+pin a specific version (`:1.1.0`) for reproducibility.
 
 **Bare-metal (systemd)** — for operators who don't want Docker:
 
