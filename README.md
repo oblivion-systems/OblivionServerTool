@@ -251,10 +251,29 @@ ISCC installer.iss
 # Output: dist\OblivionServerToolSetup-v<version>.exe
 ```
 
-### Option C — Linux *(v1.1.0)*
+### Option C — Linux *(v1.1.0, v1.2.0 in progress)*
 
 The desktop window is Windows-only; on Linux the app runs **headless**
 (`--headless`) and is administered through the web panel only.
+
+> **v1.2.0 in progress.**  v1.1 shipped the headless/Docker/systemd
+> shape and is solid for the panel, RCON, plugins, veto, Discord bot,
+> and config management.  Three workflows have known Linux gaps still
+> being closed in v1.2 — pin to Windows for these in production until
+> v1.2.0 final:
+>
+> - **Workshop map downloads** — DepotDownloader path + bootstrap pick
+>   the Windows asset.  Tracked for v1.2.0-alpha2.
+> - **In-app "Install CS2 server"** — the steamcmd bootstrap downloads
+>   the Windows zip.  Install steamcmd manually on Linux for now
+>   (`apt install steamcmd`).
+> - **Zombie / port-collision recovery** — Linux falls back to "another
+>   process is using port 5050" instead of auto-killing a prior
+>   Oblivion instance.  Change `flask_port` in `oblivion_config.json`
+>   if you hit this.
+>
+> Everything else — start/stop, map/mode switching, plugins, veto,
+> Discord, MatchZy — works on Linux today.
 
 **Docker (recommended)** — pulls the published image and brings up the
 panel on `:5050`:

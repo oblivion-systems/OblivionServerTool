@@ -2,6 +2,56 @@
 
 ---
 
+## v1.2.0 (in progress) — Linux parity
+
+v1.1 made Linux *deployable* (headless / Docker / systemd).  v1.2
+makes it **as good as Windows for the operator-facing workflows the
+unit tests don't exercise** — workshop downloads, the in-app CS2
+install button, port-collision recovery, executable-bit handling on
+extracted binaries, and the GTK desktop window for Linux desktop
+sessions.
+
+### Why this is a separate release line
+
+The v1.1 unit suite passes on both OSes, but unit tests cover Flask /
+state-machine logic — they don't run DepotDownloader, don't spawn the
+real CS2 binary, and don't exercise the zip-extract `+x` path.  A
+real-Linux audit found three operator-facing flows that fail outside
+the unit tests:
+
+1. **Workshop map downloads** — `DEPOTDL_PATH` is hardcoded to
+   `DepotDownloader.exe`; the bootstrap downloader filters GitHub
+   release assets for `windows` in the filename.
+2. **In-app "Install CS2 server" button** — calls the steamcmd
+   bootstrap, which downloads `steamcmd.zip` from akamai; Linux
+   needs `steamcmd_linux.tar.gz`.
+3. **Zombie / port-collision recovery** — `_kill_zombie_instance`
+   uses `taskkill` and a Windows-only process-name allowlist.
+
+Plus the broader Linux desktop gap: pywebview's GUI backend was
+hardcoded to `edgechromium`, so a Linux desktop session had no way
+to open the in-app window at all.
+
+### v1.2 slices
+
+| Slice | Tag                | Status   | Scope                                  |
+|-------|--------------------|----------|----------------------------------------|
+| 1     | `v1.2.0-alpha1`    | ✅ shipped | Per-OS pywebview GUI backend + headless auto-fallback when `$DISPLAY`/`$WAYLAND_DISPLAY` unset |
+| 2     | `v1.2.0-alpha2`    | planned  | **P0 parity**: DepotDownloader Linux artifact, executable-bit on zip extract, Linux zombie cleanup |
+| 3     | `v1.2.0-alpha3`    | planned  | **P1 parity**: steamcmd Linux bootstrap, Linux process-marker verification, doc pass |
+| 4     | `v1.2.0-beta`      | planned  | AppImage / .deb distribution, GTK icon polish, real-device smoke |
+| 5     | `v1.2.0`           | planned  | Final cut + marketing push (r/selfhosted, HN Show, etc.) |
+
+### Known Linux limitations until v1.2.0 final
+
+README's Option C section flags these for operators — workshop
+downloads, in-app CS2 install, and zombie recovery are the three
+workflows to avoid on Linux until v1.2.0-alpha2 ships.  Everything
+else (panel, RCON, plugins, veto, Discord, MatchZy) works on Linux
+today.
+
+---
+
 ## v1.2.0-alpha1 — 2026-06-26 (Linux desktop window)
 
 First v1.2 slice.  Brings the Windows-style in-app window to Linux
