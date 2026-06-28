@@ -6090,4 +6090,59 @@ def create_flask(core: AppCore) -> Flask:
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
 
+    # ── Reachability probe (v1.2 polish — task #168 follow-on) ─────────────
+    # "Can players actually reach this server from outside?"  Calls an
+    # external probe service that connects back to the OPERATOR's source
+    # IP (the probe enforces source-IP-only on its side, so this endpoint
+    # is naturally restricted to the operator's own public IP).
+    #
+    # Requires admin role.  No write side effects — read-only diagnostic,
+    # so @require_local is not used (an admin on a remote session pre-
+    # tournament is exactly the user we want to surface this to).
+    @app.route("/api/reachability/check", methods=["POST"])
+    @require_auth
+    def api_reachability_check():
+        from cs2servergui import reachability, config as _config
+        session  = _current_session() or {}
+        is_admin = session.get("is_local") or session.get("role") == "admin"
+        if not is_admin:
+            return jsonify({"error": "admin only"}), 403
+        body  = request.get_json(silent=True) or {}
+        # Default to the two ports the app uses out of the box; let the
+        # operator override (some operators run on a custom UDP port).
+        # Use sentinel — only default when the key is ABSENT, not when
+        # it's explicitly an empty list (operator/test bad input).
+        ports = body["ports"] if "ports" in body else [
+            _config.RCON_PORT, _config.RCON_PORT + 1,
+        ]
+        if not isinstance(ports, list) or not (1 <= len(ports) <= 4):
+            return jsonify({"error": "ports must be a list of 1-4 ints"}), 400
+        try:
+            ports = [int(p) for p in ports]
+        except (TypeError, ValueError):
+            return jsonify({"error": "ports must be integers"}), 400
+        try:
+            raw   = reachability.check_reachability(ports)
+            hints = reachability.interpret(raw)
+        except reachability.ReachabilityError as exc:
+            # 503 because the failure is upstream (probe service), not the
+            # operator's input; gives the SPA a distinct status to render.
+            return jsonify({"error": str(exc), "configured": bool(
+                _resolve_probe_url_safe()
+            )}), 503
+        return jsonify({"target": raw.get("target"),
+                         "results": raw.get("results", []),
+                         "hints":   hints})
+
     return app
+
+
+def _resolve_probe_url_safe() -> str:
+    """Helper for the reachability endpoint's error path; bare import-
+    safe wrapper so the 503 body can tell the SPA whether the feature is
+    even configured (so it can hide the panel vs. show 'probe is down')."""
+    try:
+        from cs2servergui import reachability
+        return reachability._resolve_probe_url(None)
+    except Exception:
+        return ""

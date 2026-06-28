@@ -4393,6 +4393,113 @@ t('runtime (v1.1): tar.gz dispatch handles Linux MetaMod archive',
   t_v11_runtime_install_handles_targz_for_linux_metamod)
 
 
+def t_v12_reachability_check_requires_auth():
+    """`/api/reachability/check` must be auth-gated — no admin login,
+    no probe call."""
+    ac, app, c = _new_app()
+    r = c.post('/api/reachability/check', json={'ports': [27015]})
+    return r.status_code in (401, 403), f'status={r.status_code}'
+t('reachability (v1.2): /api/reachability/check requires auth',
+  t_v12_reachability_check_requires_auth)
+
+
+def t_v12_reachability_check_admin_only():
+    """Guest sessions get 403 — reachability is admin-only diagnostic."""
+    ac, app, c = _new_app()
+    # Log in as guest (PIN '9999' per _new_app).
+    r = c.post('/api/auth/login', json={'pin': '9999'})
+    if r.status_code != 200:
+        return False, f'guest login failed: {r.status_code}'
+    # Force is_local=False so the role check matters.
+    from cs2servergui import web as _web
+    for tok in list(_web._sessions.keys()):
+        _web._sessions[tok]['is_local'] = False
+    r = c.post('/api/reachability/check', json={'ports': [27015]})
+    return r.status_code == 403, f'status={r.status_code}'
+t('reachability (v1.2): /api/reachability/check rejects non-admin',
+  t_v12_reachability_check_admin_only)
+
+
+def t_v12_reachability_check_returns_503_when_probe_not_configured():
+    """When REACHABILITY_PROBE_URL is empty (feature off), the endpoint
+    must surface that distinctly so the SPA hides the panel instead of
+    rendering an error toast."""
+    from cs2servergui import config as _cfg
+    saved = _cfg.REACHABILITY_PROBE_URL
+    _cfg.REACHABILITY_PROBE_URL = ""
+    try:
+        ac, app, c = _new_app()
+        _login(c)
+        r = c.post('/api/reachability/check', json={'ports': [27015]})
+        if r.status_code != 503:
+            return False, f'expected 503, got {r.status_code}'
+        body = r.get_json() or {}
+        if body.get('configured') is not False:
+            return False, f'expected configured=False, body={body!r}'
+        return True, '503 + configured=False when probe unset'
+    finally:
+        _cfg.REACHABILITY_PROBE_URL = saved
+t('reachability (v1.2): 503 + configured=false when probe URL unset',
+  t_v12_reachability_check_returns_503_when_probe_not_configured)
+
+
+def t_v12_reachability_check_validates_ports():
+    """Bad input → 400, not 500."""
+    from cs2servergui import config as _cfg
+    saved = _cfg.REACHABILITY_PROBE_URL
+    _cfg.REACHABILITY_PROBE_URL = "https://probe.example/check"
+    try:
+        ac, app, c = _new_app()
+        _login(c)
+        r = c.post('/api/reachability/check', json={'ports': []})
+        if r.status_code != 400:
+            return False, f'expected 400 for empty ports, got {r.status_code}'
+        r = c.post('/api/reachability/check', json={'ports': [1, 2, 3, 4, 5]})
+        if r.status_code != 400:
+            return False, f'expected 400 for >4 ports, got {r.status_code}'
+        r = c.post('/api/reachability/check', json={'ports': ['abc']})
+        if r.status_code != 400:
+            return False, f'expected 400 for non-int port, got {r.status_code}'
+        return True, 'all bad-input cases return 400'
+    finally:
+        _cfg.REACHABILITY_PROBE_URL = saved
+t('reachability (v1.2): bad port input → 400',
+  t_v12_reachability_check_validates_ports)
+
+
+def t_v12_reachability_check_returns_hints_on_happy_path():
+    """When probe succeeds, the endpoint must include both raw results AND
+    interpreted hints so the SPA doesn't have to ship the hint engine."""
+    from cs2servergui import config as _cfg, reachability as _reach
+    saved_url   = _cfg.REACHABILITY_PROBE_URL
+    saved_check = _reach.check_reachability
+    _cfg.REACHABILITY_PROBE_URL = "https://probe.example/check"
+    _reach.check_reachability = lambda ports: {
+        "target": "1.2.3.4",
+        "results": [{"port": 27015,
+                     "tcp": {"status": "open"},
+                     "udp": {"status": "open"}}]
+    }
+    try:
+        ac, app, c = _new_app()
+        _login(c)
+        r = c.post('/api/reachability/check', json={'ports': [27015]})
+        if r.status_code != 200:
+            return False, f'status={r.status_code} body={r.get_data(as_text=True)}'
+        body = r.get_json() or {}
+        if body.get('target') != '1.2.3.4':
+            return False, f'missing target: {body!r}'
+        hints = body.get('hints') or []
+        if not hints or hints[0].get('severity') != 'ok':
+            return False, f'hints malformed: {hints!r}'
+        return True, f'200 + hints[0]={hints[0]["severity"]}'
+    finally:
+        _cfg.REACHABILITY_PROBE_URL = saved_url
+        _reach.check_reachability = saved_check
+t('reachability (v1.2): happy-path returns raw results + hints',
+  t_v12_reachability_check_returns_hints_on_happy_path)
+
+
 def t_v11_safe_extract_targz_rejects_path_traversal():
     """_safe_extract_targz must reject tar entries with `..` escape
     attempts before any files are written.  Mirrors the Zip Slip

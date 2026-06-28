@@ -2,7 +2,34 @@
 
 ---
 
-## v1.2.0 (in progress) — Linux parity
+## v1.2.0 (in progress) — Linux parity + remote reachability
+
+### v1.2.0-alpha2 (planned tag, post-smoke) — Remote reachability probe
+
+Closes the "operator's port forward silently broken" diagnostic gap —
+a category of failure that's invisible to any local check because most
+home routers don't support NAT hairpinning.
+
+New surface:
+- **`probe/`** — tiny Flask service (~120 LOC) that probes back to the
+  source IP only (so it's useless for scanning).  Per-IP rate-limit,
+  Source A2S_INFO UDP query, plain TCP handshake.  Deployable on Fly.io
+  free tier (manifest included), Railway, or any Docker host.  Full
+  README with self-host instructions for paranoid operators.
+- **`cs2servergui/reachability.py`** — client + hint engine.  Maps
+  raw (tcp_status, udp_status) pairs to operator-facing severity +
+  one-line fix suggestions: "forward points at wrong IP", "forward is
+  TCP-only", "router or ISP dropping packets", "CGNAT suspected".
+- **`/api/reachability/check`** — admin-gated POST endpoint; returns
+  `{target, results, hints}`.  Falls through to **HTTP 503 +
+  `configured: false`** when no probe URL is configured so the SPA can
+  hide the panel cleanly until an operator points it at a deployment.
+- **`oblivion_config.json`**: new `reachability_probe_url` key —
+  empty by default (feature off until set).
+- **22 new tests** (17 reachability unit + 5 endpoint integration).
+  340 pass on Windows; CI matrix covers Linux equivalence.
+
+
 
 v1.1 made Linux *deployable* (headless / Docker / systemd).  v1.2
 makes it **as good as Windows for the operator-facing workflows the
