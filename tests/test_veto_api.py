@@ -4394,110 +4394,96 @@ t('runtime (v1.1): tar.gz dispatch handles Linux MetaMod archive',
 
 
 def t_v12_reachability_check_requires_auth():
-    """`/api/reachability/check` must be auth-gated — no admin login,
-    no probe call."""
+    """`/api/reachability/check` must be auth-gated."""
     ac, app, c = _new_app()
-    r = c.post('/api/reachability/check', json={'ports': [27015]})
+    r = c.post('/api/reachability/check', json={})
     return r.status_code in (401, 403), f'status={r.status_code}'
 t('reachability (v1.2): /api/reachability/check requires auth',
   t_v12_reachability_check_requires_auth)
 
 
 def t_v12_reachability_check_admin_only():
-    """Guest sessions get 403 — reachability is admin-only diagnostic."""
+    """Guest sessions get 403."""
     ac, app, c = _new_app()
-    # Log in as guest (PIN '9999' per _new_app).
     r = c.post('/api/auth/login', json={'pin': '9999'})
     if r.status_code != 200:
         return False, f'guest login failed: {r.status_code}'
-    # Force is_local=False so the role check matters.
     from cs2servergui import web as _web
     for tok in list(_web._sessions.keys()):
         _web._sessions[tok]['is_local'] = False
-    r = c.post('/api/reachability/check', json={'ports': [27015]})
+    r = c.post('/api/reachability/check', json={})
     return r.status_code == 403, f'status={r.status_code}'
 t('reachability (v1.2): /api/reachability/check rejects non-admin',
   t_v12_reachability_check_admin_only)
 
 
-def t_v12_reachability_check_returns_503_when_probe_not_configured():
-    """When REACHABILITY_PROBE_URL is empty (feature off), the endpoint
-    must surface that distinctly so the SPA hides the panel instead of
-    rendering an error toast."""
-    from cs2servergui import config as _cfg
-    saved = _cfg.REACHABILITY_PROBE_URL
-    _cfg.REACHABILITY_PROBE_URL = ""
-    try:
-        ac, app, c = _new_app()
-        _login(c)
-        r = c.post('/api/reachability/check', json={'ports': [27015]})
-        if r.status_code != 503:
-            return False, f'expected 503, got {r.status_code}'
-        body = r.get_json() or {}
-        if body.get('configured') is not False:
-            return False, f'expected configured=False, body={body!r}'
-        return True, '503 + configured=False when probe unset'
-    finally:
-        _cfg.REACHABILITY_PROBE_URL = saved
-t('reachability (v1.2): 503 + configured=false when probe URL unset',
-  t_v12_reachability_check_returns_503_when_probe_not_configured)
+def t_v12_reachability_check_503_without_public_ip():
+    """No public IP detected yet → 503 with a helpful message."""
+    ac, app, c = _new_app()
+    _login(c)
+    ac.public_ip = ''   # ensure unset
+    r = c.post('/api/reachability/check', json={})
+    if r.status_code != 503:
+        return False, f'expected 503, got {r.status_code}'
+    err = (r.get_json() or {}).get('error', '').lower()
+    return 'public ip' in err, f'error={err!r}'
+t('reachability (v1.2): 503 when public IP not yet known',
+  t_v12_reachability_check_503_without_public_ip)
 
 
-def t_v12_reachability_check_validates_ports():
-    """Bad input → 400, not 500."""
-    from cs2servergui import config as _cfg
-    saved = _cfg.REACHABILITY_PROBE_URL
-    _cfg.REACHABILITY_PROBE_URL = "https://probe.example/check"
-    try:
-        ac, app, c = _new_app()
-        _login(c)
-        r = c.post('/api/reachability/check', json={'ports': []})
-        if r.status_code != 400:
-            return False, f'expected 400 for empty ports, got {r.status_code}'
-        r = c.post('/api/reachability/check', json={'ports': [1, 2, 3, 4, 5]})
-        if r.status_code != 400:
-            return False, f'expected 400 for >4 ports, got {r.status_code}'
-        r = c.post('/api/reachability/check', json={'ports': ['abc']})
-        if r.status_code != 400:
-            return False, f'expected 400 for non-int port, got {r.status_code}'
-        return True, 'all bad-input cases return 400'
-    finally:
-        _cfg.REACHABILITY_PROBE_URL = saved
-t('reachability (v1.2): bad port input → 400',
-  t_v12_reachability_check_validates_ports)
-
-
-def t_v12_reachability_check_returns_hints_on_happy_path():
-    """When probe succeeds, the endpoint must include both raw results AND
-    interpreted hints so the SPA doesn't have to ship the hint engine."""
-    from cs2servergui import config as _cfg, reachability as _reach
-    saved_url   = _cfg.REACHABILITY_PROBE_URL
-    saved_check = _reach.check_reachability
-    _cfg.REACHABILITY_PROBE_URL = "https://probe.example/check"
-    _reach.check_reachability = lambda ports: {
-        "target": "1.2.3.4",
-        "results": [{"port": 27015,
-                     "tcp": {"status": "open"},
-                     "udp": {"status": "open"}}]
+def t_v12_reachability_check_returns_steam_master_result():
+    """Happy path: stub the Steam Web API, confirm endpoint returns
+    raw servers + hints + context.  Server is offline so hint should
+    fire the 'start server first' info-level message."""
+    from cs2servergui import reachability as _reach
+    saved = _reach.check_steam_master
+    _reach.check_steam_master = lambda ip, **kw: {
+        "target": ip, "ok": True,
+        "servers": [],
     }
     try:
         ac, app, c = _new_app()
+        ac.public_ip = '1.2.3.4'
         _login(c)
-        r = c.post('/api/reachability/check', json={'ports': [27015]})
+        r = c.post('/api/reachability/check', json={})
         if r.status_code != 200:
             return False, f'status={r.status_code} body={r.get_data(as_text=True)}'
         body = r.get_json() or {}
         if body.get('target') != '1.2.3.4':
-            return False, f'missing target: {body!r}'
+            return False, f'wrong target: {body!r}'
         hints = body.get('hints') or []
-        if not hints or hints[0].get('severity') != 'ok':
-            return False, f'hints malformed: {hints!r}'
+        if not hints or hints[0].get('severity') != 'info':
+            return False, f'expected info hint (server offline), got {hints!r}'
+        ctx = body.get('context') or {}
+        if 'gslt_set' not in ctx or 'server_running' not in ctx:
+            return False, f'missing context: {ctx!r}'
         return True, f'200 + hints[0]={hints[0]["severity"]}'
     finally:
-        _cfg.REACHABILITY_PROBE_URL = saved_url
-        _reach.check_reachability = saved_check
-t('reachability (v1.2): happy-path returns raw results + hints',
-  t_v12_reachability_check_returns_hints_on_happy_path)
+        _reach.check_steam_master = saved
+t('reachability (v1.2): happy-path returns servers + hints + context',
+  t_v12_reachability_check_returns_steam_master_result)
+
+
+def t_v12_reachability_check_surfaces_steam_api_failure():
+    """When Steam Web API errors out, endpoint returns 503."""
+    from cs2servergui import reachability as _reach
+    saved = _reach.check_steam_master
+    def _boom(ip, **kw):
+        raise _reach.ReachabilityError("Steam Web API unreachable: nope")
+    _reach.check_steam_master = _boom
+    try:
+        ac, app, c = _new_app()
+        ac.public_ip = '1.2.3.4'
+        _login(c)
+        r = c.post('/api/reachability/check', json={})
+        if r.status_code != 503:
+            return False, f'expected 503, got {r.status_code}'
+        err = (r.get_json() or {}).get('error', '')
+        return 'unreachable' in err.lower(), f'error={err!r}'
+    finally:
+        _reach.check_steam_master = saved
+t('reachability (v1.2): Steam Web API failure → 503',
+  t_v12_reachability_check_surfaces_steam_api_failure)
 
 
 def t_v11_safe_extract_targz_rejects_path_traversal():

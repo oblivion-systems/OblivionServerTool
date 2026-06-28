@@ -225,24 +225,12 @@ def _load_int_from_config(key: str, default: int) -> int:
         return default
 
 
-def _load_str_from_config(key: str, default: str = "") -> str:
-    """Read a single string setting from oblivion_config.json at import time.
-    Same swallow-and-default contract as _load_int_from_config."""
-    try:
-        import json
-        with open(_CONFIG_FILE, encoding="utf-8") as fh:
-            v = json.load(fh).get(key, default)
-        return str(v).strip() if v is not None else default
-    except Exception:
-        return default
-
-
-# ── Reachability probe (v1.2 polish — task #168 follow-on) ─────────────────────
-# External probe service URL used by cs2servergui/reachability.py.  See
-# probe/README.md for deploy / self-host instructions.  Empty default means
-# the feature is OFF until the operator points at a probe deployment; the
-# panel hides itself instead of failing loudly.
-REACHABILITY_PROBE_URL = _load_str_from_config("reachability_probe_url", "")
+# NOTE: v1.2 originally introduced a REACHABILITY_PROBE_URL pointing at a
+# self-hosted probe service.  That approach was dropped in favour of
+# Valve's Steam master server (zero infrastructure, authoritative for
+# what we actually want to know — see cs2servergui/reachability.py).
+# The config key is no longer read; existing values in oblivion_config.json
+# are harmless leftovers.
 
 
 # ── Network ────────────────────────────────────────────────────────────────────

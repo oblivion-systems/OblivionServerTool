@@ -4,30 +4,42 @@
 
 ## v1.2.0 (in progress) — Linux parity + remote reachability
 
-### v1.2.0-alpha2 (planned tag, post-smoke) — Remote reachability probe
+### v1.2.0-alpha2 (planned tag, post-smoke) — Remote reachability via Steam master
 
 Closes the "operator's port forward silently broken" diagnostic gap —
-a category of failure that's invisible to any local check because most
-home routers don't support NAT hairpinning.
+the failure mode that's invisible to local checks because most home
+routers don't support NAT hairpinning.
+
+**Strategy switch from earlier draft.**  v1.2-alpha2 originally
+introduced a self-hosted Flask probe service.  That was dropped in
+favour of querying Valve's existing Steam master server:
+
+- **Zero infrastructure to host** — Steam Web API is free, no key
+  required, exists indefinitely.
+- **Authoritative** — what we actually want to know is "can Steam
+  clients reach my server?", and the master server is *the* system
+  that answers it for the player population.
+- **Catches GSLT-missing**, which a port probe couldn't: a server
+  without GSLT can't register with Valve, so it stays invisible —
+  the hint engine surfaces this as the actual fix.
 
 New surface:
-- **`probe/`** — tiny Flask service (~120 LOC) that probes back to the
-  source IP only (so it's useless for scanning).  Per-IP rate-limit,
-  Source A2S_INFO UDP query, plain TCP handshake.  Deployable on Fly.io
-  free tier (manifest included), Railway, or any Docker host.  Full
-  README with self-host instructions for paranoid operators.
-- **`cs2servergui/reachability.py`** — client + hint engine.  Maps
-  raw (tcp_status, udp_status) pairs to operator-facing severity +
-  one-line fix suggestions: "forward points at wrong IP", "forward is
-  TCP-only", "router or ISP dropping packets", "CGNAT suspected".
+- **`cs2servergui/reachability.py`** — `check_steam_master(public_ip)`
+  + `interpret(result, gslt_set, server_running, server_uptime_secs,
+  expected_port)` hint engine.  Five-tier hint resolution:
+  server offline → GSLT missing → uptime < 90s → wrong port →
+  invisible (forward broken / CGNAT).
 - **`/api/reachability/check`** — admin-gated POST endpoint; returns
-  `{target, results, hints}`.  Falls through to **HTTP 503 +
-  `configured: false`** when no probe URL is configured so the SPA can
-  hide the panel cleanly until an operator points it at a deployment.
-- **`oblivion_config.json`**: new `reachability_probe_url` key —
-  empty by default (feature off until set).
-- **22 new tests** (17 reachability unit + 5 endpoint integration).
-  340 pass on Windows; CI matrix covers Linux equivalence.
+  `{target, ok, servers, hints, context}`.  503 when public IP not yet
+  detected (first ~5s after launch) or Steam Web API itself is down.
+- **SPA panel** in the Status tab — single severity-coded hint card,
+  optional "other CS2 servers Valve sees at this IP" list, "Re-check"
+  button.  Always visible to admins (no config gate).
+- **14 reachability unit tests** + **5 endpoint integration tests**.
+  337 pass on Windows; CI matrix covers Linux equivalence.
+
+Reachability config key `reachability_probe_url` is no longer read —
+existing values in `oblivion_config.json` are harmless leftovers.
 
 
 

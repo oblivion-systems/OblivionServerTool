@@ -1,29 +1,45 @@
 """
 cs2servergui/reachability.py — "can players actually reach my server?"
 
-v1.2 polish (#168 follow-on).  Operators routinely forward a port to
-the wrong LAN IP (stale DHCP lease, typo) and discover it only when
-a live tournament can't start.  The local pre-flight can't detect this
-because most home routers don't support NAT hairpinning — the server
-can't probe its own public IP from inside its own LAN.
+v1.2 polish.  Operators routinely forward a port to the wrong LAN IP
+(stale DHCP lease, typo) and discover it only when a tournament can't
+start.  The local pre-flight can't catch this — NAT hairpinning means
+the server can't probe its own public IP from inside its own LAN.
 
-This module calls a tiny external probe service (see probe/probe.py)
-that connects back to the operator's source IP.  By design the probe
-ONLY probes the source — operators can't aim it at someone else.
+Strategy: query **Valve's Steam master server** instead of running our
+own probe service.  This is better than a custom probe because:
+
+    1. Zero infrastructure to host — Steam Web API is free, no key
+       required, exists indefinitely.
+    2. Authoritative.  What we actually want to know is "can Steam
+       clients reach my server."  Valve's master server IS the system
+       that answers that question for the entire CS2 player population.
+    3. Catches a class of failures a port-probe wouldn't: GSLT missing
+       (server can't authenticate with Valve → can't register).
+
+Trade-offs accepted:
+    * Master server takes 30-90s to register a newly-started server.
+      The hint engine surfaces "give it a minute…" on fresh boots.
+    * Requires GSLT set.  But GSLT is required for external players
+       anyway — the diagnostic correctly says "set GSLT first" when
+       absent.
+    * Doesn't distinguish "TCP forwarded but UDP missing" — Valve's
+       check IS the UDP check (master server reaches via UDP 27015).
+       Same-port forwards are the common case anyway.
 
 Public API
 ----------
-check_reachability(ports, *, probe_url=None, timeout=12.0) -> dict
-    Raw probe result (see probe/probe.py wire protocol).
-interpret(result) -> list[Hint]
-    Operator-facing hints derived from the raw result.
+check_steam_master(public_ip)               -> dict
+    Raw Steam Web API response, normalised.
+interpret(result, *, gslt_set, server_running, server_uptime_secs,
+          expected_port)                    -> list[Hint]
+    Operator-facing hints derived from the raw result + local state.
 
 Hint
 ----
-{ "severity": "ok" | "warn" | "fail",
-  "port":      int,
-  "message":   str,
-  "fix":       str | None }   # one-line suggestion
+{ "severity": "ok" | "warn" | "fail" | "info",
+  "message":  str,
+  "fix":      str | None }   # one-line suggestion, or None
 """
 from __future__ import annotations
 
@@ -34,141 +50,174 @@ import urllib.request
 from cs2servergui import config as _config
 
 
+STEAM_MASTER_URL = (
+    "https://api.steampowered.com/ISteamApps/GetServersAtAddress/v0001/?addr={ip}"
+)
+CS2_APPID = 730
+
+# How long after start before we expect Valve's master to know about us.
+# Empirically ~30-60s; we use 90 to give the operator a buffer before we
+# start telling them something's wrong.
+MASTER_REGISTER_GRACE_SECS = 90
+
+
 class ReachabilityError(Exception):
-    """Probe service unreachable or returned an error response."""
+    """Steam Web API unreachable or returned an unexpected payload."""
 
 
-# Default URL — operators override via oblivion_config.json's
-# "reachability_probe_url".  Empty default means "feature off"; only
-# the official-deploy / self-hosted URL turns it on.
-_DEFAULT_PROBE_URL = ""
+def check_steam_master(public_ip: str, *, timeout: float = 8.0) -> dict:
+    """Query Valve's master server for CS2 servers registered at `public_ip`.
 
+    Returns a normalised dict:
+        {
+          "target":   "<public_ip>",
+          "ok":       bool,                 # Steam responded successfully
+          "servers":  [<entry>, ...],        # CS2 servers (appid=730) at this IP
+        }
 
-def _resolve_probe_url(override: str | None) -> str:
-    """Resolve the probe URL — explicit override > config file > default.
-    Returns "" if no URL is configured anywhere (feature disabled)."""
-    if override:
-        return override.strip()
-    cfg = getattr(_config, "REACHABILITY_PROBE_URL", "") or ""
-    return cfg.strip() or _DEFAULT_PROBE_URL
+    Each entry is the master server's view of one server:
+        {"addr": "x.x.x.x:27015", "gameport": 27015, "secure": bool, ...}
 
-
-def check_reachability(
-    ports: list[int],
-    *,
-    probe_url: str | None = None,
-    timeout: float = 12.0,
-) -> dict:
-    """POST to the probe service; return its raw JSON response.
-
-    Raises ReachabilityError if no probe URL is configured, the service
-    is unreachable, returns non-200, or returns non-JSON.
+    Raises ReachabilityError only on HTTP / parse failure.  An "empty
+    list" response (no servers visible) is a SUCCESSFUL response —
+    `ok=True`, `servers=[]` — and is what interpret() uses to detect
+    the "invisible to Valve" case.
     """
-    url = _resolve_probe_url(probe_url)
-    if not url:
-        raise ReachabilityError(
-            "No reachability probe URL configured. Set "
-            "reachability_probe_url in oblivion_config.json — see "
-            "probe/README.md for self-host or Fly.io deploy steps."
-        )
-    if not (1 <= len(ports) <= 4):
-        raise ReachabilityError(
-            f"check_reachability: 1-4 ports required, got {len(ports)}"
-        )
-    body = json.dumps({"ports": list(ports), "protocol": "both"}).encode("utf-8")
+    if not public_ip or not isinstance(public_ip, str):
+        raise ReachabilityError("public_ip is required")
+    url = STEAM_MASTER_URL.format(ip=public_ip)
     req = urllib.request.Request(
         url,
-        data=body,
-        headers={
-            "Content-Type": "application/json",
-            "User-Agent":   f"oblivion-server-tool/{_config.APP_VERSION}",
-        },
-        method="POST",
+        headers={"User-Agent": f"oblivion-server-tool/{_config.APP_VERSION}"},
     )
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            data = resp.read()
+            raw = resp.read()
     except urllib.error.HTTPError as exc:
-        # 429 (rate limit) and 400 (bad input) both return JSON we want to surface.
-        try:
-            detail = json.loads(exc.read().decode("utf-8", errors="replace"))
-            msg = detail.get("error") or str(exc)
-        except Exception:
-            msg = str(exc)
         raise ReachabilityError(
-            f"Probe service returned HTTP {exc.code}: {msg}"
+            f"Steam Web API returned HTTP {exc.code}: {exc.reason}"
         ) from exc
     except urllib.error.URLError as exc:
-        raise ReachabilityError(f"Probe service unreachable: {exc.reason}") from exc
+        raise ReachabilityError(
+            f"Steam Web API unreachable: {exc.reason}"
+        ) from exc
     try:
-        return json.loads(data.decode("utf-8"))
+        doc = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ReachabilityError(
-            f"Probe service returned non-JSON ({len(data)} bytes): {exc}"
+            f"Steam Web API returned non-JSON ({len(raw)} bytes): {exc}"
         ) from exc
 
-
-# ── Hint engine ──────────────────────────────────────────────────────
-
-# Operator-facing rules.  Order matters: first matching rule wins.
-# Each rule receives (tcp_status, udp_status) and returns
-# (severity, message, fix) or None to skip.
-
-def _classify(tcp: str | None, udp: str | None, port: int) -> dict:
-    """Map raw per-protocol statuses to an operator-facing hint."""
-    # tcp ∈ {open, closed, filtered, error, None}; udp ∈ {open, unknown, error, None}.
-    if tcp == "open" and udp == "open":
-        return {"severity": "ok", "port": port,
-                "message": f"Port {port}: TCP and UDP both open.",
-                "fix": None}
-    if tcp == "open" and udp == "unknown":
-        return {"severity": "warn", "port": port,
-                "message": f"Port {port}: TCP open, UDP not responding.",
-                "fix": ("Either the forward rule is TCP-only (players can't connect "
-                        "to the game), or CS2 isn't actually running. Add a UDP rule "
-                        "for this port in your router admin, then re-check.")}
-    if tcp != "open" and udp == "open":
-        return {"severity": "warn", "port": port,
-                "message": f"Port {port}: UDP reaches CS2, but TCP is closed.",
-                "fix": ("Players can connect, but RCON-from-outside won't work. "
-                        "If you don't expose RCON externally, you can ignore this. "
-                        "Otherwise add a TCP rule for this port in your router.")}
-    if tcp == "filtered" or udp == "unknown":
-        return {"severity": "fail", "port": port,
-                "message": f"Port {port}: timed out — router or ISP is dropping packets.",
-                "fix": ("Most common: the port forward in your router targets the "
-                        "wrong LAN IP (stale DHCP lease). Verify the forward points "
-                        "at THIS machine's current LAN IP, then re-check. "
-                        "If that's right and it still fails, your ISP may be blocking "
-                        "the port (less common) or you're behind CGNAT.")}
-    if tcp == "closed":
-        return {"severity": "fail", "port": port,
-                "message": f"Port {port}: closed — nothing forwarded, or forward points elsewhere.",
-                "fix": ("Add a port-forward rule in your router for both TCP and UDP "
-                        "on this port, targeting THIS machine's LAN IP. Set a DHCP "
-                        "reservation so the IP can't change.")}
-    # Catch-all for partial / error results.
-    return {"severity": "warn", "port": port,
-            "message": f"Port {port}: probe returned an unusual combination "
-                       f"(tcp={tcp!r}, udp={udp!r}).",
-            "fix": "Re-run the check; if it persists, file an issue with this status pair."}
+    body = (doc or {}).get("response") or {}
+    raw_servers = body.get("servers") or []
+    # Filter to CS2 only (this endpoint sometimes returns CS:GO legacy
+    # registrations or other Source games on a multi-server box).
+    cs2_servers = [
+        s for s in raw_servers
+        if isinstance(s, dict) and s.get("appid") == CS2_APPID
+    ]
+    return {
+        "target":  public_ip,
+        "ok":      bool(body.get("success", True)),
+        "servers": cs2_servers,
+    }
 
 
-def interpret(result: dict) -> list[dict]:
-    """Convert the probe service's raw result into operator-facing hints.
+# ── Hint engine ─────────────────────────────────────────────────────
 
-    Returns one hint per probed port.  Each hint:
-        {"severity": "ok" | "warn" | "fail",
-         "port":      int,
-         "message":   str,
-         "fix":       str | None}
+def interpret(
+    result: dict,
+    *,
+    gslt_set: bool,
+    server_running: bool,
+    server_uptime_secs: int,
+    expected_port: int = 27015,
+) -> list[dict]:
+    """Map raw Steam-master result + local state to operator-facing hints.
+
+    Order of checks matters — earlier (more fundamental) issues short-
+    circuit later ones.  We only return the first applicable hint, so the
+    operator sees the one thing they actually need to fix.
     """
-    hints: list[dict] = []
-    for port_result in (result.get("results") or []):
-        port = port_result.get("port")
-        if not isinstance(port, int):
-            continue
-        tcp = (port_result.get("tcp") or {}).get("status")
-        udp = (port_result.get("udp") or {}).get("status")
-        hints.append(_classify(tcp, udp, port))
-    return hints
+    # 1. Server not running — no point checking anything else.
+    if not server_running:
+        return [{
+            "severity": "info",
+            "message":  "Server is offline — start it before checking reachability.",
+            "fix":      None,
+        }]
+
+    # 2. GSLT missing — server CANNOT register with Valve regardless of
+    #    port forward state.  This is the silent killer the pre-flight
+    #    already warns about; surfacing it here turns it into an
+    #    actionable fix for the reachability question.
+    if not gslt_set:
+        return [{
+            "severity": "fail",
+            "message":  "No GSLT token — Valve's auth backend silently rejects "
+                        "external clients, and your server can't register with "
+                        "the master server.",
+            "fix":      "Generate a token at "
+                        "https://steamcommunity.com/dev/managegameservers "
+                        "(App ID 730) and paste it into Config → GSLT.",
+        }]
+
+    # 3. Newly-started — give Valve's master server time to discover us.
+    if server_uptime_secs < MASTER_REGISTER_GRACE_SECS:
+        wait = MASTER_REGISTER_GRACE_SECS - server_uptime_secs
+        return [{
+            "severity": "info",
+            "message":  f"Server started recently ({server_uptime_secs}s ago). "
+                        f"Valve's master server can take up to "
+                        f"{MASTER_REGISTER_GRACE_SECS}s to register a new "
+                        f"server.",
+            "fix":      f"Wait ~{wait}s, then re-check.",
+        }]
+
+    # 4. Master server response.  Look for our exact port.
+    servers   = result.get("servers") or []
+    on_port   = [s for s in servers if s.get("gameport") == expected_port]
+    target_ip = result.get("target", "")
+
+    if on_port:
+        # Found us at the expected port — players will see this server in
+        # the browser, and direct-connects will reach it.
+        secure = on_port[0].get("secure", False)
+        return [{
+            "severity": "ok",
+            "message":  f"Valve sees your server at {target_ip}:{expected_port} — "
+                        f"players can connect."
+                        + ("" if secure else "  (VAC disabled.)"),
+            "fix":      None,
+        }]
+
+    if servers:
+        # Something at this IP is registered, but on a different port —
+        # operator may be hosting multiple servers / forwarded the wrong one.
+        other_ports = sorted({s.get("gameport") for s in servers if s.get("gameport")})
+        return [{
+            "severity": "warn",
+            "message":  f"Valve sees CS2 servers at {target_ip} on port(s) "
+                        f"{other_ports}, but NOT on {expected_port}.",
+            "fix":      "Either you're hosting multiple servers and your "
+                        f"forward targets a different one, or your CS2 "
+                        f"server is listening on a non-standard port.  "
+                        f"Check `port` in your CS2 launch args / config.",
+        }]
+
+    # 5. Truly invisible — server up, GSLT set, master server doesn't know
+    #    about us.  Almost always router-side: forward broken, wrong LAN
+    #    IP, or CGNAT.
+    return [{
+        "severity": "fail",
+        "message":  f"Valve's master server cannot see your server at "
+                    f"{target_ip}:{expected_port}.  External players will "
+                    f"NOT be able to connect.",
+        "fix":      "Most common: the port forward in your router targets "
+                    "the wrong LAN IP (stale DHCP lease) or doesn't include "
+                    "UDP.  Verify the forward points at THIS machine's "
+                    "current LAN IP for BOTH TCP and UDP on port 27015, "
+                    "then re-check.  If that's correct and it still fails, "
+                    "you may be behind CGNAT — compare your router's WAN "
+                    "IP to the Public IP shown in the status bar.",
+    }]

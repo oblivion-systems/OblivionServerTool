@@ -110,12 +110,12 @@ const api = (() => {
     // based on this instead of try-then-403.
     capabilities: ()    => get('/api/capabilities'),
 
-    // ── Reachability (v1.2) — external probe; 503 + configured:false ──────
-    // when no probe URL is configured (feature OFF).  SPA hides the panel
-    // gracefully in that case instead of toasting an error.
+    // ── Reachability (v1.2) — asks Valve's Steam master server whether
+    // our CS2 server is registered + visible to external players.  No
+    // configuration required; returns 503 only when our own public IP
+    // isn't known yet (first 5s after launch) or Steam Web API is down.
     reachability: {
-      check: (ports = null) =>
-        post('/api/reachability/check', ports ? { ports } : {}),
+      check: () => post('/api/reachability/check', {}),
     },
 
     // ── Discord (v0.11.0 Layer 1B — voice-channel roster pull) ────────────

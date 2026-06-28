@@ -1,63 +1,23 @@
 """
-tests/test_reachability.py — v1.2 reachability probe client + hint engine.
+tests/test_reachability.py — v1.2 reachability via Steam master server.
 
-Doesn't hit the real probe service; monkey-patches urlopen so the test
-suite stays hermetic.  Covers:
-    * URL resolution (explicit > config > default)
-    * Empty-URL error path (feature off until probe is configured)
-    * HTTP error / non-JSON / network-error mapping
-    * Hint engine: every (tcp_status, udp_status) combination
+Doesn't hit Valve's real Web API; monkey-patches urlopen so the suite
+stays hermetic.  Covers:
+    * Steam Web API call + JSON parse
+    * CS2-only filtering (appid==730)
+    * Network / HTTP / non-JSON error paths
+    * Hint engine: every state combo (running, gslt, uptime, server-present)
 """
 from __future__ import annotations
 
 import io
 import json
 import urllib.error
-import urllib.request
 
 import pytest
 
 
-# ── _resolve_probe_url ─────────────────────────────────────────────────
-
-def test_resolve_probe_url_prefers_explicit_override(monkeypatch):
-    from cs2servergui import reachability, config as _cfg
-    monkeypatch.setattr(_cfg, "REACHABILITY_PROBE_URL", "https://from-config.example/")
-    assert reachability._resolve_probe_url("https://override.example/check") == \
-        "https://override.example/check"
-
-
-def test_resolve_probe_url_falls_back_to_config(monkeypatch):
-    from cs2servergui import reachability, config as _cfg
-    monkeypatch.setattr(_cfg, "REACHABILITY_PROBE_URL", "  https://from-config.example/  ")
-    assert reachability._resolve_probe_url(None) == "https://from-config.example/"
-
-
-def test_resolve_probe_url_empty_when_unset(monkeypatch):
-    from cs2servergui import reachability, config as _cfg
-    monkeypatch.setattr(_cfg, "REACHABILITY_PROBE_URL", "")
-    assert reachability._resolve_probe_url(None) == ""
-
-
-# ── check_reachability error paths ─────────────────────────────────────
-
-def test_check_reachability_raises_when_no_url_configured(monkeypatch):
-    from cs2servergui import reachability, config as _cfg
-    monkeypatch.setattr(_cfg, "REACHABILITY_PROBE_URL", "")
-    with pytest.raises(reachability.ReachabilityError) as exc:
-        reachability.check_reachability([27015])
-    assert "probe URL" in str(exc.value).lower() or "configured" in str(exc.value).lower()
-
-
-def test_check_reachability_validates_port_count(monkeypatch):
-    from cs2servergui import reachability
-    monkeypatch.setattr(reachability, "_resolve_probe_url",
-                        lambda override: "https://probe.example/check")
-    with pytest.raises(reachability.ReachabilityError):
-        reachability.check_reachability([])
-    with pytest.raises(reachability.ReachabilityError):
-        reachability.check_reachability([1, 2, 3, 4, 5])
-
+# ── check_steam_master ──────────────────────────────────────────────────
 
 def _stub_urlopen_returning(body: bytes):
     class _FakeResp:
@@ -70,132 +30,147 @@ def _stub_urlopen_returning(body: bytes):
     return _fake
 
 
-def test_check_reachability_happy_path(monkeypatch):
+def test_check_requires_public_ip():
     from cs2servergui import reachability
-    payload = {"target": "1.2.3.4", "results": [
-        {"port": 27015, "tcp": {"status": "open"}, "udp": {"status": "open"}},
-    ]}
-    monkeypatch.setattr(reachability, "_resolve_probe_url",
-                        lambda override: "https://probe.example/check")
+    with pytest.raises(reachability.ReachabilityError):
+        reachability.check_steam_master("")
+
+
+def test_check_happy_path_filters_to_cs2(monkeypatch):
+    from cs2servergui import reachability
+    payload = {"response": {"success": True, "servers": [
+        {"addr": "1.2.3.4:27015", "gameport": 27015, "appid": 730, "secure": True},
+        {"addr": "1.2.3.4:27016", "gameport": 27016, "appid":  10, "secure": True},  # CS:S, ignored
+        {"addr": "1.2.3.4:27017", "gameport": 27017, "appid": 730, "secure": False},
+    ]}}
     monkeypatch.setattr(reachability.urllib.request, "urlopen",
                         _stub_urlopen_returning(json.dumps(payload).encode()))
-    result = reachability.check_reachability([27015])
-    assert result == payload
+    out = reachability.check_steam_master("1.2.3.4")
+    assert out["target"] == "1.2.3.4"
+    assert out["ok"] is True
+    assert {s["gameport"] for s in out["servers"]} == {27015, 27017}
 
 
-def test_check_reachability_surfaces_429_rate_limit(monkeypatch):
+def test_check_empty_servers_is_success(monkeypatch):
+    """No servers registered at this IP is a SUCCESSFUL response — the
+    interpret() function uses servers=[] to detect 'invisible to Valve'."""
     from cs2servergui import reachability
-    monkeypatch.setattr(reachability, "_resolve_probe_url",
-                        lambda override: "https://probe.example/check")
-    err_body = json.dumps({"error": "rate limit (10/min per IP)"}).encode()
+    payload = {"response": {"success": True, "servers": []}}
+    monkeypatch.setattr(reachability.urllib.request, "urlopen",
+                        _stub_urlopen_returning(json.dumps(payload).encode()))
+    out = reachability.check_steam_master("1.2.3.4")
+    assert out["ok"] is True
+    assert out["servers"] == []
+
+
+def test_check_surfaces_http_error(monkeypatch):
+    from cs2servergui import reachability
     def _fake(req, timeout=None):
-        raise urllib.error.HTTPError(
-            req.full_url, 429, "Too Many Requests", {}, io.BytesIO(err_body)
-        )
+        raise urllib.error.HTTPError(req.full_url, 503, "Service Unavailable",
+                                       {}, io.BytesIO(b""))
     monkeypatch.setattr(reachability.urllib.request, "urlopen", _fake)
     with pytest.raises(reachability.ReachabilityError) as exc:
-        reachability.check_reachability([27015])
-    assert "429" in str(exc.value) and "rate limit" in str(exc.value).lower()
+        reachability.check_steam_master("1.2.3.4")
+    assert "503" in str(exc.value)
 
 
-def test_check_reachability_surfaces_network_error(monkeypatch):
+def test_check_surfaces_network_error(monkeypatch):
     from cs2servergui import reachability
-    monkeypatch.setattr(reachability, "_resolve_probe_url",
-                        lambda override: "https://probe.example/check")
     def _fake(req, timeout=None):
         raise urllib.error.URLError("Name or service not known")
     monkeypatch.setattr(reachability.urllib.request, "urlopen", _fake)
     with pytest.raises(reachability.ReachabilityError) as exc:
-        reachability.check_reachability([27015])
+        reachability.check_steam_master("1.2.3.4")
     assert "unreachable" in str(exc.value).lower()
 
 
-def test_check_reachability_surfaces_non_json(monkeypatch):
+def test_check_surfaces_non_json(monkeypatch):
     from cs2servergui import reachability
-    monkeypatch.setattr(reachability, "_resolve_probe_url",
-                        lambda override: "https://probe.example/check")
     monkeypatch.setattr(reachability.urllib.request, "urlopen",
-                        _stub_urlopen_returning(b"<html>oops</html>"))
+                        _stub_urlopen_returning(b"<html>steam down</html>"))
     with pytest.raises(reachability.ReachabilityError) as exc:
-        reachability.check_reachability([27015])
+        reachability.check_steam_master("1.2.3.4")
     assert "non-json" in str(exc.value).lower()
 
 
-# ── Hint engine ────────────────────────────────────────────────────────
+# ── Hint engine ─────────────────────────────────────────────────────────
 
-def _interpret(tcp_status, udp_status, port=27015):
-    """Helper: run interpret() against a single-port synthetic result."""
+def _hint(servers, *, gslt_set=True, running=True, uptime=600, port=27015):
+    """Convenience: build a synthetic raw result + run interpret."""
     from cs2servergui.reachability import interpret
-    return interpret({"results": [
-        {"port": port,
-         "tcp": {"status": tcp_status} if tcp_status else None,
-         "udp": {"status": udp_status} if udp_status else None}
-    ]})[0]
+    raw = {"target": "1.2.3.4", "ok": True, "servers": servers}
+    return interpret(raw, gslt_set=gslt_set, server_running=running,
+                     server_uptime_secs=uptime, expected_port=port)[0]
 
 
-def test_hint_both_open_is_ok():
-    h = _interpret("open", "open")
+def test_hint_server_offline_is_info():
+    h = _hint([], running=False)
+    assert h["severity"] == "info"
+    assert "offline" in h["message"].lower()
+
+
+def test_hint_gslt_missing_fail():
+    """Running but no GSLT — fatal for external visibility."""
+    h = _hint([], running=True, gslt_set=False)
+    assert h["severity"] == "fail"
+    assert "gslt" in h["message"].lower()
+    assert "steamcommunity.com/dev/managegameservers" in (h["fix"] or "")
+
+
+def test_hint_recently_started_is_info():
+    """Just started — Valve master server has 30-90s discovery lag."""
+    h = _hint([], running=True, gslt_set=True, uptime=15)
+    assert h["severity"] == "info"
+    assert "wait" in (h["fix"] or "").lower()
+
+
+def test_hint_visible_in_master_is_ok():
+    h = _hint(
+        [{"addr": "1.2.3.4:27015", "gameport": 27015, "appid": 730, "secure": True}],
+    )
     assert h["severity"] == "ok"
-    assert h["fix"] is None
+    assert "players can connect" in h["message"].lower()
 
 
-def test_hint_tcp_open_udp_unknown_warns_about_tcp_only_forward():
-    h = _interpret("open", "unknown")
+def test_hint_vac_disabled_flagged_on_ok():
+    h = _hint(
+        [{"addr": "1.2.3.4:27015", "gameport": 27015, "appid": 730, "secure": False}],
+    )
+    assert h["severity"] == "ok"
+    assert "vac disabled" in h["message"].lower()
+
+
+def test_hint_wrong_port_is_warn():
+    """Valve sees us, but on a port that isn't what we expected."""
+    h = _hint(
+        [{"addr": "1.2.3.4:27020", "gameport": 27020, "appid": 730}],
+        port=27015,
+    )
     assert h["severity"] == "warn"
-    assert "udp" in h["message"].lower()
+    assert "27020" in h["message"]
+    assert "27015" in h["message"]
 
 
-def test_hint_udp_open_tcp_closed_explains_rcon_only_impact():
-    h = _interpret("closed", "open")
-    assert h["severity"] == "warn"
-    assert "rcon" in (h["fix"] or "").lower()
-
-
-def test_hint_filtered_blames_router_or_isp():
-    h = _interpret("filtered", "unknown")
+def test_hint_invisible_blames_forward_then_cgnat():
+    h = _hint([], running=True, gslt_set=True, uptime=600)
     assert h["severity"] == "fail"
-    assert "router" in (h["fix"] or "").lower() or \
-           "isp" in (h["fix"] or "").lower()
+    msg_lower = h["message"].lower()
+    fix_lower = (h["fix"] or "").lower()
+    assert "cannot see" in msg_lower or "invisible" in msg_lower
+    assert "forward" in fix_lower
+    assert "cgnat" in fix_lower
 
 
-def test_hint_tcp_closed_suggests_forward_rule():
-    h = _interpret("closed", "unknown")
-    # closed+unknown is the "common stale DHCP forward" case — fail+router fix.
-    assert h["severity"] == "fail"
-    assert "forward" in (h["fix"] or "").lower()
-
-
-def test_hint_handles_missing_protocol_blocks():
-    """If the probe couldn't run one protocol (None status), still emit a hint."""
-    from cs2servergui.reachability import interpret
-    out = interpret({"results": [{"port": 27015,
-                                   "tcp": {"status": "open"},
-                                   "udp": None}]})
-    assert len(out) == 1
-    assert out[0]["port"] == 27015
-
-
-def test_hint_skips_entries_without_port():
-    from cs2servergui.reachability import interpret
-    out = interpret({"results": [
-        {"port": 27015, "tcp": {"status": "open"}, "udp": {"status": "open"}},
-        {"port": "bogus", "tcp": {"status": "open"}, "udp": {"status": "open"}},
-        {"tcp": {"status": "open"}},
-    ]})
-    assert len(out) == 1
-    assert out[0]["port"] == 27015
-
-
-def test_hint_severity_set_matches_doc():
-    """Every hint must have severity ∈ {ok, warn, fail}.  Frontend uses
-    this to pick badge colour; an unknown value would render blank."""
-    from cs2servergui.reachability import interpret
-    pairs = [("open", "open"), ("open", "unknown"), ("closed", "open"),
-             ("filtered", "unknown"), ("closed", "unknown"),
-             ("error", "error"), (None, None)]
-    for tcp, udp in pairs:
-        out = interpret({"results": [{"port": 27015,
-                                       "tcp": {"status": tcp} if tcp else None,
-                                       "udp": {"status": udp} if udp else None}]})
-        assert out[0]["severity"] in {"ok", "warn", "fail"}, \
-            f"unknown severity for (tcp={tcp}, udp={udp}): {out[0]}"
+def test_hint_severity_always_valid():
+    """Every hint must have severity ∈ {ok, warn, fail, info}."""
+    cases = [
+        ([], {"running": False}),
+        ([], {"gslt_set": False}),
+        ([], {"uptime": 10}),
+        ([], {}),
+        ([{"addr": "1.2.3.4:27015", "gameport": 27015, "appid": 730, "secure": True}], {}),
+        ([{"addr": "1.2.3.4:27020", "gameport": 27020, "appid": 730}], {}),
+    ]
+    for servers, kwargs in cases:
+        h = _hint(servers, **kwargs)
+        assert h["severity"] in {"ok", "warn", "fail", "info"}, h

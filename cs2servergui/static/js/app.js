@@ -943,43 +943,26 @@ function renderStatusState() {
   });
 }
 
-/* ─── Remote Reachability (v1.2 / task #168 follow-on) ─────────────────────
- * Calls /api/reachability/check; renders per-port TCP/UDP status badges
- * + operator-facing hints from the backend's hint engine.  The card
- * stays hidden when the probe URL is unset (503 + configured:false) so
- * the feature is invisible until an operator points at a deployment.
+/* ─── Remote Reachability (v1.2 — Steam master server query) ───────────────
+ * Asks Valve's master server whether our CS2 server is registered + visible
+ * to external players.  Renders a single severity-coded hint plus optional
+ * detail about the matched server.  Zero infrastructure needed — Steam Web
+ * API is free, no key, authoritative for the "can players reach me?"
+ * question.
  */
 async function _reachCheck(card, body, btn, silent = false) {
-  // Use the existing api.js wrapper; it handles auth + retries + 401 reload.
   if (btn) btn.disabled = true;
-  const previousHTML = body.innerHTML;
-  body.innerHTML = `<div class="dim" style="font-size:13px">Probing public IP…</div>`;
+  body.innerHTML = `<div class="dim" style="font-size:13px">Asking Valve's master server…</div>`;
   try {
     const r = await api.reachability.check();
     card.classList.remove('hidden');
     body.innerHTML = _renderReachResult(r);
   } catch (err) {
-    // 503 with configured:false = feature off; hide silently on first load,
-    // surface explicitly on user-clicked re-check so they get feedback.
-    const off = err.status === 503 && err.body && err.body.configured === false;
-    if (off) {
-      if (silent) {
-        // Restore — leave the card hidden, no toast.
-        body.innerHTML = previousHTML;
-        return;
-      }
-      card.classList.remove('hidden');
-      body.innerHTML = `
-        <div class="dim" style="font-size:13px">
-          Probe URL not configured.  Set <code>reachability_probe_url</code>
-          in <code>oblivion_config.json</code> — see
-          <code>probe/README.md</code> for deploy steps (Fly.io free tier or
-          self-host).  Until then, this panel stays dormant.
-        </div>`;
-      return;
-    }
-    // Probe service is configured but unreachable / errored.  Surface so
-    // the operator knows their probe deployment is down.
+    // 503 from our endpoint = either "no public IP yet" or "Steam Web API
+    // unreachable".  Either is worth surfacing — on first load (silent),
+    // leave the card hidden so a fresh launch isn't noisy; on user click,
+    // surface the actual message.
+    if (silent) return;
     card.classList.remove('hidden');
     body.innerHTML = `
       <div style="color:var(--bad);font-size:13px">
@@ -991,31 +974,16 @@ async function _reachCheck(card, body, btn, silent = false) {
 }
 
 function _renderReachResult(r) {
-  const target  = r.target || '(unknown)';
-  const hints   = r.hints  || [];
-  const results = r.results || [];
+  const target  = r.target  || '(unknown)';
+  const hints   = r.hints   || [];
+  const servers = r.servers || [];
+  const ctx     = r.context || {};
 
   const sevColor = (sev) =>
     sev === 'ok'   ? 'var(--ok)'
-  : sev === 'warn' ? 'var(--warn, #d28a00)'
+  : sev === 'warn' ? 'var(--warn)'
+  : sev === 'info' ? 'var(--accent, #888)'
   :                  'var(--bad)';
-
-  const badge = (label, status) => {
-    if (status === 'open')     return `<span class="reach-badge reach-ok">${label}: open</span>`;
-    if (status === 'closed')   return `<span class="reach-badge reach-bad">${label}: closed</span>`;
-    if (status === 'filtered') return `<span class="reach-badge reach-bad">${label}: filtered</span>`;
-    if (status === 'unknown')  return `<span class="reach-badge reach-warn">${label}: no reply</span>`;
-    if (status === 'error')    return `<span class="reach-badge reach-bad">${label}: error</span>`;
-    return `<span class="reach-badge reach-warn">${label}: —</span>`;
-  };
-
-  const rows = results.map(pr => `
-    <div class="reach-row">
-      <span class="reach-port">Port ${pr.port}</span>
-      ${badge('TCP', (pr.tcp || {}).status)}
-      ${badge('UDP', (pr.udp || {}).status)}
-    </div>
-  `).join('');
 
   const hintBlock = hints.map(h => `
     <div class="reach-hint reach-sev-${h.severity}" style="border-left-color:${sevColor(h.severity)}">
@@ -1024,12 +992,24 @@ function _renderReachResult(r) {
     </div>
   `).join('');
 
+  const serverList = servers.length ? `
+    <div class="dim" style="font-size:12px;margin-top:8px">
+      Steam master sees ${servers.length === 1 ? '1 server' : servers.length + ' servers'} at this IP:
+      <ul style="margin:4px 0 0 18px;padding:0">
+        ${servers.map(s => `<li>
+          <code>${esc(s.addr || '?')}</code>
+          ${s.secure === false ? '<span class="reach-badge reach-warn" style="margin-left:6px">VAC: off</span>' : ''}
+        </li>`).join('')}
+      </ul>
+    </div>` : '';
+
   return `
     <div class="reach-target dim" style="font-size:12px;margin-bottom:6px">
-      Probed public IP: <code>${esc(target)}</code>
+      Public IP: <code>${esc(target)}</code>
+      ${ctx.expected_port ? ` · expected port <code>${ctx.expected_port}</code>` : ''}
     </div>
-    <div class="reach-rows">${rows}</div>
-    ${hintBlock ? `<div class="reach-hints" style="margin-top:8px">${hintBlock}</div>` : ''}
+    ${hintBlock ? `<div class="reach-hints">${hintBlock}</div>` : ''}
+    ${serverList}
   `;
 }
 
