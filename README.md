@@ -118,6 +118,11 @@ Vanilla modes (Competitive, Casual, Wingman, etc.) run with no managed plugins a
   no logs, no bans)
 - **PIN brute-force protection**: per-IP lockout after 5 fails + global decay backoff
 - **Cloudflare quick tunnel** support for one-night-only HTTPS access — see the Off-LAN access section below
+- **Remote Reachability check** *(v1.1.5)* — Status-tab panel asks Valve's
+  master server whether your CS2 server is actually reachable from outside
+  the LAN.  Catches the silent failure modes that local pre-flight can't
+  see (port-forward-points-at-wrong-IP, GSLT missing, CGNAT, ISP blocking).
+  One severity-coded hint per check with an actionable fix line.
 
 ### Player Management
 - Live **player list** with names and ping
@@ -253,16 +258,17 @@ ISCC installer.iss
 # Output: dist\OblivionServerToolSetup-v<version>.exe
 ```
 
-### Option C — Linux *(v1.1.0, v1.2.0 in progress)*
+### Option C — Linux *(v1.1.5, v1.2.0 in progress)*
 
-The desktop window is Windows-only; on Linux the app runs **headless**
-(`--headless`) and is administered through the web panel only.
+The default `python main.py` opens an in-app window on both Windows
+(Edge WebView2) and Linux desktop sessions (GTK / WebKitGTK).  On
+SSH-only servers it auto-falls-back to **headless** (`--headless`) and
+is administered through the web panel only.
 
 > **v1.2.0 in progress.**  v1.1 shipped the headless/Docker/systemd
-> shape and is solid for the panel, RCON, plugins, veto, Discord bot,
-> and config management.  Three workflows have known Linux gaps still
-> being closed in v1.2 — pin to Windows for these in production until
-> v1.2.0 final:
+> shape and v1.1.5 added the GTK desktop window + reachability check.
+> Three workflows still have known Linux gaps being closed in v1.2 —
+> pin to Windows for these in production until v1.2.0 final:
 >
 > - **Workshop map downloads** — DepotDownloader path + bootstrap pick
 >   the Windows asset.  Tracked for v1.2.0-alpha2.
@@ -291,7 +297,7 @@ docker compose up -d
 ```
 
 The compose file pulls `ghcr.io/oblivion-systems/oblivion-server-tool:latest`;
-pin a specific version (`:1.1.0`) for reproducibility.
+pin a specific version (`:1.1.5`) for reproducibility.
 
 **Bare-metal (systemd)** — for operators who don't want Docker:
 

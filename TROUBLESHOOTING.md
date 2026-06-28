@@ -80,6 +80,33 @@ Secrets are masked.  Safe to paste publicly.
 4. Plugin manifest — what's currently deployed?  Mismatch with the
    mode you're trying to start?
 
+### "Remote players can't connect" *(v1.1.5)*
+
+The Status tab has a **Remote Reachability** panel that asks Valve's
+master server whether your CS2 server is registered + visible to the
+outside world.  Click it first — the one severity-coded hint tells
+you exactly which of these you're hitting:
+
+1. **No GSLT token** — Valve auth rejects external clients silently.
+   Generate one at https://steamcommunity.com/dev/managegameservers
+   (App ID 730), paste into Config → GSLT, restart server.
+2. **Just started** — give Valve's master server up to 90 seconds to
+   discover you, then re-check.
+3. **Invisible to Valve** — almost always a router port forward
+   issue.  Most common: the forward rule targets the wrong LAN IP
+   (stale DHCP lease).  Verify the forward points at THIS machine's
+   current LAN IP for **both TCP and UDP** on port 27015, and set a
+   DHCP reservation so the IP can't drift.
+4. **Visible on the wrong port** — you're hosting multiple servers
+   and your forward targets a different one, or your CS2 server is
+   listening on a non-standard port.  Check the `port` cvar.
+
+If the panel says everything is OK but players still can't connect,
+the problem is on the client side (their firewall, their Steam
+client, their connect string typo).  Verify with the LAN connect
+string first — if a player on your same WiFi can connect via
+`192.168.x.x:27015`, the server itself is fine.
+
 ### "MatchZy didn't load the match"
 
 1. Snapshot's **Active veto session → matchzy_config_built** —
