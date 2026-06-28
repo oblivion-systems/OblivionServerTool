@@ -2,125 +2,79 @@
 
 ---
 
-## v1.2.0 (in progress) — Linux parity + remote reachability
+## v1.1.5 — 2026-06-28 (Reachability + Linux desktop window)
 
-### v1.2.0-alpha2 (planned tag, post-smoke) — Remote reachability via Steam master
+Two operator-facing additions on the v1.1 line — neither requires a
+v1.2 major bump because both are non-breaking, OS-gated, or
+admin-only diagnostic surfaces.
+
+### Remote reachability (Steam master server query)
 
 Closes the "operator's port forward silently broken" diagnostic gap —
 the failure mode that's invisible to local checks because most home
 routers don't support NAT hairpinning.
 
-**Strategy switch from earlier draft.**  v1.2-alpha2 originally
-introduced a self-hosted Flask probe service.  That was dropped in
-favour of querying Valve's existing Steam master server:
+Approach: query Valve's existing Steam master server via the public
+`ISteamApps/GetServersAtAddress` endpoint.  Zero infrastructure to
+host, no API key required, and authoritative for the actual question
+("can Steam clients reach my server?").
 
-- **Zero infrastructure to host** — Steam Web API is free, no key
-  required, exists indefinitely.
-- **Authoritative** — what we actually want to know is "can Steam
-  clients reach my server?", and the master server is *the* system
-  that answers it for the player population.
-- **Catches GSLT-missing**, which a port probe couldn't: a server
-  without GSLT can't register with Valve, so it stays invisible —
-  the hint engine surfaces this as the actual fix.
-
-New surface:
 - **`cs2servergui/reachability.py`** — `check_steam_master(public_ip)`
   + `interpret(result, gslt_set, server_running, server_uptime_secs,
   expected_port)` hint engine.  Five-tier hint resolution:
   server offline → GSLT missing → uptime < 90s → wrong port →
   invisible (forward broken / CGNAT).
 - **`/api/reachability/check`** — admin-gated POST endpoint; returns
-  `{target, ok, servers, hints, context}`.  503 when public IP not yet
-  detected (first ~5s after launch) or Steam Web API itself is down.
-- **SPA panel** in the Status tab — single severity-coded hint card,
-  optional "other CS2 servers Valve sees at this IP" list, "Re-check"
-  button.  Always visible to admins (no config gate).
-- **14 reachability unit tests** + **5 endpoint integration tests**.
-  337 pass on Windows; CI matrix covers Linux equivalence.
+  `{target, ok, servers, hints, context}`.  503 only when public IP
+  not yet detected (first ~5s after launch) or Steam Web API is down.
+- **Status-tab panel** with severity-coded hint, "other CS2 servers
+  Valve sees at this IP" list, and a Re-check button.
 
-Reachability config key `reachability_probe_url` is no longer read —
-existing values in `oblivion_config.json` are harmless leftovers.
+Catches **GSLT-missing** automatically — a server without GSLT can't
+register with Valve, so it stays invisible, and the hint surfaces
+that as the actual fix.
 
+### Linux desktop window (non-breaking)
 
+The Windows-style in-app window now works on Linux desktop sessions
+too.  Windows behaviour is identical (still uses Edge WebView2);
+headless servers still auto-detect and run without a window.
 
-v1.1 made Linux *deployable* (headless / Docker / systemd).  v1.2
-makes it **as good as Windows for the operator-facing workflows the
-unit tests don't exercise** — workshop downloads, the in-app CS2
-install button, port-collision recovery, executable-bit handling on
-extracted binaries, and the GTK desktop window for Linux desktop
-sessions.
+- `platform.webview_gui()` — pywebview backend per OS.
+  Windows: `"edgechromium"`.  Linux: `"gtk"` (WebKitGTK).
+  Override via `OBLIVION_WEBVIEW_GUI=qt`.
+- `platform.has_display()` — `True` on Windows; on Linux, `True` iff
+  `$DISPLAY` or `$WAYLAND_DISPLAY` is set.
+- `main.py` — `webview.start(gui=...)` now uses
+  `platform.webview_gui()`; auto-fallback to `--headless` on Linux
+  when no display is detected; pywebview `ImportError` falls through
+  to `_run_headless()` (was exit-with-error).
 
-### Why this is a separate release line
-
-The v1.1 unit suite passes on both OSes, but unit tests cover Flask /
-state-machine logic — they don't run DepotDownloader, don't spawn the
-real CS2 binary, and don't exercise the zip-extract `+x` path.  A
-real-Linux audit found three operator-facing flows that fail outside
-the unit tests:
-
-1. **Workshop map downloads** — `DEPOTDL_PATH` is hardcoded to
-   `DepotDownloader.exe`; the bootstrap downloader filters GitHub
-   release assets for `windows` in the filename.
-2. **In-app "Install CS2 server" button** — calls the steamcmd
-   bootstrap, which downloads `steamcmd.zip` from akamai; Linux
-   needs `steamcmd_linux.tar.gz`.
-3. **Zombie / port-collision recovery** — `_kill_zombie_instance`
-   uses `taskkill` and a Windows-only process-name allowlist.
-
-Plus the broader Linux desktop gap: pywebview's GUI backend was
-hardcoded to `edgechromium`, so a Linux desktop session had no way
-to open the in-app window at all.
-
-### v1.2 slices
-
-| Slice | Tag                | Status   | Scope                                  |
-|-------|--------------------|----------|----------------------------------------|
-| 1     | `v1.2.0-alpha1`    | ✅ shipped | Per-OS pywebview GUI backend + headless auto-fallback when `$DISPLAY`/`$WAYLAND_DISPLAY` unset |
-| 2     | `v1.2.0-alpha2`    | planned  | **P0 parity**: DepotDownloader Linux artifact, executable-bit on zip extract, Linux zombie cleanup |
-| 3     | `v1.2.0-alpha3`    | planned  | **P1 parity**: steamcmd Linux bootstrap, Linux process-marker verification, doc pass |
-| 4     | `v1.2.0-beta`      | planned  | AppImage / .deb distribution, GTK icon polish, real-device smoke |
-| 5     | `v1.2.0`           | planned  | Final cut + marketing push (r/selfhosted, HN Show, etc.) |
-
-### Known Linux limitations until v1.2.0 final
-
-README's Option C section flags these for operators — workshop
-downloads, in-app CS2 install, and zombie recovery are the three
-workflows to avoid on Linux until v1.2.0-alpha2 ships.  Everything
-else (panel, RCON, plugins, veto, Discord, MatchZy) works on Linux
-today.
+### Tests
+- +14 reachability unit + 5 endpoint integration tests.
+- +4 platform tests for the webview GUI selector + display detection.
+- **337 pass** on Windows; CI matrix covers Linux equivalence.
 
 ---
 
-## v1.2.0-alpha1 — 2026-06-26 (Linux desktop window)
+## v1.2.0 (in progress) — Linux operator-flow parity
 
-First v1.2 slice.  Brings the Windows-style in-app window to Linux
-desktop sessions while keeping headless as the right default for
-servers.
+After v1.1.5 ships, the remaining v1.2 work is closing the
+operator-facing Linux gaps the v1.1 unit suite doesn't exercise:
 
-### Added
-- `platform.webview_gui()` — pywebview backend name per OS.
-  Windows: `"edgechromium"` (unchanged).  Linux: `"gtk"` (WebKitGTK).
-  Operator override via `OBLIVION_WEBVIEW_GUI=qt`.
-- `platform.has_display()` — `True` on Windows; on Linux, `True` iff
-  `$DISPLAY` or `$WAYLAND_DISPLAY` is set.
-- README quickstart for Linux desktop: install `python3-gi
-  gir1.2-webkit2-4.1`, run `python main.py`.
+| Priority | Item                                                                   |
+|----------|------------------------------------------------------------------------|
+| **P0**   | DepotDownloader Linux artifact + path (workshop maps on Linux)         |
+| **P0**   | `+x` after zip extract for `cs2`, `steamcmd.sh`, CSS loader `.so`      |
+| **P0**   | Linux zombie cleanup (`platform.kill_pid` + Linux process names)       |
+| **P1**   | steamcmd Linux bootstrap (`steamcmd_linux.tar.gz`)                     |
+| **P1**   | Linux process-marker verification (manual smoke against real CS2)      |
+| **P2**   | AppImage / `.deb` distribution                                          |
+| **P2**   | Documentation pass (Cloudflare tunnel, troubleshooting paths)          |
+| **P3**   | `.png` icon for GTK window                                              |
 
-### Changed
-- `main.py` — `webview.start()` now passes `gui=platform.webview_gui()`
-  instead of the hardcoded `"edgechromium"`.  Behaviour on Windows is
-  identical; Linux desktop sessions get a real in-app WebKitGTK window.
-- `main.py` — auto-fallback to `--headless` when launched without it
-  on a Linux box with no `$DISPLAY` / `$WAYLAND_DISPLAY` (typical SSH /
-  systemd scenario).  Log line names the reason.
-- `main.py` — pywebview `ImportError` no longer prints "install
-  pywebview" and exits.  Falls through to `_run_headless()` so the web
-  panel stays reachable.
-
-### Tests
-- +4 platform tests: per-OS GUI default, `OBLIVION_WEBVIEW_GUI` override,
-  `has_display()` Windows-always-True, `has_display()` Linux follows
-  display envs.  318 pass on Windows AND native Linux (was 314).
+P0+P1 are ~4 hours of focused work.  v1.2.0 final ships when all
+P0/P1 land plus a manual smoke against a real Ubuntu CS2 install.
 
 ---
 

@@ -9,14 +9,16 @@ Linux runs headless via Docker or systemd, administered from the web panel.
 [![Tests](https://img.shields.io/badge/tests-300%2F300-brightgreen)](tests/)
 
 
-> **Status: v1.1.0** — Linux + headless support shipped.  Windows still
-> ships as the single `.exe` with the WebView2 desktop window; Linux
-> operators get headless via Docker (`ghcr.io/oblivion-systems/oblivion-server-tool:1.1.0`)
-> or a systemd unit, administered through the same web panel.  Fifty-plus
-> releases of evening + weekend work, dozens of live tournaments, 314
-> backend tests green on both Windows and Linux, bundled patched
-> WarcraftPlugin source published, every plugin author credited.
-> Anything tagged before v1.0 was a draft.
+> **Status: v1.1.5** — Linux + headless + reachability diagnostic.
+> Windows still ships as the single `.exe` with the WebView2 desktop
+> window; Linux operators get headless via Docker
+> (`ghcr.io/oblivion-systems/oblivion-server-tool:1.1.5`) or a systemd
+> unit, plus the Linux desktop window for interactive sessions.  New
+> **Remote Reachability** panel asks Valve's master server whether
+> external players can actually reach your server — catches the
+> port-forward-points-at-wrong-IP failure mode that's invisible to
+> local checks.  337 backend tests green on Windows + Linux, every
+> plugin author credited.  Anything tagged before v1.0 was a draft.
 >
 > Full per-release prose lives in [CHANGELOG.md](CHANGELOG.md); spec for
 > the map-veto feature in [VETO.md](VETO.md); plugin-author guide in
