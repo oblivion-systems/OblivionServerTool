@@ -110,6 +110,14 @@ const api = (() => {
     // based on this instead of try-then-403.
     capabilities: ()    => get('/api/capabilities'),
 
+    // ── Reachability (v1.2) — external probe; 503 + configured:false ──────
+    // when no probe URL is configured (feature OFF).  SPA hides the panel
+    // gracefully in that case instead of toasting an error.
+    reachability: {
+      check: (ports = null) =>
+        post('/api/reachability/check', ports ? { ports } : {}),
+    },
+
     // ── Discord (v0.11.0 Layer 1B — voice-channel roster pull) ────────────
     discord: {
       voiceChannels: ()           => get('/api/discord/voice_channels'),

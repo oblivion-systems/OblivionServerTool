@@ -943,6 +943,96 @@ function renderStatusState() {
   });
 }
 
+/* ─── Remote Reachability (v1.2 / task #168 follow-on) ─────────────────────
+ * Calls /api/reachability/check; renders per-port TCP/UDP status badges
+ * + operator-facing hints from the backend's hint engine.  The card
+ * stays hidden when the probe URL is unset (503 + configured:false) so
+ * the feature is invisible until an operator points at a deployment.
+ */
+async function _reachCheck(card, body, btn, silent = false) {
+  // Use the existing api.js wrapper; it handles auth + retries + 401 reload.
+  if (btn) btn.disabled = true;
+  const previousHTML = body.innerHTML;
+  body.innerHTML = `<div class="dim" style="font-size:13px">Probing public IP…</div>`;
+  try {
+    const r = await api.reachability.check();
+    card.classList.remove('hidden');
+    body.innerHTML = _renderReachResult(r);
+  } catch (err) {
+    // 503 with configured:false = feature off; hide silently on first load,
+    // surface explicitly on user-clicked re-check so they get feedback.
+    const off = err.status === 503 && err.body && err.body.configured === false;
+    if (off) {
+      if (silent) {
+        // Restore — leave the card hidden, no toast.
+        body.innerHTML = previousHTML;
+        return;
+      }
+      card.classList.remove('hidden');
+      body.innerHTML = `
+        <div class="dim" style="font-size:13px">
+          Probe URL not configured.  Set <code>reachability_probe_url</code>
+          in <code>oblivion_config.json</code> — see
+          <code>probe/README.md</code> for deploy steps (Fly.io free tier or
+          self-host).  Until then, this panel stays dormant.
+        </div>`;
+      return;
+    }
+    // Probe service is configured but unreachable / errored.  Surface so
+    // the operator knows their probe deployment is down.
+    card.classList.remove('hidden');
+    body.innerHTML = `
+      <div style="color:var(--bad);font-size:13px">
+        ${esc(err.message || 'Reachability check failed.')}
+      </div>`;
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+function _renderReachResult(r) {
+  const target  = r.target || '(unknown)';
+  const hints   = r.hints  || [];
+  const results = r.results || [];
+
+  const sevColor = (sev) =>
+    sev === 'ok'   ? 'var(--ok)'
+  : sev === 'warn' ? 'var(--warn, #d28a00)'
+  :                  'var(--bad)';
+
+  const badge = (label, status) => {
+    if (status === 'open')     return `<span class="reach-badge reach-ok">${label}: open</span>`;
+    if (status === 'closed')   return `<span class="reach-badge reach-bad">${label}: closed</span>`;
+    if (status === 'filtered') return `<span class="reach-badge reach-bad">${label}: filtered</span>`;
+    if (status === 'unknown')  return `<span class="reach-badge reach-warn">${label}: no reply</span>`;
+    if (status === 'error')    return `<span class="reach-badge reach-bad">${label}: error</span>`;
+    return `<span class="reach-badge reach-warn">${label}: —</span>`;
+  };
+
+  const rows = results.map(pr => `
+    <div class="reach-row">
+      <span class="reach-port">Port ${pr.port}</span>
+      ${badge('TCP', (pr.tcp || {}).status)}
+      ${badge('UDP', (pr.udp || {}).status)}
+    </div>
+  `).join('');
+
+  const hintBlock = hints.map(h => `
+    <div class="reach-hint reach-sev-${h.severity}" style="border-left-color:${sevColor(h.severity)}">
+      <div class="reach-hint-msg">${esc(h.message)}</div>
+      ${h.fix ? `<div class="reach-hint-fix">${esc(h.fix)}</div>` : ''}
+    </div>
+  `).join('');
+
+  return `
+    <div class="reach-target dim" style="font-size:12px;margin-bottom:6px">
+      Probed public IP: <code>${esc(target)}</code>
+    </div>
+    <div class="reach-rows">${rows}</div>
+    ${hintBlock ? `<div class="reach-hints" style="margin-top:8px">${hintBlock}</div>` : ''}
+  `;
+}
+
 function _matchPanelTemplate() {
   return `
     <div class="mp-thumb-side">
@@ -1247,6 +1337,41 @@ function buildStatusPage() {
     </button>
   `;
   root.appendChild(mapCard);
+
+  // ── Remote Reachability card (v1.2 — admin-only, hides if probe unset) ──
+  // Calls /api/reachability/check on demand; renders per-port TCP/UDP
+  // badges + one-line operator-facing hints.  The card is mounted hidden
+  // and only un-hides if the first probe call returns 200 OR returns 503
+  // with configured:true (meaning the probe URL is set but the service
+  // is currently down — surface that distinctly).  503+configured:false
+  // = feature off, card stays hidden.
+  const reachCard = h('div', 'card admin-only mb-16 hidden');
+  reachCard.id = 'reach-card';
+  reachCard.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px">
+      <span class="card-title" style="margin-bottom:0">Remote Reachability</span>
+      <button class="btn btn-sm" id="reach-check-btn">
+        ${icon('<polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>')}
+        Re-check
+      </button>
+    </div>
+    <div class="reach-body" id="reach-body">
+      <div class="dim" style="font-size:13px">
+        Click "Re-check" to probe whether players can reach this server
+        from outside the LAN.
+      </div>
+    </div>
+  `;
+  root.appendChild(reachCard);
+
+  // Wire the button + initial auto-probe (deferred so the page renders first).
+  const reachBtn  = el('reach-check-btn');
+  const reachBody = el('reach-body');
+  if (reachBtn && reachBody) {
+    reachBtn.addEventListener('click', () => _reachCheck(reachCard, reachBody, reachBtn));
+    // First-load probe — fire & forget, surfaces the card if configured.
+    setTimeout(() => _reachCheck(reachCard, reachBody, reachBtn, true), 250);
+  }
 
   // Populate mode select
   const modeSel = el('mode-select');
