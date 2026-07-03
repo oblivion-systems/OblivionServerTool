@@ -133,15 +133,16 @@ APP_API_URL      = f"https://api.github.com/repos/{APP_REPO}/releases/latest"
 # string here is just a placeholder so the os.path.join() calls below
 # don't error at import time; nothing should read these values directly.
 from cs2servergui.platform import (
-    server_binary_rel_path as _server_binary_rel_path,
-    steamcmd_filename      as _steamcmd_filename,
+    server_binary_rel_path   as _server_binary_rel_path,
+    steamcmd_filename        as _steamcmd_filename,
+    depotdownloader_filename as _depotdl_filename,
 )
 
 CS2_SERVER_DIR = ""
 STEAMCMD_PATH  = os.path.join(CS2_SERVER_DIR, _steamcmd_filename())
 CS2_PATH       = os.path.join(CS2_SERVER_DIR, _server_binary_rel_path())
 WORKSHOP_DIR   = os.path.join(CS2_SERVER_DIR, "steamapps", "workshop", "content", "730")
-DEPOTDL_PATH   = os.path.join(CS2_SERVER_DIR, "depotdownloader", "DepotDownloader.exe")
+DEPOTDL_PATH   = os.path.join(CS2_SERVER_DIR, "depotdownloader", _depotdl_filename())
 CS2_ADDONS_DIR = os.path.join(CS2_SERVER_DIR, "steamapps", "common",
                                "Counter-Strike Global Offensive",
                                "game", "csgo", "addons")
@@ -161,7 +162,7 @@ def update_paths(server_dir: str) -> None:
     WORKSHOP_DIR   = os.path.join(server_dir, "steamapps", "workshop",
                                    "content", "730")
     DEPOTDL_PATH   = os.path.join(server_dir, "depotdownloader",
-                                   "DepotDownloader.exe")
+                                   _depotdl_filename())
     CS2_ADDONS_DIR = os.path.join(server_dir, "steamapps", "common",
                                    "Counter-Strike Global Offensive",
                                    "game", "csgo", "addons")

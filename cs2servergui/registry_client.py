@@ -48,6 +48,8 @@ import zipfile
 
 from . import config as _config
 
+_IS_WINDOWS = sys.platform == "win32"
+
 
 # v0.16.8 (review fix #4) — per-component lock so two simultaneous
 # install_runtime calls for the same component can't race on
@@ -299,7 +301,13 @@ def _safe_extract_zip(zip_bytes: bytes, dest_dir: str) -> None:
     """Extract a zip into dest_dir with Zip Slip protection.  Every
     member's normalised target path MUST resolve inside dest_dir.  Symbolic
     links in zip entries are ignored (zipfile doesn't support them on
-    Windows anyway, but checked here for cross-platform safety)."""
+    Windows anyway, but checked here for cross-platform safety).
+
+    v1.2: on Linux, re-applies the Unix mode bits stored in each entry's
+    external_attr after extraction.  zipfile.extractall discards them, so
+    an executable inside a .zip (e.g. the CSS-with-runtime Linux bundle's
+    native binaries) would otherwise land as 0644 and fail to run.  No-op
+    on Windows, which has no Unix mode bits."""
     os.makedirs(dest_dir, exist_ok=True)
     dest_norm = os.path.realpath(dest_dir)
     try:
@@ -318,6 +326,20 @@ def _safe_extract_zip(zip_bytes: bytes, dest_dir: str) -> None:
         if os.path.commonpath([dest_norm, target]) != dest_norm:
             raise RegistryError(f"zip slip detected on entry {name!r}")
     zf.extractall(dest_dir)
+
+    # Restore Unix mode bits (Linux only).  The high 16 bits of
+    # external_attr hold the st_mode the archive was created with; if any
+    # entry carries execute bits, re-apply them so extracted binaries run.
+    if not _IS_WINDOWS:
+        for member in zf.infolist():
+            mode = (member.external_attr >> 16) & 0o7777
+            if not mode:
+                continue                       # entry stored no Unix mode
+            path = os.path.join(dest_dir, member.filename)
+            try:
+                os.chmod(path, mode)
+            except OSError:
+                pass                           # best-effort; skip on failure
     zf.close()
 
 

@@ -59,22 +59,46 @@ headless servers still auto-detect and run without a window.
 
 ## v1.2.0 (in progress) — Linux operator-flow parity
 
-After v1.1.5 ships, the remaining v1.2 work is closing the
-operator-facing Linux gaps the v1.1 unit suite doesn't exercise:
+Closing the operator-facing Linux gaps the v1.1 unit suite doesn't
+exercise.
+
+### v1.2.0-alpha2 (this slice) — P0 parity ✅
+
+The three hard blockers that made a Linux operator's first real
+tournament fail outside the unit tests are fixed:
+
+- **DepotDownloader Linux** — `platform.depotdownloader_filename()`
+  (`DepotDownloader` vs `.exe`) + `depotdownloader_asset_os()`
+  (`linux` vs `windows`).  `config.DEPOTDL_PATH` and the GitHub
+  release-asset picker now target the Linux self-contained bundle
+  (`DepotDownloader-linux-x64.zip`), and the extracted ELF is
+  `chmod +x`'d.  **Workshop map downloads now work on Linux.**
+- **Executable bit on zip extract** — `platform.make_executable()`
+  (chmod +x, no-op on Windows) applied to the DepotDownloader binary;
+  `registry_client._safe_extract_zip()` now re-applies the Unix mode
+  bits stored in each entry's `external_attr`, so an executable inside
+  a `.zip` (CSS-with-runtime Linux bundle) lands runnable instead of
+  0644.
+- **Linux zombie cleanup** — `main._OUR_PROCESS_NAMES` sourced from
+  `platform.own_process_names()` (adds `python`/`python3`/onefile
+  binary), and the killer uses `platform.kill_pid()` (SIGKILL on
+  Linux) instead of a hardcoded `taskkill`.  Port-collision recovery
+  works on Linux.
+
++7 tests.  **344 pass on Windows AND native Linux.**
+
+### Remaining v1.2 work
 
 | Priority | Item                                                                   |
 |----------|------------------------------------------------------------------------|
-| **P0**   | DepotDownloader Linux artifact + path (workshop maps on Linux)         |
-| **P0**   | `+x` after zip extract for `cs2`, `steamcmd.sh`, CSS loader `.so`      |
-| **P0**   | Linux zombie cleanup (`platform.kill_pid` + Linux process names)       |
 | **P1**   | steamcmd Linux bootstrap (`steamcmd_linux.tar.gz`)                     |
 | **P1**   | Linux process-marker verification (manual smoke against real CS2)      |
 | **P2**   | AppImage / `.deb` distribution                                          |
 | **P2**   | Documentation pass (Cloudflare tunnel, troubleshooting paths)          |
 | **P3**   | `.png` icon for GTK window                                              |
 
-P0+P1 are ~4 hours of focused work.  v1.2.0 final ships when all
-P0/P1 land plus a manual smoke against a real Ubuntu CS2 install.
+v1.2.0 final ships when P1 lands plus a manual smoke against a real
+Ubuntu CS2 install.
 
 ---
 

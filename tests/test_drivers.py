@@ -323,6 +323,126 @@ t('config: runtime URLs match platform.metamod_download_url() / css_download_url
   t_config_runtime_urls_match_platform)
 
 
+# ─── v1.2-alpha2 — P0 Linux parity (DepotDownloader, +x, zombie kill) ──────
+
+def t_platform_depotdownloader_filename_per_os():
+    """DepotDownloader executable name: .exe on Windows, bare on Linux."""
+    import sys as _sys
+    from cs2servergui.platform import depotdownloader_filename
+    name = depotdownloader_filename()
+    if _sys.platform == 'win32':
+        return name == 'DepotDownloader.exe', f'got={name!r}'
+    return name == 'DepotDownloader', f'got={name!r}'
+t('platform: depotdownloader_filename() per OS',
+  t_platform_depotdownloader_filename_per_os)
+
+
+def t_platform_depotdownloader_asset_os_per_os():
+    """Release asset OS token: 'windows' on Windows, 'linux' on Linux."""
+    import sys as _sys
+    from cs2servergui.platform import depotdownloader_asset_os
+    tag = depotdownloader_asset_os()
+    if _sys.platform == 'win32':
+        return tag == 'windows', f'got={tag!r}'
+    return tag == 'linux', f'got={tag!r}'
+t('platform: depotdownloader_asset_os() per OS',
+  t_platform_depotdownloader_asset_os_per_os)
+
+
+def t_config_depotdl_path_uses_platform_filename():
+    """config.DEPOTDL_PATH must end in the platform-correct executable name
+    so os.path.isfile() checks + subprocess invocation target the right
+    binary on Linux."""
+    import os as _os
+    from cs2servergui import config as _cfg
+    from cs2servergui.platform import depotdownloader_filename
+    from cs2servergui.config import update_paths
+    fake = '/srv/cs2' if _os.sep == '/' else 'C:\\cs2'
+    update_paths(fake)
+    got = _os.path.basename(_cfg.DEPOTDL_PATH)
+    update_paths('')   # restore
+    return got == depotdownloader_filename(), \
+           f'got={got!r} expected={depotdownloader_filename()!r}'
+t('config: DEPOTDL_PATH uses platform.depotdownloader_filename()',
+  t_config_depotdl_path_uses_platform_filename)
+
+
+def t_platform_own_process_names_per_os():
+    """own_process_names(): .exe names on Windows, python/python3 on Linux.
+    Used by main.py's zombie killer to avoid nuking an unrelated process."""
+    import sys as _sys
+    from cs2servergui.platform import own_process_names
+    names = own_process_names()
+    if _sys.platform == 'win32':
+        return 'oblivionservertool.exe' in names and 'python.exe' in names, \
+               f'got={sorted(names)!r}'
+    return 'python3' in names and 'oblivion-server-tool' in names, \
+           f'got={sorted(names)!r}'
+t('platform: own_process_names() per OS',
+  t_platform_own_process_names_per_os)
+
+
+def t_platform_make_executable_is_noop_safe():
+    """make_executable() must never throw — on Windows it's a no-op, on a
+    missing file it silently returns.  On Linux with a real file it adds +x."""
+    import sys as _sys, os as _os, tempfile, stat
+    from cs2servergui.platform import make_executable
+    # Missing file — must not raise on any OS.
+    make_executable('/no/such/file/oblivion-xyz')
+    # Real file.
+    fd, path = tempfile.mkstemp(prefix='oblivion_mkexec_')
+    _os.close(fd)
+    try:
+        make_executable(path)
+        if _sys.platform == 'win32':
+            return True, 'no-op on Windows, no throw'
+        mode = stat.S_IMODE(_os.stat(path).st_mode)
+        return bool(mode & stat.S_IXUSR), f'u+x not set: mode={oct(mode)}'
+    finally:
+        _os.remove(path)
+t('platform: make_executable() no-throw + sets +x on Linux',
+  t_platform_make_executable_is_noop_safe)
+
+
+def t_registry_zip_extract_preserves_exec_bit():
+    """_safe_extract_zip must re-apply Unix mode bits stored in a zip entry's
+    external_attr, so an executable inside a .zip lands runnable on Linux.
+    On Windows this is a no-op (no mode bits) — we just assert extraction
+    succeeded and the file exists."""
+    import sys as _sys, io as _io, os as _os, tempfile, zipfile as _zf, stat
+    from cs2servergui import registry_client
+    buf = _io.BytesIO()
+    with _zf.ZipFile(buf, 'w') as zf:
+        info = _zf.ZipInfo('runme.sh')
+        info.external_attr = (0o755 << 16)   # rwxr-xr-x in the high 16 bits
+        zf.writestr(info, '#!/bin/sh\necho hi\n')
+    dest = tempfile.mkdtemp(prefix='oblivion_zipexec_')
+    try:
+        registry_client._safe_extract_zip(buf.getvalue(), dest)
+        path = _os.path.join(dest, 'runme.sh')
+        if not _os.path.isfile(path):
+            return False, 'extraction did not create the file'
+        if _sys.platform == 'win32':
+            return True, 'extracted OK (mode bits N/A on Windows)'
+        mode = stat.S_IMODE(_os.stat(path).st_mode)
+        return bool(mode & stat.S_IXUSR), f'exec bit lost: mode={oct(mode)}'
+    finally:
+        import shutil; shutil.rmtree(dest, ignore_errors=True)
+t('registry: _safe_extract_zip preserves exec bit from external_attr',
+  t_registry_zip_extract_preserves_exec_bit)
+
+
+def t_main_zombie_names_come_from_platform():
+    """main._OUR_PROCESS_NAMES must be sourced from platform.own_process_names()
+    so the Linux zombie killer recognises python3 / the onefile binary."""
+    import main as _main
+    from cs2servergui.platform import own_process_names
+    return _main._OUR_PROCESS_NAMES == own_process_names(), \
+           f'main={sorted(_main._OUR_PROCESS_NAMES)!r}'
+t('main: _OUR_PROCESS_NAMES sourced from platform.own_process_names()',
+  t_main_zombie_names_come_from_platform)
+
+
 def t_platform_case_mismatch_hint_returns_none_when_path_exists():
     """case_mismatch_hint() returns None for an existing path — only
     fires when the path is missing AND a same-name-different-case sibling

@@ -38,24 +38,30 @@ def _enable_high_dpi() -> None:
         pass
 
 
-_OUR_PROCESS_NAMES = {"oblivionservertool.exe", "python.exe", "pythonw.exe"}
-
-
 # Port/process helpers live in cs2servergui/_netutils.py — single source of
 # truth for both this module (Flask port collisions) and core.py (CS2 port
 # conflict detection in _preflight_checks / _post_launch_sanity_check).
 from cs2servergui._netutils import port_in_use as _port_in_use
 from cs2servergui._netutils import holder_of_port as _holder_of_port
+from cs2servergui import platform as _plat
+
+# Image names that could be a stale copy of THIS app.  Per-OS (v1.2):
+# Windows = the frozen .exe / a python launcher; Linux = python[3] or the
+# onefile binary name.
+_OUR_PROCESS_NAMES = _plat.own_process_names()
 
 
 def _kill_zombie_instance(port: int) -> bool:
     """Kill a prior Oblivion process holding our Flask port. Returns True on kill.
 
-    pywebview's Edge WebView2 runtime occasionally leaves non-daemon threads alive
-    so the Python process survives window close.  The zombie holds our port,
-    making re-launches silently fail.  Only processes whose image matches our own
-    (OblivionServerTool.exe / python.exe) are killed — anything else (e.g.
-    CS_GO_Arx_Applet) is left alone and the caller falls back to a different port.
+    pywebview / Edge WebView2 (Windows) occasionally leaves non-daemon threads
+    alive so the Python process survives window close.  The zombie holds our
+    port, making re-launches silently fail.  Only processes whose image matches
+    our own are killed — anything else (e.g. CS_GO_Arx_Applet) is left alone and
+    the caller falls back to a different port.
+
+    v1.2: cross-platform.  Kill uses platform.kill_pid (taskkill on Windows,
+    SIGKILL on Linux) instead of a hardcoded taskkill.
     """
     holder = _holder_of_port(port)
     if not holder:
@@ -66,8 +72,7 @@ def _kill_zombie_instance(port: int) -> bool:
         return False
     print(f"[startup] Port {port} held by our own '{name}' (PID {pid}) — killing zombie…")
     try:
-        subprocess.run(["taskkill", "/F", "/PID", str(pid)],
-                       capture_output=True, timeout=5)
+        _plat.kill_pid(pid)
         for _ in range(15):
             time.sleep(0.2)
             if not _port_in_use(port):

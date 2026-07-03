@@ -3286,24 +3286,28 @@ class AppCore:
             )
             with urllib.request.urlopen(req, timeout=15) as r:
                 release = json.loads(r.read())
-            # Find the Windows x64 zip asset specifically
+            # SteamRE ships self-contained per-OS bundles:
+            #   DepotDownloader-windows-x64.zip  /  DepotDownloader-linux-x64.zip
+            # Pick the one matching THIS OS (v1.2 — was Windows-only).
+            from cs2servergui import platform as _plat
+            os_tag = _plat.depotdownloader_asset_os()
             assets = release.get("assets", [])
             asset_url = next(
                 (a["browser_download_url"] for a in assets
-                 if "windows" in a["name"].lower()
+                 if os_tag in a["name"].lower()
                  and "x64" in a["name"].lower()
                  and a["name"].endswith(".zip")),
                 None,
             )
             if not asset_url:
-                # Fallback: any windows zip (log the name so we can debug)
+                # Fallback: any zip for this OS (log the name so we can debug).
                 for a in assets:
-                    if "windows" in a["name"].lower() and a["name"].endswith(".zip"):
+                    if os_tag in a["name"].lower() and a["name"].endswith(".zip"):
                         self.log(f"  No x64 asset found — using: {a['name']}")
                         asset_url = a["browser_download_url"]
                         break
             if not asset_url:
-                self.log("  ✗ Could not find a Windows release asset.")
+                self.log(f"  ✗ Could not find a {os_tag} release asset.")
                 return False
             self.log(f"  Downloading: {asset_url}")
             zip_path = os.path.join(dest_dir, "depotdownloader.zip")
@@ -3311,6 +3315,10 @@ class AppCore:
             with zipfile.ZipFile(zip_path, "r") as zf:
                 zf.extractall(dest_dir)
             os.remove(zip_path)
+            # zipfile.extractall doesn't preserve the Unix executable bit, so
+            # the Linux DepotDownloader ELF lands as 0644 and won't launch.
+            # chmod +x it back to runnable (no-op on Windows).
+            _plat.make_executable(_config.DEPOTDL_PATH)
             if os.path.isfile(_config.DEPOTDL_PATH):
                 self.log("  DepotDownloader installed ✓")
                 return True

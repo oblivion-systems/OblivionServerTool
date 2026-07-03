@@ -26,6 +26,10 @@ css_download_url()                → str   # CounterStrikeSharp default
 case_mismatch_hint(path)          → str | None  # Linux-only case diagnostic
 webview_gui()                     → str   # pywebview backend name
 has_display()                     → bool  # desktop session available?
+depotdownloader_filename()        → str   # "DepotDownloader.exe" | "DepotDownloader"
+depotdownloader_asset_os()        → str   # "windows" | "linux"
+make_executable(path)             → None  # chmod +x on Linux; no-op on Windows
+own_process_names()               → set[str]  # our own image names for zombie kill
 """
 from __future__ import annotations
 
@@ -128,6 +132,59 @@ def server_binary_rel_path() -> str:
 def steamcmd_filename() -> str:
     """SteamCMD launcher filename — differs by OS."""
     return "steamcmd.exe" if _IS_WINDOWS else "steamcmd.sh"
+
+
+def depotdownloader_filename() -> str:
+    """DepotDownloader executable filename inside its release bundle.
+
+    SteamRE ships self-contained per-OS builds: the Windows bundle
+    contains DepotDownloader.exe, the Linux bundle contains a bare
+    DepotDownloader ELF binary.  We invoke it directly (not via
+    `dotnet`), so the filename has to match the OS.
+    """
+    return "DepotDownloader.exe" if _IS_WINDOWS else "DepotDownloader"
+
+
+def depotdownloader_asset_os() -> str:
+    """OS token used in SteamRE/DepotDownloader release asset filenames
+    (e.g. DepotDownloader-windows-x64.zip / DepotDownloader-linux-x64.zip)."""
+    return "windows" if _IS_WINDOWS else "linux"
+
+
+def make_executable(path: str) -> None:
+    """Ensure `path` has the executable bit set.  No-op on Windows (which
+    has no Unix mode bits); on Linux, adds u+x/g+x/o+x so a freshly
+    extracted binary (DepotDownloader, steamcmd.sh) can actually be run.
+
+    zipfile.extractall does NOT preserve Unix mode on many archives, so
+    an executable pulled from a .zip lands as 0644 and refuses to launch
+    with 'Permission denied'.  Callers chmod it back to runnable here.
+    Silently ignores a missing file — caller already handles that case.
+    """
+    if _IS_WINDOWS:
+        return
+    import stat
+    try:
+        st = os.stat(path)
+    except OSError:
+        return
+    os.chmod(
+        path,
+        st.st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH,
+    )
+
+
+def own_process_names() -> set[str]:
+    """Lower-cased image names that could be a stale copy of THIS app
+    holding our Flask port.  Used by main.py's zombie-instance killer to
+    avoid killing an unrelated process that merely grabbed the port.
+
+    Windows: the frozen .exe or a python launcher.
+    Linux:   python / python3, or the PyInstaller onefile binary name.
+    """
+    if _IS_WINDOWS:
+        return {"oblivionservertool.exe", "python.exe", "pythonw.exe"}
+    return {"oblivion-server-tool", "oblivionservertool", "python", "python3"}
 
 
 def metamod_bin_arch() -> str:
