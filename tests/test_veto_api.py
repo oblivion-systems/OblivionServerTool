@@ -1136,8 +1136,13 @@ def t_server_start_409_during_workshop_download():
     ac, app, c = _new_app()
     _login(c)
     ac.server_dir = tempfile.mkdtemp(prefix='oblivion_dl_test_')   # bypass dir-not-configured
-    # Bypass the property check by overriding it on the instance.
-    type(ac).is_installed = property(lambda _self: True)   # type: ignore[assignment]
+    # Bypass the property check by overriding it on the class.  Capture the
+    # ORIGINAL descriptor first so the finally restores it exactly — the old
+    # MRO-walk restore deleted the real property (it lives on AppCore itself,
+    # which the walk excluded), corrupting is_installed for every later test.
+    _cls = type(ac)
+    _orig_is_installed = _cls.__dict__.get('is_installed')
+    _cls.is_installed = property(lambda _self: True)   # type: ignore[assignment]
     try:
         # Simulate an active download
         class _FakeProc:
@@ -1149,16 +1154,12 @@ def t_server_start_409_during_workshop_download():
                 and 'download' in body.get('error', '').lower()), \
                f'status={r.status_code} body={body}'
     finally:
-        # Restore the original property so subsequent tests get the real check.
-        from cs2servergui.core import AppCore as _AC
-        # Walk MRO to find the original descriptor (defined on AppCore itself).
-        for klass in type(ac).__mro__:
-            if 'is_installed' in klass.__dict__ and klass is not type(ac):
-                type(ac).is_installed = klass.__dict__['is_installed']
-                break
+        # Restore the exact original property (or remove our override if the
+        # class didn't define one before — inherit from a base again).
+        if _orig_is_installed is not None:
+            _cls.is_installed = _orig_is_installed
         else:
-            # If we mutated AppCore itself, just delete to restore inheritance.
-            try: delattr(type(ac), 'is_installed')
+            try: delattr(_cls, 'is_installed')
             except AttributeError: pass
 t('/api/server/start: 409 during workshop download (v0.11.17 A6)',
   t_server_start_409_during_workshop_download)
@@ -2722,7 +2723,7 @@ t('plugins (v0.13.2): activate rejects unknown slug with 400',
 
 
 def t_plugins_activate_requires_mode_for_multimode():
-    """MatchZy (slug 'practice') is used by Practice/3v3/4v4/5v5.  Calling
+    """MatchZy (slug 'practice') is used by Practice/3v3/4v4/5v5/Fun.  Calling
     activate without `mode` is ambiguous — backend must refuse and list
     the valid modes so the SPA can prompt the operator."""
     ac, app, c = _new_app()
@@ -2735,7 +2736,7 @@ def t_plugins_activate_requires_mode_for_multimode():
         return False, f'status={r.status_code}'
     body = r.get_json() or {}
     modes = body.get('modes', [])
-    expected = {'Practice', '3v3', '4v4', '5v5'}
+    expected = {'Practice', '3v3', '4v4', '5v5', 'Fun'}
     return set(modes) == expected, f'modes={modes} expected={sorted(expected)}'
 t('plugins (v0.13.2): activate refuses ambiguous multi-mode slug',
   t_plugins_activate_requires_mode_for_multimode)
@@ -4391,6 +4392,29 @@ def t_v11_runtime_install_handles_targz_for_linux_metamod():
         import shutil; shutil.rmtree(fake_csgo, ignore_errors=True)
 t('runtime (v1.1): tar.gz dispatch handles Linux MetaMod archive',
   t_v11_runtime_install_handles_targz_for_linux_metamod)
+
+
+def t_v12_funmode_state_flags():
+    """/api/state must expose fun_mode + gslt_suppressed so the SPA can render
+    the 'GSLT off, LAN only' banner.  Both True in Fun, both False otherwise."""
+    from cs2servergui.web import create_flask
+    ac = AppCore()
+    ac.admin_pin = '0000'
+    app = create_flask(ac)
+    c = app.test_client()
+    c.post('/api/auth/login', json={'pin': '0000'})
+
+    ac.current_mode = "Fun"
+    body = c.get('/api/state').get_json() or {}
+    if not (body.get("fun_mode") is True and body.get("gslt_suppressed") is True):
+        return False, f'Fun: fun_mode={body.get("fun_mode")} gslt_suppressed={body.get("gslt_suppressed")}'
+    ac.current_mode = "5v5"
+    body = c.get('/api/state').get_json() or {}
+    if body.get("fun_mode") is not False or body.get("gslt_suppressed") is not False:
+        return False, f'5v5: fun_mode={body.get("fun_mode")} gslt_suppressed={body.get("gslt_suppressed")}'
+    return True, "flags track current_mode"
+t('funmode (v1.2): /api/state exposes fun_mode + gslt_suppressed',
+  t_v12_funmode_state_flags)
 
 
 def t_v12_reachability_check_requires_auth():

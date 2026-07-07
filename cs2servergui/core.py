@@ -477,7 +477,7 @@ _PLUGIN_PACKS: list[dict] = [
 # filtering ON for the whole session — even on official maps — which then rejects the
 # mode's own server CVars. Zombie Escape mounts the ZombieReborn pack and relies on
 # zm_enable + cs2f_*/zr_*/zm_* CVars, so without the flag ZM silently never enables.
-_CMDFILTER_REQUIRED_MODES: frozenset[str] = frozenset({"Zombie Escape"})
+_CMDFILTER_REQUIRED_MODES: frozenset[str] = frozenset({"Zombie Escape", "Fun"})
 
 # NOTE: _PLUGIN_COPY_RULES and _PLUGIN_CLEANUP_ITEMS are now DERIVED from
 # each plugin's plugin.json (copy_rules / cleanup fields), see
@@ -1381,11 +1381,37 @@ class AppCore:
         # failed" or a silent timeout with no log entry on either side.  Don't
         # gate the start (an operator may legitimately want LAN-only) — just
         # surface the situation in the log drawer so it's visible.
-        if not self.gslt_token:
+        _gslt_suppressed = mode in _config.GSLT_SUPPRESSED_MODES
+        if not self.gslt_token and not _gslt_suppressed:
             self.log("[preflight] ⚠  No GSLT token — server is set to non-LAN "
                      "but external clients will be silently rejected by Valve's "
                      "auth backend. LAN clients will work. Get a GSLT at "
                      "https://steamcommunity.com/dev/managegameservers (App ID 730).")
+
+        # ── Fun Mode / custom-model GSLT protection (belt + suspenders) ──────
+        # Belt: Fun Mode suppresses GSLT at launch (handled in the launch-arg
+        # builder).  Suspenders: warn loudly if the custom-model plugin is
+        # installed AND a GSLT token would be emitted on a NON-Fun mode — that
+        # combination is the exact footgun (custom models on a GSLT server can
+        # get the token banned).
+        try:
+            _pmc_dir = os.path.join(self._csgo_dir(), "addons", "counterstrikesharp",
+                                    "plugins", "PlayerModelChanger")
+            _models_installed = os.path.isdir(_pmc_dir)
+        except Exception:
+            _models_installed = False
+        if _gslt_suppressed:
+            self.log("[preflight] 🎭 Fun Mode — GSLT auto-suppressed, custom random "
+                     "player models active. LAN/private only, not for ranked/public.")
+            if not _models_installed:
+                self.log("[preflight] ⚠  Fun Mode selected but PlayerModelChanger is "
+                         "not installed — no custom models will appear. Install it + "
+                         "MultiAddonManager to see cartoon characters.")
+        elif _models_installed and self.gslt_token:
+            self.log("[preflight] ⚠  RISK: PlayerModelChanger is installed AND a GSLT "
+                     "token is set on a non-Fun mode. Running custom models on a "
+                     "GSLT-secured server can get your GSLT token BANNED. Switch to "
+                     "Fun Mode (auto-suppresses GSLT) or remove the models plugin.")
         return (not errors), errors
 
     def start_server(self, map_name: str, mode: str,
@@ -1500,7 +1526,12 @@ class AppCore:
             cmd += ["+sv_password", self.sv_password]
         if self.tickrate_128:
             cmd += ["-tickrate", "128"]
-        if self.gslt_token:
+        # GSLT lockout for custom-model modes.  Custom player models can trigger
+        # a GSLT ban (per PlayerModelChanger's own warning), so Fun Mode NEVER
+        # emits +sv_setsteamaccount — enforced here at the launch-command level,
+        # not just in the UI.  The token stays saved for normal (secure) modes.
+        _gslt_suppressed = mode in _config.GSLT_SUPPRESSED_MODES
+        if self.gslt_token and not _gslt_suppressed:
             cmd += ["+sv_setsteamaccount", self.gslt_token]
         # Some workshop maps run server commands from their own map logic, which
         # CS2 blocks unless launched with this flag.  Added for: (a) workshop maps
@@ -1540,8 +1571,11 @@ class AppCore:
             self.log("  Tickrate 128 enabled")
         if self.sv_password:
             self.log("  Server password set")
-        if self.gslt_token:
+        if self.gslt_token and mode not in _config.GSLT_SUPPRESSED_MODES:
             self.log("  GSLT token set (+sv_setsteamaccount)")
+        elif self.gslt_token and mode in _config.GSLT_SUPPRESSED_MODES:
+            self.log("  🎭 Fun Mode — GSLT SUPPRESSED (custom models risk a GSLT "
+                     "ban); server runs LAN/insecure. Not for ranked/public.")
         self.log(f"Polling RCON at {_config.RCON_HOST}:{RCON_PORT} — waiting for server…")
         if self.on_state_change:
             self.on_state_change()

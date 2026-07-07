@@ -908,6 +908,11 @@ def create_flask(core: AppCore) -> Flask:
             # no error logged on either side.  Burned a full evening of triage
             # before this gap was caught — clear UX matters here.
             "gslt_set":           bool(core.gslt_token),
+            # v1.2: Fun Mode auto-suppresses GSLT (custom models risk a GSLT
+            # ban).  The SPA uses this to render the "GSLT off, LAN only" banner
+            # and to explain why the GSLT badge shows suppressed in this mode.
+            "gslt_suppressed":    core.current_mode in _config.GSLT_SUPPRESSED_MODES,
+            "fun_mode":           core.current_mode == "Fun",
             "dl_active":          core._active_dl_proc is not None,
             "dl_progress":        core._dl_progress or None,
             # v0.10.2: last "why did Start fail" string from the most recent

@@ -6,7 +6,7 @@
   "author": "shobhit-pathak",
   "kind": "css",
   "load_order": 20,
-  "modes": ["3v3", "4v4", "5v5", "Practice"],
+  "modes": ["3v3", "4v4", "5v5", "Practice", "Fun"],
   "copy_rules": [
     { "src": "addons", "dst": "addons" },
     { "src": "cfg",    "dst": "cfg" }

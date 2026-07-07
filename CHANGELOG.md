@@ -62,6 +62,33 @@ headless servers still auto-detect and run without a window.
 Closing the operator-facing Linux gaps the v1.1 unit suite doesn't
 exercise.
 
+### Fun Mode — custom random player models with a GSLT lockout
+
+New game mode: **Fun** — MatchZy 5v5 rules + a random cartoon character
+per round for every player (via PlayerModelChanger + MultiAddonManager).
+
+The headline is the **safety mechanism**: custom player models can get a
+server's GSLT token banned by Valve, so Fun Mode makes it *impossible*
+to run models on a GSLT-secured server:
+
+- **Launch-level GSLT lockout** — `config.GSLT_SUPPRESSED_MODES` = `{Fun}`;
+  the launch-arg builder never appends `+sv_setsteamaccount` in Fun Mode,
+  regardless of whether a token is saved.  Enforced in code, not just UI.
+- **Belt + suspenders** — a pre-flight warning fires if PlayerModelChanger
+  is installed AND a GSLT token would be emitted on a *non*-Fun mode
+  (the exact footgun).
+- Fun Mode adds `-disable_workshop_command_filtering` (MAM mounts the
+  model packs as workshop addons) and runs on the competitive 5v5 ruleset.
+- `/api/state` exposes `fun_mode` + `gslt_suppressed`; the SPA shows a
+  "🎭 Fun Mode — GSLT off, LAN/private only" banner.
+
+Also fixed a **latent test-isolation bug** surfaced by this work: the
+v0.11.17 download-guard test's teardown deleted `AppCore.is_installed`
+(MRO-walk excluded the class that defines it), corrupting the property
+for any later test that hit `/api/state`.  Now restores the exact
+original descriptor.  **350 tests pass.**
+
+
 ### v1.2.0-alpha2 (this slice) — P0 parity ✅
 
 The three hard blockers that made a Linux operator's first real

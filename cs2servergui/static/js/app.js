@@ -1439,6 +1439,9 @@ function buildStatusPage() {
 
 const MODE_HINTS = {
   'Retakes': 'Players type <kbd>!r</kbd> in chat to ready up — game starts when everyone is ready.',
+  'Fun': '🎭 <strong>Fun Mode</strong> — MatchZy 5v5 + random cartoon character every round. '
+       + '<strong>GSLT is auto-disabled</strong> (custom models can get a GSLT token banned), so this runs '
+       + '<strong>LAN / private only</strong> — not for ranked or public. Needs PlayerModelChanger + MultiAddonManager installed.',
 };
 function updateModeHint(mode) {
   const hint = el('mode-hint');
@@ -1484,6 +1487,7 @@ const _MODE_CATEGORY = {
   'Warcraft':       { group: 'Plugin-enhanced', plugin: 'CS2-Warcraft' },
   'Deathmatch':     { group: 'Plugin-enhanced', plugin: 'MetaMod', restart: true },
   'Zombie Escape':  { group: 'Plugin-enhanced', plugin: 'MetaMod', restart: true },
+  'Fun':            { group: 'Plugin-enhanced', plugin: 'Random Models', restart: true },
 };
 
 function _populateModeSelect(sel, modes, selectedMode) {

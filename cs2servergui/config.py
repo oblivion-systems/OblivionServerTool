@@ -289,6 +289,10 @@ GAME_MODES = [
     "1v1", "2v2",
     "Arms Race", "Demolition", "Deathmatch",
     "Retakes", "Jailbreak", "Practice", "Warcraft", "Zombie Escape",
+    # Fun Mode: MatchZy 5v5 rules + custom random player models.  GSLT is
+    # auto-suppressed at launch (custom models risk a GSLT ban), so this mode
+    # is LAN/private only.  See core.py launch args + _preflight_checks.
+    "Fun",
 ]
 
 # game_type + game_mode together define CS2's ruleset
@@ -325,8 +329,17 @@ MODE_SETTINGS: dict[str, dict[str, str]] = {
     # Casual ruleset gives the relaxed spawning behaviour ZE maps expect.
     # ZombieMod (cs2fixes fork) + MultiAddonManager + ZombieReborn content pack.
     "Zombie Escape": {"game_type": "0", "game_mode": "0", "maxplayers": "64"},
+    # Fun: competitive 5v5 ruleset (MatchZy drives match flow) + custom random
+    # player models via PlayerModelChanger + MultiAddonManager.  GSLT suppressed
+    # at launch → LAN/private only.
+    "Fun":           {"game_type": "0", "game_mode": "1", "maxplayers": "10"},
 }
 _DEFAULT_MODE = MODE_SETTINGS["Competitive"]
+
+# Modes that run custom player models and therefore MUST NOT be launched with a
+# GSLT token (custom models can trigger a GSLT ban — see the PlayerModelChanger
+# author's own warning).  core.py suppresses +sv_setsteamaccount for these.
+GSLT_SUPPRESSED_MODES: frozenset[str] = frozenset({"Fun"})
 
 # Maps valid for each game mode.
 #   list[str] → show only these maps in the Official Map picker

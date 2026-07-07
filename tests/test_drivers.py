@@ -443,6 +443,81 @@ t('main: _OUR_PROCESS_NAMES sourced from platform.own_process_names()',
   t_main_zombie_names_come_from_platform)
 
 
+# ─── v1.2 — Fun Mode (custom models + GSLT lockout) ───────────────────────
+
+def t_funmode_registered_in_config():
+    """Fun must be a real mode: in GAME_MODES + MODE_SETTINGS with a 5v5
+    competitive ruleset (game_mode 1, maxplayers 10)."""
+    from cs2servergui import config as _cfg
+    if "Fun" not in _cfg.GAME_MODES:
+        return False, "Fun missing from GAME_MODES"
+    s = _cfg.MODE_SETTINGS.get("Fun")
+    if not s:
+        return False, "Fun missing from MODE_SETTINGS"
+    ok = s.get("game_mode") == "1" and s.get("maxplayers") == "10"
+    return ok, f"Fun settings={s!r}"
+t('funmode: registered in GAME_MODES + MODE_SETTINGS (5v5 ruleset)',
+  t_funmode_registered_in_config)
+
+
+def t_funmode_in_gslt_suppressed_set():
+    """The GSLT lockout hinges on config.GSLT_SUPPRESSED_MODES containing
+    Fun (and NOT containing a normal secure mode).  This is the single
+    source of truth the launch-arg builder and pre-flight both read."""
+    from cs2servergui import config as _cfg
+    if "Fun" not in _cfg.GSLT_SUPPRESSED_MODES:
+        return False, "Fun not in GSLT_SUPPRESSED_MODES — GSLT would leak!"
+    if "5v5" in _cfg.GSLT_SUPPRESSED_MODES or "Competitive" in _cfg.GSLT_SUPPRESSED_MODES:
+        return False, "a secure mode is wrongly GSLT-suppressed"
+    return True, "Fun suppressed, secure modes not"
+t('funmode: Fun in GSLT_SUPPRESSED_MODES, secure modes excluded',
+  t_funmode_in_gslt_suppressed_set)
+
+
+def t_funmode_gslt_gate_logic():
+    """Replicates the exact launch-arg gate to lock the safety contract:
+    GSLT is emitted iff a token is set AND the mode is NOT suppressed."""
+    from cs2servergui import config as _cfg
+    def emits_gslt(token, mode):
+        return bool(token) and mode not in _cfg.GSLT_SUPPRESSED_MODES
+    checks = [
+        (emits_gslt("TOKEN", "5v5")  is True,  "5v5 + token should emit"),
+        (emits_gslt("TOKEN", "Fun")  is False, "Fun + token must NOT emit (lockout)"),
+        (emits_gslt("",      "5v5")  is False, "no token, no emit"),
+        (emits_gslt("TOKEN", "Competitive") is True, "Competitive emits"),
+    ]
+    for ok, msg in checks:
+        if not ok:
+            return False, msg
+    return True, "GSLT gate honours the lockout"
+t('funmode: GSLT launch gate never emits token in Fun mode',
+  t_funmode_gslt_gate_logic)
+
+
+def t_funmode_needs_cmdfilter_flag():
+    """Fun mounts the model packs via MultiAddonManager (workshop addons),
+    so it must be in _CMDFILTER_REQUIRED_MODES → launches with
+    -disable_workshop_command_filtering."""
+    from cs2servergui import core as _core
+    return "Fun" in _core._CMDFILTER_REQUIRED_MODES, \
+           f"_CMDFILTER_REQUIRED_MODES={set(_core._CMDFILTER_REQUIRED_MODES)!r}"
+t('funmode: in _CMDFILTER_REQUIRED_MODES (MAM addon mounting)',
+  t_funmode_needs_cmdfilter_flag)
+
+
+def t_funmode_matchzy_deploys_in_fun():
+    """MatchZy (practice plugin.json) must list 'Fun' in its modes so the
+    5v5 match flow deploys when Fun is selected."""
+    import json as _json, os as _os
+    p = _os.path.join("cs2servergui", "plugins", "practice", "plugin.json")
+    with open(p, encoding="utf-8") as f:
+        manifest = _json.load(f)
+    return "Fun" in manifest.get("modes", []), \
+           f"modes={manifest.get('modes')!r}"
+t('funmode: MatchZy plugin.json includes Fun mode',
+  t_funmode_matchzy_deploys_in_fun)
+
+
 def t_platform_case_mismatch_hint_returns_none_when_path_exists():
     """case_mismatch_hint() returns None for an existing path — only
     fires when the path is missing AND a same-name-different-case sibling
