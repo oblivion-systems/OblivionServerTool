@@ -83,22 +83,30 @@ class RCONClient:
                 raise ConnectionError("RCON auth failed — wrong rcon_password?")
 
             # Real command + sentinel (empty body, type-2).  Server processes
-            # them in order; once we see a response with `sid` we know every
-            # fragment of the real command's response has been delivered.
-            # NOTE: do NOT speculatively _recv() after sid — earlier attempts
-            # did, on the theory that some Source builds emit a trailing
-            # packet, but CS2 doesn't, so every execute() stalled for the
-            # full 5-second socket timeout waiting for a phantom packet.
-            # Adding 5s per command broke status polling, broadcasts, kicks,
-            # map changes — every RCON-touching path.  v0.9.2.1 drops it.
+            # them in order and terminates the batch with an empty-body reply.
+            #
+            # We do NOT key the response off packet ids.  Current CS2 tags the
+            # command's OUTPUT packet(s) with the *sentinel's* id, not the
+            # command id (observed: `status` output came back id=200 == sid,
+            # never id=100 == cid), so the old `if rid == sid: break` fired on
+            # the very first packet — the one holding the real output — and
+            # discarded it, making every execute() return "".  Both the output
+            # fragments and the terminator carry the same id, so ids can't tell
+            # them apart at all.
+            #
+            # Instead: accumulate non-empty bodies and stop at the first
+            # empty-body packet, which is the sentinel's own reply and always
+            # arrives after the real output (TCP in-order; the server flushes
+            # command output before processing the empty sentinel).  This is
+            # correct for a command with no output too (its first packet is the
+            # empty terminator → "").  Works on both current and pre-2025 CS2.
             s.sendall(self._pack(cid, 2, command) + self._pack(sid, 2, ""))
             chunks: list[str] = []
             while True:
-                rid, _rtype, body = self._recv(s)
-                if rid == sid:
+                _rid, _rtype, body = self._recv(s)
+                if not body:
                     break
-                if rid == cid:
-                    chunks.append(body)
+                chunks.append(body)
         return "".join(chunks)
 
     def execute_many(self, commands: list[str]) -> list[str]:
