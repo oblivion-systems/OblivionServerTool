@@ -67,6 +67,14 @@
       "author": "Source2ZE + Oblivion config",
       "source": "bundled",
       "versions": []
+    },
+    {
+      "slug": "funmodels",
+      "display_name": "Fun Mode Models",
+      "summary": "Random cartoon/chaos model + ability each life: mounts the verified AG2 packs via MultiAddonManager and runs the timer-driven RandomModels plugin (67-model pool).",
+      "author": "NOZB1/CRAZY models + Source2ZE MAM + Oblivion RandomModels",
+      "source": "bundled",
+      "versions": []
     }
   ]
 }

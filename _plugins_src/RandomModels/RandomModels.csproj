@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>RandomModels</AssemblyName>
+    <RootNamespace>RandomModels</RootNamespace>
+    <!-- Build against the server's own CounterStrikeSharp assemblies so the
+         plugin is ABI-identical to the installed runtime (CSS 1.0.368).
+         Override CssApi at build time via MSBuild property or env-var, e.g.:
+           dotnet build /p:CssApi="C:\path\to\counterstrikesharp\api"
+         Default below is this machine's dedicated-server CSS install. -->
+    <CssApi Condition="'$(CssApi)' == ''">D:\steamcmd\steamapps\common\Counter-Strike Global Offensive\game\csgo\addons\counterstrikesharp\api</CssApi>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Reference every CSS api DLL; Private=false keeps build output to just
+         RandomModels.dll (the host already provides these at runtime). -->
+    <Reference Include="$(CssApi)\*.dll">
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>

@@ -1440,8 +1440,9 @@ function buildStatusPage() {
 const MODE_HINTS = {
   'Retakes': 'Players type <kbd>!r</kbd> in chat to ready up — game starts when everyone is ready.',
   'Fun': '🎭 <strong>Fun Mode</strong> — MatchZy 5v5 + random cartoon character every round. '
-       + '<strong>GSLT is auto-disabled</strong> (custom models can get a GSLT token banned), so this runs '
-       + '<strong>LAN / private only</strong> — not for ranked or public. Needs PlayerModelChanger + MultiAddonManager installed.',
+       + 'Your <strong>real GSLT is never used here</strong> (custom models can get a token banned). '
+       + 'Set a <strong>throwaway / burner GSLT</strong> in Config to let friends connect over the internet, '
+       + 'or leave it blank to run <strong>LAN / private only</strong>. Needs PlayerModelChanger + MultiAddonManager installed.',
 };
 function updateModeHint(mode) {
   const hint = el('mode-hint');
@@ -6513,6 +6514,17 @@ pages['config'] = async function() {
               (App&nbsp;ID&nbsp;730). Left blank during setup? Paste it here.
             </small>
           </div>
+          <div class="field">
+            <label>🎭 Fun Mode GSLT <span class="text-sub">(throwaway / burner account)</span></label>
+            <input class="input" id="cfg-fun-gslt" placeholder="Leave blank = Fun Mode is LAN only"
+                   value="${esc(cfg.fun_mode_gslt || '')}">
+            <small class="text-sub text-sm" style="display:block;margin-top:6px;line-height:1.5">
+              Custom player models can get a GSLT <strong>banned</strong>, so Fun Mode never uses
+              your real token above. Set a token from a <strong>separate burner Steam account</strong>
+              here to let friends connect over the internet in Fun Mode — if it gets banned, only the
+              burner is affected. Leave blank and Fun Mode stays LAN-only.
+            </small>
+          </div>
           <div class="field"><label>Max Players Override <span class="text-sub">(blank = mode default)</span></label>
             <input class="input" id="cfg-maxplayers" placeholder="e.g. 16"
                    value="${esc(cfg.max_players_override || '')}"></div>
@@ -7173,6 +7185,8 @@ pages['config'] = async function() {
     };
     if (isLocal) {
       data.gslt_token        = el('cfg-gslt').value;
+      const funGslt = el('cfg-fun-gslt');
+      if (funGslt) data.fun_mode_gslt = funGslt.value;
       data.max_players_override = el('cfg-maxplayers').value;
     }
     try { await api.setConfig(data); toast('Server settings saved'); }

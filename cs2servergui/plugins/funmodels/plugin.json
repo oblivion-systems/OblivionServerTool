@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "slug": "funmodels",
+  "display_name": "Fun Mode Models",
+  "summary": "Random cartoon/chaos player model + ability each life: mounts the verified AG2 packs via MultiAddonManager and runs the timer-driven RandomModels plugin (67-model pool, Tank/Moon/Ghost/Speed/Neon).",
+  "author": "NOZB1/CRAZY models + Source2ZE MAM + Oblivion RandomModels",
+  "kind": "metamod",
+  "load_order": 15,
+  "modes": ["Fun"],
+  "copy_rules": [
+    { "src": "addons", "dst": "addons" },
+    { "src": "cfg",    "dst": "cfg" }
+  ],
+  "verify_files": [
+    "addons/metamod/multiaddonmanager.vdf",
+    "addons/multiaddonmanager/bin/multiaddonmanager.dll",
+    "addons/counterstrikesharp/plugins/RandomModels/RandomModels.dll"
+  ],
+  "cleanup": [
+    "addons/multiaddonmanager",
+    "addons/metamod/multiaddonmanager.vdf",
+    "cfg/multiaddonmanager",
+    "addons/counterstrikesharp/plugins/RandomModels",
+    "addons/counterstrikesharp/configs/plugins/RandomModels"
+  ]
+}

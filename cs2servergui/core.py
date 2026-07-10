@@ -594,6 +594,12 @@ class AppCore:
         self.hostname:             str  = "CS2 Dedicated Server"
         self.sv_password:          str  = ""
         self.gslt_token:           str  = ""   # Steam Game Server Login Token
+        # Separate THROWAWAY GSLT used ONLY in Fun Mode.  Custom player models
+        # can get a GSLT banned, so Fun Mode never uses the real gslt_token
+        # above; if this burner token is set it's used instead (public hosting
+        # with the ban risk isolated to a disposable account).  Empty = Fun
+        # Mode runs token-less (LAN only).
+        self.fun_mode_gslt:        str  = ""
         self.tickrate_128:         bool = False
         self.auto_start:           bool = False
         self.auto_restart_on_crash: bool = False
@@ -841,6 +847,7 @@ class AppCore:
         self.hostname              = cfg.get("hostname", "CS2 Dedicated Server")
         self.sv_password           = cfg.get("sv_password", "")
         self.gslt_token            = cfg.get("gslt_token", "")
+        self.fun_mode_gslt         = cfg.get("fun_mode_gslt", "")
         self.tickrate_128          = bool(cfg.get("tickrate_128", False))
         self.auto_start            = bool(cfg.get("auto_start", False))
         self.auto_restart_on_crash = bool(cfg.get("auto_restart_on_crash", False))
@@ -972,6 +979,7 @@ class AppCore:
                 "hostname":              self.hostname,
                 "sv_password":           self.sv_password,
                 "gslt_token":            self.gslt_token,
+                "fun_mode_gslt":         self.fun_mode_gslt,
                 "tickrate_128":          self.tickrate_128,
                 "auto_start":            self.auto_start,
                 "auto_restart_on_crash": self.auto_restart_on_crash,
@@ -1401,8 +1409,15 @@ class AppCore:
         except Exception:
             _models_installed = False
         if _gslt_suppressed:
-            self.log("[preflight] 🎭 Fun Mode — GSLT auto-suppressed, custom random "
-                     "player models active. LAN/private only, not for ranked/public.")
+            if self.fun_mode_gslt:
+                self.log("[preflight] 🎭 Fun Mode — using the THROWAWAY GSLT, so "
+                         "friends can connect over the internet. Your real GSLT "
+                         "is NOT used here (ban risk isolated to the burner).")
+            else:
+                self.log("[preflight] 🎭 Fun Mode — no throwaway GSLT set, so the "
+                         "server is LAN/private only (remote friends can't "
+                         "connect). Add a burner GSLT in Config for public play. "
+                         "Custom random player models active.")
             if not _models_installed:
                 self.log("[preflight] ⚠  Fun Mode selected but PlayerModelChanger is "
                          "not installed — no custom models will appear. Install it + "
@@ -1526,13 +1541,17 @@ class AppCore:
             cmd += ["+sv_password", self.sv_password]
         if self.tickrate_128:
             cmd += ["-tickrate", "128"]
-        # GSLT lockout for custom-model modes.  Custom player models can trigger
-        # a GSLT ban (per PlayerModelChanger's own warning), so Fun Mode NEVER
-        # emits +sv_setsteamaccount — enforced here at the launch-command level,
-        # not just in the UI.  The token stays saved for normal (secure) modes.
+        # GSLT selection.  Custom player models can trigger a GSLT ban (per
+        # PlayerModelChanger's own warning), so Fun Mode NEVER emits the real
+        # gslt_token — enforced here at the launch-command level, not just the
+        # UI.  If a separate THROWAWAY token is configured, Fun Mode uses that
+        # instead (public hosting with the ban risk isolated to a burner
+        # account); otherwise Fun Mode runs token-less (LAN only).
         _gslt_suppressed = mode in _config.GSLT_SUPPRESSED_MODES
-        if self.gslt_token and not _gslt_suppressed:
-            cmd += ["+sv_setsteamaccount", self.gslt_token]
+        _effective_gslt = (self.fun_mode_gslt if _gslt_suppressed
+                           else self.gslt_token)
+        if _effective_gslt:
+            cmd += ["+sv_setsteamaccount", _effective_gslt]
         # Some workshop maps run server commands from their own map logic, which
         # CS2 blocks unless launched with this flag.  Added for: (a) workshop maps
         # flagged (auto-detected from the Steam description or a manual override),
@@ -1571,11 +1590,17 @@ class AppCore:
             self.log("  Tickrate 128 enabled")
         if self.sv_password:
             self.log("  Server password set")
-        if self.gslt_token and mode not in _config.GSLT_SUPPRESSED_MODES:
+        if mode in _config.GSLT_SUPPRESSED_MODES:
+            if self.fun_mode_gslt:
+                self.log("  🎭 Fun Mode — using the THROWAWAY GSLT (public "
+                         "hosting; real token protected). Ban risk isolated to "
+                         "the burner account.")
+            else:
+                self.log("  🎭 Fun Mode — GSLT SUPPRESSED (custom models risk a "
+                         "GSLT ban); server runs LAN only. Set a throwaway GSLT "
+                         "in Config to host publicly.")
+        elif self.gslt_token:
             self.log("  GSLT token set (+sv_setsteamaccount)")
-        elif self.gslt_token and mode in _config.GSLT_SUPPRESSED_MODES:
-            self.log("  🎭 Fun Mode — GSLT SUPPRESSED (custom models risk a GSLT "
-                     "ban); server runs LAN/insecure. Not for ranked/public.")
         self.log(f"Polling RCON at {_config.RCON_HOST}:{RCON_PORT} — waiting for server…")
         if self.on_state_change:
             self.on_state_change()
@@ -1843,8 +1868,17 @@ class AppCore:
                 self.boot_state    = "ready"
                 self._uptime_start = time.time()
 
+            # CS2's `status` text changed: pre-2025 builds had a "map : de_dust2"
+            # line; current builds dropped it and expose the map only as the
+            # first spawn group, e.g.
+            #   loaded spawngroup(  1)  : SV:  [1: de_dust2 | main lump | mapload]
+            # Try the legacy line first, then the spawngroup-1 form, so reconnect
+            # map detection works on both.
             map_m = re.search(r"^map\s*:\s*(\S+)", out,
                               re.MULTILINE | re.IGNORECASE)
+            if not map_m:
+                map_m = re.search(r"spawngroup\(\s*1\s*\).*?\[1:\s*([^\s|]+)",
+                                  out, re.IGNORECASE)
             if map_m:
                 self.current_map = map_m.group(1).split()[0]  # strip trailing junk
 

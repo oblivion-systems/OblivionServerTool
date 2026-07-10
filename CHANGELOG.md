@@ -68,19 +68,55 @@ New game mode: **Fun** — MatchZy 5v5 rules + a random cartoon character
 per round for every player (via PlayerModelChanger + MultiAddonManager).
 
 The headline is the **safety mechanism**: custom player models can get a
-server's GSLT token banned by Valve, so Fun Mode makes it *impossible*
-to run models on a GSLT-secured server:
+server's GSLT token banned by Valve, so Fun Mode never touches your real
+GSLT — the ban risk can't land on the token you use for normal matches:
 
-- **Launch-level GSLT lockout** — `config.GSLT_SUPPRESSED_MODES` = `{Fun}`;
-  the launch-arg builder never appends `+sv_setsteamaccount` in Fun Mode,
-  regardless of whether a token is saved.  Enforced in code, not just UI.
+- **Launch-level lockout on the real token** — `config.GSLT_SUPPRESSED_MODES`
+  = `{Fun}`; the launch-arg builder never emits your saved `gslt_token` in
+  Fun Mode, regardless of whether one is set.  Enforced in code, not just UI.
+- **Optional throwaway GSLT** — set a separate burner-account token
+  (`fun_mode_gslt`) to let friends connect over the internet in Fun Mode;
+  if it's ever banned, only the disposable account is affected.  Leave it
+  blank and Fun Mode runs LAN/private only.
 - **Belt + suspenders** — a pre-flight warning fires if PlayerModelChanger
-  is installed AND a GSLT token would be emitted on a *non*-Fun mode
+  is installed AND a real GSLT token would be emitted on a *non*-Fun mode
   (the exact footgun).
 - Fun Mode adds `-disable_workshop_command_filtering` (MAM mounts the
   model packs as workshop addons) and runs on the competitive 5v5 ruleset.
-- `/api/state` exposes `fun_mode` + `gslt_suppressed`; the SPA shows a
-  "🎭 Fun Mode — GSLT off, LAN/private only" banner.
+- `/api/state` exposes `fun_mode`, `gslt_suppressed`, and `fun_mode_gslt_set`;
+  the SPA banner explains whether Fun Mode is public (throwaway token set)
+  or LAN-only (blank).
+
+### Fun Mode hardening after the Jul-8 CS2 patch (2026-07-10)
+
+The Jul-8 engine patch broke three things at once; Fun Mode now ships its
+own model changer and survives all of them:
+
+- **Game events are dead on the PR#1348 CSS build** (`[GameEventHandler]`
+  and explicit `RegisterEventHandler` both silently never fire), which
+  killed PMC's `@random` auto-apply.  Replacement: **RandomModels v2.3**
+  (`_plugins_src/RandomModels/`, net10.0), a timer-driven CSS plugin —
+  0.5 s `AddTimer` assigns a random model **and ability** (Tank / Moon
+  Jump / Ghost / Speedster / Neon Glow) per life; `OnTick` drives the
+  movement powers.  Bundled into the `funmodels` plugin so Fun Mode
+  deploys/undeploys it with the mode — no manual install.
+- **Player rendering now requires AG2 animation graphs** (`.vnmgraph`);
+  legacy-graph models T-pose.  The mounted pack set was re-curated by
+  binary fingerprint (`worldmodel.vnmgraph` marker) + live bot tests:
+  `3759230500` (25 meme cartoons) + `3759622016` (Vader/CJ/cars) +
+  `3759603654` (full-body anime).  Dropped: `3163629484` (pre-AG2,
+  T-poses) and `3759306902` (its `*_ag2.vmdl` files are arms-stubs —
+  floating arms, no hitboxes; the author's "Updated" pack has the real
+  bodies).  Pool: 67 models in `RandomModels.json`, deployed with the
+  bundle.
+- **MAM's server-side workshop downloader is broken** (no new pack has
+  downloaded since the patch; `appworkshop_730.acf` shows no attempt) —
+  packs are pre-seeded into `game/bin/win64/steamapps/workshop/content/730/`
+  via steamcmd and registered in the ACF with their real manifest IDs.
+- **Bot takeover crashed the server** (pawn swaps owners mid-frame; the
+  plugin's OnTick touching a mid-swap pawn = native AV).  Fixed twice:
+  `bot_controllable 0` baked into the funmodels cfg, and a
+  pawn↔controller alignment guard in RandomModels v2.3.
 
 Also fixed a **latent test-isolation bug** surfaced by this work: the
 v0.11.17 download-guard test's teardown deleted `AppCore.is_installed`

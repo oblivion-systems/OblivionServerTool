@@ -388,6 +388,9 @@ MODE_MAPS: dict[str, list[str] | None] = {
     # Zombie Escape.  Both are selectable — official via this picker, ze_ via the
     # workshop tab.
     "Zombie Escape":   OFFICIAL_MAPS,
+    # Fun: MatchZy 5v5 on standard competitive maps (same pool as
+    # 5v5/Practice) — custom models are map-independent.
+    "Fun":             OFFICIAL_MAPS,
 }
 
 # Search terms for Steam Workshop URL filtering per mode
@@ -408,6 +411,7 @@ MODE_WORKSHOP_SEARCH: dict[str, str] = {
     "Practice":    "competitive practice",
     "Warcraft":        "warcraft rpg",
     "Zombie Escape":   "zombie escape ze_",
+    "Fun":             "competitive 5v5",
 }
 _WS_BROWSE = "https://steamcommunity.com/workshop/browse/?appid=730&browsesort=trend"
 
@@ -437,6 +441,7 @@ MODE_WORKSHOP_TAGS: dict[str, list[str]] = {
     "Practice":    ["classic", "competitive"],
     "Warcraft":        ["classic", "competitive", "casual"],
     "Zombie Escape":   ["zombie", "ze"],
+    "Fun":             ["classic", "competitive"],
 }
 
 

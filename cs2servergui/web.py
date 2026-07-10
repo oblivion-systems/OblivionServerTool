@@ -913,6 +913,10 @@ def create_flask(core: AppCore) -> Flask:
             # and to explain why the GSLT badge shows suppressed in this mode.
             "gslt_suppressed":    core.current_mode in _config.GSLT_SUPPRESSED_MODES,
             "fun_mode":           core.current_mode == "Fun",
+            # Whether a throwaway GSLT is set for Fun Mode.  True → Fun Mode can
+            # host publicly (burner token); False → Fun Mode is LAN-only.  Never
+            # leaks the token itself, just its presence.
+            "fun_mode_gslt_set":  bool((core.fun_mode_gslt or "").strip()),
             "dl_active":          core._active_dl_proc is not None,
             "dl_progress":        core._dl_progress or None,
             # v0.10.2: last "why did Start fail" string from the most recent
@@ -1905,6 +1909,7 @@ def create_flask(core: AppCore) -> Flask:
             "hostname":              core.hostname,
             "sv_password":           core.sv_password   if is_local else "***",
             "gslt_token":            core.gslt_token    if is_local else "***",
+            "fun_mode_gslt":         core.fun_mode_gslt if is_local else "***",
             "tickrate_128":          core.tickrate_128,
             "auto_start":            core.auto_start,
             "auto_restart_on_crash": core.auto_restart_on_crash,
@@ -2084,6 +2089,8 @@ def create_flask(core: AppCore) -> Flask:
                     core.guest_pin = new_gpin
             if "gslt_token" in d:
                 core.gslt_token = str(d["gslt_token"])
+            if "fun_mode_gslt" in d:
+                core.fun_mode_gslt = str(d["fun_mode_gslt"]).strip()
             if "rcon_password" in d:
                 new_pw = str(d["rcon_password"]).strip()
                 if new_pw:
@@ -5717,8 +5724,8 @@ def create_flask(core: AppCore) -> Flask:
                 cfg_data = json.load(f)
             SENSITIVE = {
                 "admin_pin", "guest_pin", "rcon_password", "sv_password",
-                "gslt_token", "steam_password", "discord_bot_token",
-                "discord_webhook_url",
+                "gslt_token", "fun_mode_gslt", "steam_password",
+                "discord_bot_token", "discord_webhook_url",
             }
             for k, v in sorted(cfg_data.items()):
                 if k in SENSITIVE:
