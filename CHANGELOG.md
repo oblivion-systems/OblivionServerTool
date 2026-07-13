@@ -124,6 +124,31 @@ v0.11.17 download-guard test's teardown deleted `AppCore.is_installed`
 for any later test that hit `/api/state`.  Now restores the exact
 original descriptor.  **350 tests pass.**
 
+### Fun Mode game-night hotfixes → RandomModels v2.6.2 (2026-07-10 pm)
+
+Live findings from the first real Fun Mode session, now baked in:
+
+- **A bad model can crash every client rendering it.** `subway_jake`
+  (Subway Surfers) took out multiple people; removed from the 67→**66**
+  model pool.  Static reference-integrity screening of the rest was
+  **inconclusive** — subway_jake is structurally unremarkable, and the
+  crash is a render-time defect (shader/texture/mesh) invisible to a
+  file-grep.  So instead of guess-culling good models, the plugin now
+  **logs the model every spawn** (`[RM] {name} spawned -> model=… ability=…`),
+  making any future client crash traceable: cross-reference the crash
+  time against the log to name the offending model, then pull it.
+- **Ability roll trimmed** (24 → 20): dropped **Giant/Tiny** (model
+  scaling can crash clients on complex rigs), **Flicker** (RenderFX),
+  and **BottomlessMags/Vampire** (native VData/MatchStats reads — the
+  suspected source of two early `accessviolation` server crashes).  Also
+  dropped `weapon_shield` from the Loot Box pool.
+- **PlayerModelChanger retired.** The legacy PMC plugin was a *manual*
+  install (not app-managed), so it loaded in **every** mode and spilled
+  custom models into K4-Arenas.  RandomModels fully replaces it, so PMC
+  is disabled — mode-switching is now genuinely clean.  (The app-managed
+  funmodels teardown was already correct: RandomModels + the MAM mount
+  are torn out on mode switch.)
+
 
 ### v1.2.0-alpha2 (this slice) — P0 parity ✅
 

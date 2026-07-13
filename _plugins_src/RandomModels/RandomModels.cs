@@ -36,7 +36,7 @@ public class RandomModelsConfig : BasePluginConfig
 public class RandomModelsPlugin : BasePlugin, IPluginConfig<RandomModelsConfig>
 {
     public override string ModuleName => "RandomModels";
-    public override string ModuleVersion => "2.6.0";
+    public override string ModuleVersion => "2.6.2";
     public override string ModuleAuthor => "Oblivion Server Tool";
     public override string ModuleDescription => "Random model + ability each life (timer + OnTick).";
 
@@ -61,14 +61,17 @@ public class RandomModelsPlugin : BasePlugin, IPluginConfig<RandomModelsConfig>
         Vampire, Adrenaline, BunnyHopper, Flicker, MedicKit, RadarHack, SixthSense,
     }
 
-    // One entry each + a single None → ~4% of lives are "normal".
+    // One entry each + a single None → ~5% of lives are "normal".
+    // v2.6.2: Giant/Tiny (model scaling → client render crashes on complex
+    // rigs), Flicker (RenderFX), and BottomlessMags/Vampire (native VData/
+    // MatchStats reads → server AVs) removed after live crash reports.
     private static readonly Ability[] Roll =
     {
         Ability.None, Ability.Tank, Ability.Moon, Ability.Ghost, Ability.Speed, Ability.Neon,
-        Ability.Giant, Ability.Tiny, Ability.BottomlessMags, Ability.Moneybags, Ability.Juggernaut,
+        Ability.Moneybags, Ability.Juggernaut,
         Ability.GrenadeSanta, Ability.LootBox, Ability.Regenerator, Ability.Disco,
         Ability.Kangaroo, Ability.WideEye, Ability.TaserTime,
-        Ability.Vampire, Ability.Adrenaline, Ability.BunnyHopper, Ability.Flicker,
+        Ability.Adrenaline, Ability.BunnyHopper,
         Ability.MedicKit, Ability.RadarHack, Ability.SixthSense,
     };
 
@@ -103,7 +106,7 @@ public class RandomModelsPlugin : BasePlugin, IPluginConfig<RandomModelsConfig>
 
     private static readonly string[] LootGuns =
     { "weapon_awp", "weapon_negev", "weapon_deagle", "weapon_p90", "weapon_mag7",
-      "weapon_ssg08", "weapon_m249", "weapon_shield" };
+      "weapon_ssg08", "weapon_m249" };   // dropped weapon_shield (unusual entity, crash risk)
 
     public void OnConfigParsed(RandomModelsConfig config) => Config = config;
 
@@ -116,7 +119,7 @@ public class RandomModelsPlugin : BasePlugin, IPluginConfig<RandomModelsConfig>
         });
         AddTimer(Config.TickSeconds, Tick, TimerFlags.REPEAT);
         RegisterListener<Listeners.OnTick>(OnEngineTick);
-        Logger.LogInformation("[RM] v2.6.0 loaded (hotReload={H}) — models={M} abilities={A} ({R} rolls); {C} model(s).",
+        Logger.LogInformation("[RM] v2.6.2 loaded (hotReload={H}) — models={M} abilities={A} ({R} rolls); {C} model(s).",
             hotReload, Config.EnableModels, Config.EnableAbilities, Roll.Length, Config.Models.Count);
     }
 
@@ -156,7 +159,10 @@ public class RandomModelsPlugin : BasePlugin, IPluginConfig<RandomModelsConfig>
                 _lifeTicks[p.Slot] = 0;
                 _kangarooUsed.Remove(p.Slot);
                 _lifeKills[p.Slot] = MatchKills(p);
-                Logger.LogInformation("[RM] {N} new life -> ability={A}", SafeName(p), _ability[p.Slot]);
+                // model is logged every spawn so a client crash can be traced to the
+                // exact model: cross-reference the crash time against this line.
+                Logger.LogInformation("[RM] {N} spawned -> model={M} ability={A}",
+                    SafeName(p), ModelName(_model[p.Slot]), _ability[p.Slot]);
             }
             _wasAlive[p.Slot] = true;
             int t = ++_lifeTicks[p.Slot];
@@ -517,6 +523,10 @@ public class RandomModelsPlugin : BasePlugin, IPluginConfig<RandomModelsConfig>
             3 => Color.FromArgb(0, x, 255), 4 => Color.FromArgb(x, 0, 255), _ => Color.FromArgb(255, 0, x),
         };
     }
+
+    // Short model id for crash-tracing logs (e.g. "subway_jake_player_model").
+    private static string ModelName(string path)
+        => path.Split('/')[^1].Replace(".vmdl", "");
 
     private static string PrettyName(string modelPath)
     {
