@@ -129,8 +129,11 @@ original descriptor.  **350 tests pass.**
 Live findings from the first real Fun Mode session, now baked in:
 
 - **A bad model can crash every client rendering it.** `subway_jake`
-  (Subway Surfers) took out multiple people; removed from the 67→**66**
-  model pool.  Static reference-integrity screening of the rest was
+  (Subway Surfers) took out multiple people; later `among_orange` (an Among
+  Us recolor) cascaded a whole 7-player lobby to zero. Both removed →
+  **65**-model pool (base `among_us` + the white/green/blue recolors kept —
+  only the confirmed-bad one pulled). Static reference-integrity screening
+  of the rest was
   **inconclusive** — subway_jake is structurally unremarkable, and the
   crash is a render-time defect (shader/texture/mesh) invisible to a
   file-grep.  So instead of guess-culling good models, the plugin now
