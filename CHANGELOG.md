@@ -149,8 +149,17 @@ Live findings from the first real Fun Mode session, now baked in:
   funmodels teardown was already correct: RandomModels + the MAM mount
   are torn out on mode switch.)
 
+### Dependency maintenance (post-game-night)
 
-### v1.2.0-alpha2 (this slice) — P0 parity ✅
+- **MultiAddonManager 1.5.1 → 1.5.3** in the funmodels bundle. 1.5.2 fixed a
+  Windows crash; 1.5.3 added a custom cfg parser to bypass the Season-5 ConVar
+  whitelist. Added the new `mm_addon_connection_timeout` convar (60s) to the
+  mount cfg. Does **not** fix the broken workshop downloader — the pre-seed +
+  ACF-registration workaround stays.
+- Note (not in-repo): the live server's **CounterStrikeSharp** was moved off the
+  broken PR#1348 draft build onto stable **v1.0.371** (the finished Season-5 fix)
+  — see the CSS-upgrade staging notes. The timer-driven RandomModels architecture
+  still works either way.
 
 The three hard blockers that made a Linux operator's first real
 tournament fail outside the unit tests are fixed:
