@@ -36,7 +36,7 @@ public class RandomModelsConfig : BasePluginConfig
 public class RandomModelsPlugin : BasePlugin, IPluginConfig<RandomModelsConfig>
 {
     public override string ModuleName => "RandomModels";
-    public override string ModuleVersion => "2.6.2";
+    public override string ModuleVersion => "2.7.0";
     public override string ModuleAuthor => "Oblivion Server Tool";
     public override string ModuleDescription => "Random model + ability each life (timer + OnTick).";
 
@@ -61,17 +61,19 @@ public class RandomModelsPlugin : BasePlugin, IPluginConfig<RandomModelsConfig>
         Vampire, Adrenaline, BunnyHopper, Flicker, MedicKit, RadarHack, SixthSense,
     }
 
-    // One entry each + a single None → ~5% of lives are "normal".
-    // v2.6.2: Giant/Tiny (model scaling → client render crashes on complex
-    // rigs), Flicker (RenderFX), and BottomlessMags/Vampire (native VData/
-    // MatchStats reads → server AVs) removed after live crash reports.
+    // One entry each + a single None → ~4% of lives are "normal".
+    // v2.7.0: full 24-ability roster restored. The v2.6.x trim (Giant/Tiny/
+    // Flicker/BottomlessMags/Vampire) was cut during the crash panic, but the
+    // real culprits were always bad MODELS (subway_jake, among_orange). The
+    // native-read abilities were failing on the draft CSS build's incomplete
+    // offsets — fixed by stable v1.0.371, game events restored.
     private static readonly Ability[] Roll =
     {
         Ability.None, Ability.Tank, Ability.Moon, Ability.Ghost, Ability.Speed, Ability.Neon,
-        Ability.Moneybags, Ability.Juggernaut,
+        Ability.Giant, Ability.Tiny, Ability.BottomlessMags, Ability.Moneybags, Ability.Juggernaut,
         Ability.GrenadeSanta, Ability.LootBox, Ability.Regenerator, Ability.Disco,
         Ability.Kangaroo, Ability.WideEye, Ability.TaserTime,
-        Ability.Adrenaline, Ability.BunnyHopper,
+        Ability.Vampire, Ability.Adrenaline, Ability.BunnyHopper, Ability.Flicker,
         Ability.MedicKit, Ability.RadarHack, Ability.SixthSense,
     };
 
@@ -119,7 +121,7 @@ public class RandomModelsPlugin : BasePlugin, IPluginConfig<RandomModelsConfig>
         });
         AddTimer(Config.TickSeconds, Tick, TimerFlags.REPEAT);
         RegisterListener<Listeners.OnTick>(OnEngineTick);
-        Logger.LogInformation("[RM] v2.6.2 loaded (hotReload={H}) — models={M} abilities={A} ({R} rolls); {C} model(s).",
+        Logger.LogInformation("[RM] v2.7.0 loaded (hotReload={H}) — models={M} abilities={A} ({R} rolls); {C} model(s).",
             hotReload, Config.EnableModels, Config.EnableAbilities, Roll.Length, Config.Models.Count);
     }
 
