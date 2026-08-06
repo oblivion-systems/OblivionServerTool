@@ -19,6 +19,7 @@ process_running(image_name, args_marker) → bool
 listeners_on_port(port, log)      → list[tuple[str, int, str]]
 server_binary_rel_path()          → str   # relative from server_dir
 steamcmd_filename()               → str
+steamcmd_download_url()           → str   # Valve SteamCMD bootstrap archive
 metamod_bin_arch()                → str   # "win64" | "linuxsteamrt64"
 server_process_name()             → str   # "cs2.exe" | "cs2"
 metamod_download_url()            → str   # alliedmods MetaMod default
@@ -132,6 +133,20 @@ def server_binary_rel_path() -> str:
 def steamcmd_filename() -> str:
     """SteamCMD launcher filename — differs by OS."""
     return "steamcmd.exe" if _IS_WINDOWS else "steamcmd.sh"
+
+
+def steamcmd_download_url() -> str:
+    """Valve's SteamCMD bootstrap archive URL for the current OS.
+
+    Windows: steamcmd.zip  ·  Linux: steamcmd_linux.tar.gz
+
+    The Linux tarball carries Unix mode bits, so steamcmd.sh and its
+    linux32/steamcmd loader land executable; the Windows .zip stores no
+    mode, so callers chmod the launcher afterwards regardless (no-op on
+    Windows).  These are the canonical steamcdn URLs Valve documents.
+    """
+    base = "https://steamcdn-a.akamaihd.net/client/installer/"
+    return base + ("steamcmd.zip" if _IS_WINDOWS else "steamcmd_linux.tar.gz")
 
 
 def depotdownloader_filename() -> str:

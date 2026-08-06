@@ -187,18 +187,41 @@ tournament fail outside the unit tests are fixed:
 
 +7 tests.  **344 pass on Windows AND native Linux.**
 
+### steamcmd Linux bootstrap (v1.2.0-alpha3)
+
+The last hardcoded-Windows hole in the install flow.  `core`'s Step-1
+bootstrap fetched `steamcmd.zip` and unzipped it unconditionally — on
+Linux that has no valid download, and even mocked, a `.zip` can't carry
+the executable bit `steamcmd.sh` needs.
+
+- **`platform.steamcmd_download_url()`** — `steamcmd.zip` on Windows,
+  `steamcmd_linux.tar.gz` on Linux (the canonical steamcdn URLs).
+- **`core._extract_steamcmd_archive()`** — dispatches on the archive
+  suffix: `.zip` → `zipfile`, `.tar.gz` → `tarfile`, which preserves
+  Unix mode so `steamcmd.sh` and its `linux32/steamcmd` loader land
+  executable.  Tar members are sanitised against path traversal via the
+  stdlib `data` filter where the running Python supports it (3.11.4+ /
+  3.12+), falling back to a plain extractall on older stdlib.
+- Belt-and-suspenders `platform.make_executable(STEAMCMD_PATH)` after
+  extraction (no-op on Windows).  **The CS2 server install now
+  bootstraps steamcmd on Linux.**
+
+Windows behaviour is byte-identical (same URL, same zip path, chmod is a
+no-op).  +3 tests.
+
 ### Remaining v1.2 work
 
 | Priority | Item                                                                   |
 |----------|------------------------------------------------------------------------|
-| **P1**   | steamcmd Linux bootstrap (`steamcmd_linux.tar.gz`)                     |
 | **P1**   | Linux process-marker verification (manual smoke against real CS2)      |
 | **P2**   | AppImage / `.deb` distribution                                          |
 | **P2**   | Documentation pass (Cloudflare tunnel, troubleshooting paths)          |
 | **P3**   | `.png` icon for GTK window                                              |
 
-v1.2.0 final ships when P1 lands plus a manual smoke against a real
-Ubuntu CS2 install.
+steamcmd Linux bootstrap (was P1) landed in `v1.2.0-alpha3`.  With it,
+the install flow is code-complete on Linux — v1.2.0 final now gates only
+on the manual smoke against a real Ubuntu CS2 install plus the P2 docs
+pass.
 
 ---
 

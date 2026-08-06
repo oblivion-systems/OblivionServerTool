@@ -443,6 +443,73 @@ t('main: _OUR_PROCESS_NAMES sourced from platform.own_process_names()',
   t_main_zombie_names_come_from_platform)
 
 
+# ─── v1.2-alpha3 — P1 Linux parity (steamcmd bootstrap) ───────────────────
+
+def t_platform_steamcmd_download_url_per_os():
+    """steamcmd bootstrap URL: steamcmd.zip on Windows,
+    steamcmd_linux.tar.gz on Linux — and the archive suffix must match the
+    launcher filename's OS so the extractor + chmod target line up."""
+    import sys as _sys
+    from cs2servergui.platform import steamcmd_download_url, steamcmd_filename
+    url = steamcmd_download_url()
+    if _sys.platform == 'win32':
+        ok = url.endswith('/steamcmd.zip') and steamcmd_filename() == 'steamcmd.exe'
+    else:
+        ok = (url.endswith('/steamcmd_linux.tar.gz')
+              and steamcmd_filename() == 'steamcmd.sh')
+    return ok, f'url={url!r} launcher={steamcmd_filename()!r}'
+t('platform: steamcmd_download_url() per OS',
+  t_platform_steamcmd_download_url_per_os)
+
+
+def t_core_extract_steamcmd_targz_preserves_exec_bit():
+    """_extract_steamcmd_archive routes a .tar.gz through tarfile and
+    preserves the Unix exec bit on steamcmd.sh, so the Linux launcher runs.
+    On Windows mode bits are N/A — just assert extraction succeeded."""
+    import sys as _sys, os as _os, io as _io, tarfile as _tf, tempfile, stat, shutil
+    from cs2servergui.core import _extract_steamcmd_archive
+    dest = tempfile.mkdtemp(prefix='oblivion_scmd_tgz_')
+    arc = _os.path.join(dest, 'steamcmd.tar.gz')
+    try:
+        payload = b'#!/bin/sh\necho steam\n'
+        with _tf.open(arc, 'w:gz') as tf:
+            info = _tf.TarInfo('steamcmd.sh')
+            info.size = len(payload)
+            info.mode = 0o755
+            tf.addfile(info, _io.BytesIO(payload))
+        _extract_steamcmd_archive(arc, dest)
+        path = _os.path.join(dest, 'steamcmd.sh')
+        if not _os.path.isfile(path):
+            return False, 'tar extraction did not create steamcmd.sh'
+        if _sys.platform == 'win32':
+            return True, 'extracted OK (mode bits N/A on Windows)'
+        mode = stat.S_IMODE(_os.stat(path).st_mode)
+        return bool(mode & stat.S_IXUSR), f'exec bit lost: mode={oct(mode)}'
+    finally:
+        shutil.rmtree(dest, ignore_errors=True)
+t('core: _extract_steamcmd_archive tar.gz preserves +x on steamcmd.sh',
+  t_core_extract_steamcmd_targz_preserves_exec_bit)
+
+
+def t_core_extract_steamcmd_zip_dispatch():
+    """_extract_steamcmd_archive routes a .zip through zipfile (the Windows
+    steamcmd bootstrap) and lands the file."""
+    import os as _os, zipfile as _zf, tempfile, shutil
+    from cs2servergui.core import _extract_steamcmd_archive
+    dest = tempfile.mkdtemp(prefix='oblivion_scmd_zip_')
+    arc = _os.path.join(dest, 'steamcmd.zip')
+    try:
+        with _zf.ZipFile(arc, 'w') as zf:
+            zf.writestr('steamcmd.exe', b'MZ fake')
+        _extract_steamcmd_archive(arc, dest)
+        return _os.path.isfile(_os.path.join(dest, 'steamcmd.exe')), \
+               'zip extraction did not create steamcmd.exe'
+    finally:
+        shutil.rmtree(dest, ignore_errors=True)
+t('core: _extract_steamcmd_archive .zip dispatch extracts',
+  t_core_extract_steamcmd_zip_dispatch)
+
+
 # ─── v1.2 — Fun Mode (custom models + GSLT lockout) ───────────────────────
 
 def t_funmode_registered_in_config():

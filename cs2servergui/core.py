@@ -22,6 +22,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
+import tarfile
 from collections.abc import Callable
 
 from . import config as _config
@@ -88,6 +89,30 @@ _DL_TIMEOUT_SECS: int = 600
 # Map authors that need it almost always say so in the Workshop description, so we
 # auto-detect by matching the flag name there.
 _CMDFILTER_RE = re.compile(r"-?disable_workshop_command_filtering", re.IGNORECASE)
+
+
+def _extract_steamcmd_archive(archive_path: str, dest_dir: str) -> None:
+    """Extract a SteamCMD bootstrap archive into dest_dir.
+
+    Windows ships steamcmd.zip; Linux ships steamcmd_linux.tar.gz.  The
+    tarball carries Unix mode bits, so steamcmd.sh and its linux32/steamcmd
+    loader land executable — a .zip can't.  Dispatch on the archive suffix
+    (not the OS) so a mismatched download is still extracted correctly.
+
+    Trusted Valve CDN source, but tar members are sanitised against path
+    traversal via the stdlib 'data' filter where the running Python supports
+    it (3.12+, backported to 3.11.4+); older stdlib falls back to a plain
+    extractall.
+    """
+    if archive_path.endswith((".tar.gz", ".tgz")):
+        with tarfile.open(archive_path, "r:gz") as tf:
+            try:
+                tf.extractall(dest_dir, filter="data")
+            except TypeError:
+                tf.extractall(dest_dir)
+    else:
+        with zipfile.ZipFile(archive_path) as zf:
+            zf.extractall(dest_dir)
 
 
 def _semver_tuple(v: str) -> tuple[int, ...]:
@@ -2196,19 +2221,26 @@ class AppCore:
             else:
                 self.log("Step 1/2 — Downloading steamcmd from Valve…")
                 try:
+                    from cs2servergui import platform as _plat
                     os.makedirs(_config.CS2_SERVER_DIR, exist_ok=True)
-                    zip_path = os.path.join(_config.CS2_SERVER_DIR, "steamcmd.zip")
-                    url = "https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip"
+                    # Windows → steamcmd.zip, Linux → steamcmd_linux.tar.gz.
+                    url = _plat.steamcmd_download_url()
+                    archive_name = ("steamcmd.tar.gz" if url.endswith(".tar.gz")
+                                    else "steamcmd.zip")
+                    archive_path = os.path.join(_config.CS2_SERVER_DIR, archive_name)
                     # urlopen(timeout) instead of urlretrieve so a stalled CDN can't
                     # hang the install thread indefinitely.
                     req = urllib.request.Request(
                         url, headers={"User-Agent": f"OblivionServerTool/{APP_VERSION}"})
                     with urllib.request.urlopen(req, timeout=60) as resp, \
-                            open(zip_path, "wb") as fh:
+                            open(archive_path, "wb") as fh:
                         shutil.copyfileobj(resp, fh)
-                    with zipfile.ZipFile(zip_path) as zf:
-                        zf.extractall(_config.CS2_SERVER_DIR)
-                    os.remove(zip_path)
+                    _extract_steamcmd_archive(archive_path, _config.CS2_SERVER_DIR)
+                    os.remove(archive_path)
+                    # The tarball already sets +x, but a stray umask (or the
+                    # Windows .zip, which stores no mode) can leave the launcher
+                    # unrunnable — chmod it back (no-op on Windows).
+                    _plat.make_executable(_config.STEAMCMD_PATH)
                     self.log("  steamcmd downloaded and extracted ✓")
                 except Exception as exc:
                     self.log(f"  ✗ steamcmd download failed: {exc}")
