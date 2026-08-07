@@ -209,19 +209,33 @@ the executable bit `steamcmd.sh` needs.
 Windows behaviour is byte-identical (same URL, same zip path, chmod is a
 no-op).  +3 tests.
 
+### Documentation (v1.2)
+
+- **[LINUX_SMOKE.md](LINUX_SMOKE.md)** — a 10-phase manual smoke checklist
+  exercising the real-binary Linux flows the unit suite can't reach
+  (steamcmd bootstrap, CS2 download, MetaMod + CSS extraction, process
+  markers, RCON, DepotDownloader workshop maps, zombie recovery), each
+  phase tagged with the code path + commit it validates.  Covers both the
+  Docker image and a bare-metal Ubuntu 22.04 host.
+- **README** — corrected the stale "known Linux gaps" block (all three
+  workflows are now fixed) and added Linux `cloudflared` install +
+  detached quick-tunnel instructions to Off-LAN access.
+- **TROUBLESHOOTING** — new "Linux: install & runtime gotchas" section
+  (permission-denied on binaries, missing i386 libs, `ss`/iproute2,
+  case-sensitivity, headless panel reachability) + a Linux note on the
+  tunnel-URL entry.
+
 ### Remaining v1.2 work
 
 | Priority | Item                                                                   |
 |----------|------------------------------------------------------------------------|
 | **P1**   | Linux process-marker verification (manual smoke against real CS2)      |
 | **P2**   | AppImage / `.deb` distribution                                          |
-| **P2**   | Documentation pass (Cloudflare tunnel, troubleshooting paths)          |
 | **P3**   | `.png` icon for GTK window                                              |
 
-steamcmd Linux bootstrap (was P1) landed in `v1.2.0-alpha3`.  With it,
-the install flow is code-complete on Linux — v1.2.0 final now gates only
-on the manual smoke against a real Ubuntu CS2 install plus the P2 docs
-pass.
+The steamcmd Linux bootstrap (was P1) landed in `v1.2.0-alpha3` and the
+docs pass (was P2) is done.  v1.2.0 final now gates only on the manual
+smoke against a real Ubuntu CS2 install plus AppImage/`.deb` packaging.
 
 ---
 

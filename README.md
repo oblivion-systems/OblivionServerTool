@@ -266,22 +266,24 @@ SSH-only servers it auto-falls-back to **headless** (`--headless`) and
 is administered through the web panel only.
 
 > **v1.2.0 in progress.**  v1.1 shipped the headless/Docker/systemd
-> shape and v1.1.5 added the GTK desktop window + reachability check.
-> Three workflows still have known Linux gaps being closed in v1.2 —
-> pin to Windows for these in production until v1.2.0 final:
+> shape; v1.1.5 added the GTK desktop window + reachability check; v1.2
+> closed the operator-flow gaps that only surface against real Linux
+> binaries.  The install flow is now **code-complete on Linux** — the
+> three workflows that used to need Windows are fixed:
 >
-> - **Workshop map downloads** — DepotDownloader path + bootstrap pick
->   the Windows asset.  Tracked for v1.2.0-alpha2.
-> - **In-app "Install CS2 server"** — the steamcmd bootstrap downloads
->   the Windows zip.  Install steamcmd manually on Linux for now
->   (`apt install steamcmd`).
-> - **Zombie / port-collision recovery** — Linux falls back to "another
->   process is using port 5050" instead of auto-killing a prior
->   Oblivion instance.  Change `flask_port` in `oblivion_config.json`
->   if you hit this.
+> - **In-app "Install CS2 server"** — the steamcmd bootstrap now fetches
+>   `steamcmd_linux.tar.gz` and preserves the executable bit
+>   (v1.2.0-alpha3).  No manual `apt install steamcmd` needed.
+> - **Workshop map downloads** — DepotDownloader picks the Linux x64
+>   asset and `chmod +x`'s the extracted ELF (v1.2.0-alpha2).
+> - **Zombie / port-collision recovery** — a stale Oblivion instance
+>   holding port 5050 is auto-killed (SIGKILL); a *foreign* holder is
+>   left alone and the app falls back to the next port (v1.2.0-alpha2).
 >
-> Everything else — start/stop, map/mode switching, plugins, veto,
-> Discord, MatchZy — works on Linux today.
+> v1.2.0 final gates only on a manual smoke against a real Ubuntu CS2
+> install (see [LINUX_SMOKE.md](LINUX_SMOKE.md)) plus AppImage/`.deb`
+> packaging.  Everything else — start/stop, map/mode switching, plugins,
+> veto, Discord, MatchZy — has worked on Linux since v1.1.
 
 **Docker (recommended)** — pulls the published image and brings up the
 panel on `:5050`:
@@ -387,6 +389,33 @@ tunnel (`cloudflared tunnel --url http://localhost:5050`) and share the
 printed HTTPS URL + a PIN — no router changes, encrypted transport. The
 PIN brute-force lockout (per-IP after 5 fails + global decay backoff)
 covers the public exposure window; rotate the PIN after the session ends.
+
+**On Linux**, install `cloudflared` once, then run the same quick tunnel:
+
+```bash
+# Debian / Ubuntu — Cloudflare's official apt repo
+curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg \
+  | sudo tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null
+echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main" \
+  | sudo tee /etc/apt/sources.list.d/cloudflared.list
+sudo apt-get update && sudo apt-get install -y cloudflared
+
+cloudflared tunnel --url http://localhost:5050   # prints an https://<random>.trycloudflare.com URL
+```
+
+A headless box has no terminal to leave open, so run it **detached** and
+read the URL back, then paste it into **Config → Veto / Match Setup →
+Public Share URL**:
+
+```bash
+nohup cloudflared tunnel --url http://localhost:5050 > ~/cf.log 2>&1 &
+grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' ~/cf.log
+```
+
+Quick-tunnel URLs rotate on every restart. For anything recurring, use a
+**named tunnel** with a stable hostname (Cloudflare Zero Trust) run under
+its own `systemd` service, so it comes back on boot next to the Oblivion
+unit instead of needing a fresh URL each session.
 
 ---
 

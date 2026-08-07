@@ -150,6 +150,9 @@ string first — if a player on your same WiFi can connect via
    **Public Share URL** → Save.
 3. Re-share new captain links (the old ones bind to the old URL
    base; captain tokens themselves still work).
+4. *(Linux)* A quick tunnel dies when the SSH session that launched it
+   closes.  Run `cloudflared` detached (`nohup … &`) or under its own
+   `systemd` service — see the README's **Off-LAN access → Linux** notes.
 
 ### "I get a lag spike every time I alt-tab to Discord / browser / Oblivion"
 
@@ -283,6 +286,69 @@ The snapshot's `Config (redacted)` section shows `admin_pin: ***` and
 `guest_pin: ***` so you can confirm the PINs are SET without leaking
 them.  If either shows `(none)` or empty, fix that before exposing
 the panel.
+
+## Linux: install & runtime gotchas
+
+Linux is case-sensitive and doesn't share Windows' "every file is
+executable" assumption, so a handful of failures are Linux-only. The
+[LINUX_SMOKE.md](LINUX_SMOKE.md) checklist exercises all of these against
+real binaries.
+
+### "Permission denied" launching steamcmd / cs2 / DepotDownloader
+
+The tool `chmod +x`'s the binaries it extracts — `steamcmd.sh` (v1.2.0
+preserves the tarball's exec bit), the CS2 binary (steamcmd installs it
+with its bit intact), and the DepotDownloader ELF — so a **fresh install
+shouldn't hit this**. If it does — you copied a server dir across
+machines with a mode-stripping tool, or hand-extracted an archive —
+restore the bits:
+
+```bash
+chmod +x /srv/cs2/steamcmd.sh /srv/cs2/linux32/steamcmd
+chmod +x "/srv/cs2/steamapps/common/Counter-Strike Global Offensive/game/bin/linuxsteamrt64/cs2"
+chmod +x /srv/cs2/depotdownloader/DepotDownloader   # only if you use workshop maps
+```
+
+### steamcmd or CS2 exits immediately / "No such file or directory"
+
+Almost always missing 32-bit runtime libraries (steamcmd is a 32-bit
+binary even on a 64-bit host). Install the multiarch deps:
+
+```bash
+sudo dpkg --add-architecture i386 && sudo apt-get update
+sudo apt-get install -y lib32gcc-s1 libstdc++6 libstdc++6:i386
+```
+
+The Docker image bakes these in — this only bites bare-metal installs.
+
+### Server shows "not running" though cs2 is up (or ports look free)
+
+The process/port scanners prefer `ss` from **iproute2**. A pure-`/proc`
+fallback exists, but installing iproute2 is the clean fix:
+
+```bash
+sudo apt-get install -y iproute2
+pgrep -af -- '-dedicated'      # confirm the dedicated server is actually up
+ss -tlnp 'sport = :27015'      # confirm it's listening on the game/RCON port
+```
+
+### "CS2 is not installed" when the path is clearly right
+
+Linux is case-sensitive: `SteamApps` ≠ `steamapps`. The pre-flight prints
+a hint like `case mismatch — expected 'steamapps' but found 'SteamApps'`
+— match the case exactly in your `server_dir`.
+
+### The panel won't open / can't be reached
+
+- **No window on a desktop Linux session** — install WebKitGTK
+  (`sudo apt install python3-gi gir1.2-webkit2-4.1`), or just use the
+  browser panel. On an SSH-only box the app auto-runs headless.
+- **Can't reach `http://<host>:5050` from another device** — the panel
+  binds `0.0.0.0`, so check the host firewall (`sudo ufw allow 5050/tcp`)
+  and, on a cloud VM, the provider's security group.
+- **Docker** — confirm the port is published (`docker compose ps`) and
+  that `server_dir` is `/srv/cs2` (the mounted volume), not a path inside
+  the ephemeral container filesystem.
 
 ## Linux: secret storage on headless servers
 
