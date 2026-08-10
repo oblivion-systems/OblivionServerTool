@@ -103,3 +103,10 @@ _plugins_src/**/obj/
 # Debug symbols for bundled third-party plugin binaries (PDBs are build output,
 # not redistributable artefacts; 44 MB cs2fixes.pdb was accidentally tracked once).
 *.pdb
+
+# ── Linux packaging ──────────────────────────────────────────────────────────
+# Fetched build tools (appimagetool / nfpm) — re-downloaded by build.sh.
+packaging/linux/.build-tools/
+# The `*.spec` rule above is for local PyInstaller artefacts; the committed
+# Linux onefile spec is source and must be tracked. Re-include it explicitly.
+!packaging/linux/oblivion-server-tool.spec

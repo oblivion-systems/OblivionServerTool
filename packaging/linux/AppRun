@@ -1,0 +1,9 @@
+#!/bin/sh
+# AppImage entry point.  Locate the bundled onefile binary relative to the
+# mounted AppDir and exec it, passing every argument through.
+#
+# We do NOT force --headless: the binary excludes pywebview, so it already
+# auto-falls-back to headless and prints the panel URL.  Passing args through
+# means `./Oblivion...AppImage --headless` and future flags still work.
+HERE="$(dirname "$(readlink -f "${0}")")"
+exec "${HERE}/usr/bin/oblivion-server-tool" "$@"

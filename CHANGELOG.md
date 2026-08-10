@@ -225,17 +225,38 @@ no-op).  +3 tests.
   case-sensitivity, headless panel reachability) + a Linux note on the
   tunnel-URL entry.
 
+### Linux packaging — AppImage + `.deb` (v1.2)
+
+Recipe drafted under [`packaging/linux/`](packaging/linux/); both artifacts
+wrap one PyInstaller onefile (`oblivion-server-tool`, headless):
+
+- **onefile spec** (`oblivion-server-tool.spec`) — Linux/headless build:
+  SecretService keyring backend, pywebview excluded (the GTK window needs
+  un-freezable system WebKitGTK), console binary.
+- **`.deb`** via nfpm (`nfpm.yaml` + maintainer scripts) — installs the
+  binary to `/usr/bin`, a systemd unit, and an `oblivion` service user with
+  config in `/var/lib/oblivion-server-tool`; `apt purge` keeps `/srv/cs2`.
+- **AppImage** (`AppRun` + `.desktop` + appimagetool) — one portable file
+  for non-Debian distros.
+- **`build.sh`** orchestrates all three; **`.github/workflows/release-linux.yml`**
+  builds + attaches them to every `v*.*.*` release alongside the Docker image.
+
+Not yet build-verified — the onefile must be built on real Linux
+(ubuntu-22.04), so this goes green with the smoke run or the first tagged
+CI build.
+
 ### Remaining v1.2 work
 
-| Priority | Item                                                                   |
-|----------|------------------------------------------------------------------------|
-| **P1**   | Linux process-marker verification (manual smoke against real CS2)      |
-| **P2**   | AppImage / `.deb` distribution                                          |
-| **P3**   | `.png` icon for GTK window                                              |
+| Priority | Item                                                                    |
+|----------|-------------------------------------------------------------------------|
+| **P1**   | Linux process-marker verification (manual smoke against real CS2)       |
+| **P2**   | AppImage / `.deb` build-verify (recipe drafted; needs a real-Linux run) |
+| **P3**   | `.png` icon for GTK window                                               |
 
-The steamcmd Linux bootstrap (was P1) landed in `v1.2.0-alpha3` and the
-docs pass (was P2) is done.  v1.2.0 final now gates only on the manual
-smoke against a real Ubuntu CS2 install plus AppImage/`.deb` packaging.
+The steamcmd Linux bootstrap (was P1) and the docs pass (was P2) are done,
+and the AppImage/`.deb` packaging recipe is drafted.  v1.2.0 final now gates
+on a real-Linux pass: the manual CS2 smoke plus a clean AppImage + `.deb`
+build (the same ubuntu-22.04 step the release workflow runs).
 
 ---
 

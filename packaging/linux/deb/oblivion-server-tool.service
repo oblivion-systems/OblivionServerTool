@@ -1,0 +1,41 @@
+[Unit]
+# systemd unit for the .deb-installed binary (/usr/bin/oblivion-server-tool).
+# The from-source unit lives in packaging/systemd/ and runs `python3 main.py`
+# from /opt instead — do not confuse the two.
+Description=Oblivion Server Tool (CS2 server admin panel)
+Documentation=https://github.com/oblivion-systems/OblivionServerTool
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=oblivion
+Group=oblivion
+ExecStart=/usr/bin/oblivion-server-tool --headless
+
+# Config + logs live in the service's state dir (FHS for a system daemon).
+Environment=XDG_CONFIG_HOME=/var/lib/oblivion-server-tool
+
+Restart=on-failure
+RestartSec=10s
+StartLimitBurst=5
+StartLimitIntervalSec=120
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=oblivion-server-tool
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/oblivion-server-tool /srv/cs2
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

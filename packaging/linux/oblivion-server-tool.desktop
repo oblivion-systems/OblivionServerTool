@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Oblivion Server Tool
+Comment=CS2 dedicated server admin panel
+Exec=oblivion-server-tool
+Icon=oblivion-server-tool
+Categories=Game;Utility;Network;
+Terminal=true

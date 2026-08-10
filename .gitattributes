@@ -10,3 +10,11 @@
 *.iss       text eol=crlf
 
 # Everything else: let git autocrlf settings + the user's platform decide.
+
+# ── Linux artefacts MUST stay LF ─────────────────────────────────────────────
+# CRLF breaks shebangs ("#!/bin/sh\r" = bad interpreter), shell parsers, and
+# systemd unit parsing. Pin every Linux-packaging file + all .sh + the CI
+# workflows to LF regardless of the contributor's core.autocrlf.
+*.sh                     text eol=lf
+packaging/linux/**       text eol=lf
+.github/workflows/*.yml  text eol=lf

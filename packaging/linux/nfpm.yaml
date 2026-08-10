@@ -1,0 +1,55 @@
+# nfpm config — builds the Debian package from the prebuilt onefile binary.
+# https://nfpm.goreleaser.com/
+#
+#   VERSION=$(python3 -c "from cs2servergui.config import APP_VERSION; print(APP_VERSION)") \
+#     nfpm pkg --config packaging/linux/nfpm.yaml --packager deb --target dist/
+#
+# Produces dist/oblivion-server-tool_<version>_amd64.deb.  The same config also
+# builds rpm / apk (`--packager rpm|apk`) if we ever want them — no changes.
+
+name: oblivion-server-tool
+arch: amd64
+platform: linux
+version: ${VERSION}
+version_schema: none          # take VERSION verbatim (APP_VERSION is already semver)
+section: games
+priority: optional
+maintainer: Oblivion <oblivion-systems@users.noreply.github.com>
+vendor: Oblivion
+homepage: https://github.com/oblivion-systems/OblivionServerTool
+license: BSL-1.1
+description: |
+  CS2 dedicated server admin panel — one-click plugin install, map/mode
+  switching, workshop maps, MatchZy veto, and a Discord bot, driven from a
+  web panel. This package ships the self-contained headless binary; run it as
+  a systemd service and administer it from any browser.
+
+# The binary bundles its own Python runtime + deps, so there are no package
+# dependencies.  lib32gcc-s1 is only needed to actually *host* CS2 (steamcmd +
+# the server are 32/64-bit ELFs the tool downloads), so it's a recommend.
+depends: []
+recommends:
+  - lib32gcc-s1
+
+contents:
+  - src: ./dist/oblivion-server-tool
+    dst: /usr/bin/oblivion-server-tool
+    file_info:
+      mode: 0755
+  - src: ./packaging/linux/deb/oblivion-server-tool.service
+    dst: /lib/systemd/system/oblivion-server-tool.service
+    file_info:
+      mode: 0644
+  # State/config dir — created empty + owned in postinstall; marked so purge
+  # removes it. /srv/cs2 is deliberately NOT managed here (operator data).
+  - dst: /var/lib/oblivion-server-tool
+    type: dir
+    file_info:
+      mode: 0750
+      owner: oblivion
+      group: oblivion
+
+scripts:
+  postinstall: ./packaging/linux/deb/postinstall.sh
+  preremove: ./packaging/linux/deb/preremove.sh
+  postremove: ./packaging/linux/deb/postremove.sh
