@@ -41,3 +41,6 @@ jobs:
             dist/*.AppImage
             dist/*.deb
           fail_on_unmatched_files: true
+          # Tags with a suffix (-alpha/-beta/-rc) are prereleases, so they
+          # don't become the "latest" release the app's update check reads.
+          prerelease: ${{ contains(github.ref, '-') }}
