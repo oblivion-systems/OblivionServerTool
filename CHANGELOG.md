@@ -241,22 +241,23 @@ wrap one PyInstaller onefile (`oblivion-server-tool`, headless):
 - **`build.sh`** orchestrates all three; **`.github/workflows/release-linux.yml`**
   builds + attaches them to every `v*.*.*` release alongside the Docker image.
 
-Not yet build-verified — the onefile must be built on real Linux
-(ubuntu-22.04), so this goes green with the smoke run or the first tagged
-CI build.
+**Build-verified in `v1.2.0-alpha4`:** the release workflow built both
+artifacts clean on ubuntu-22.04 in ~80 s and attached them to the
+prerelease — `oblivion-server-tool_1.2.0-alpha4_amd64.deb` (76 MB) +
+`Oblivion_Server_Tool-1.2.0-alpha4-x86_64.AppImage` (77 MB).
 
 ### Remaining v1.2 work
 
 | Priority | Item                                                                    |
 |----------|-------------------------------------------------------------------------|
-| **P1**   | Linux process-marker verification (manual smoke against real CS2)       |
-| **P2**   | AppImage / `.deb` build-verify (recipe drafted; needs a real-Linux run) |
+| **P1**   | Linux process-marker verification (manual smoke against real CS2)        |
 | **P3**   | `.png` icon for GTK window                                               |
 
-The steamcmd Linux bootstrap (was P1) and the docs pass (was P2) are done,
-and the AppImage/`.deb` packaging recipe is drafted.  v1.2.0 final now gates
-on a real-Linux pass: the manual CS2 smoke plus a clean AppImage + `.deb`
-build (the same ubuntu-22.04 step the release workflow runs).
+The steamcmd Linux bootstrap, the docs pass, and the AppImage/`.deb`
+packaging are all done — packaging build-verified in the `v1.2.0-alpha4`
+CI run.  v1.2.0 final now gates only on the manual CS2 smoke against a real
+Ubuntu install ([LINUX_SMOKE.md](LINUX_SMOKE.md)); the `.png` GTK icon is
+cosmetic P3.
 
 ---
 
