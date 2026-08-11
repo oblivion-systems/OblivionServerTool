@@ -77,7 +77,7 @@ build_appimage() {
     cp "${DIST}/oblivion-server-tool"          "${APPDIR}/usr/bin/"
     cp "${HERE}/AppRun"                        "${APPDIR}/AppRun"; chmod +x "${APPDIR}/AppRun"
     cp "${HERE}/oblivion-server-tool.desktop"  "${APPDIR}/"
-    cp "${ROOT}/cs2servergui/static/favicon.png" "${APPDIR}/oblivion-server-tool.png"
+    cp "${ROOT}/emblem.png"                    "${APPDIR}/oblivion-server-tool.png"
     local OUT="${DIST}/Oblivion_Server_Tool-${VERSION}-x86_64.AppImage"
     ARCH=x86_64 "${APPIMAGETOOL}" "${APPDIR}" "${OUT}"
     echo "   -> ${OUT}"

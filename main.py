@@ -307,11 +307,12 @@ def main() -> None:
 
     # Resolve icon path: works both in source layout and PyInstaller --onefile.
     # sys._MEIPASS is the temp-extract root when frozen; fall back to the
-    # directory that contains this script when running from source.
-    if getattr(sys, "frozen", False):
-        _ico_path = os.path.join(getattr(sys, "_MEIPASS", ""), "emblem.ico")
-    else:
-        _ico_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "emblem.ico")
+    # directory that contains this script when running from source.  The
+    # filename is per-OS — .ico for Edge WebView2 (Windows), .png for
+    # GTK/WebKitGTK (Linux), which won't render a .ico.
+    _ico_base = (getattr(sys, "_MEIPASS", "") if getattr(sys, "frozen", False)
+                 else os.path.dirname(os.path.abspath(__file__)))
+    _ico_path = os.path.join(_ico_base, _plat.window_icon_filename())
 
     window = webview.create_window(
         title      = f"Oblivion Server Tool  v{APP_VERSION}",

@@ -246,18 +246,25 @@ artifacts clean on ubuntu-22.04 in ~80 s and attached them to the
 prerelease — `oblivion-server-tool_1.2.0-alpha4_amd64.deb` (76 MB) +
 `Oblivion_Server_Tool-1.2.0-alpha4-x86_64.AppImage` (77 MB).
 
+### Desktop-window icon (v1.2)
+
+`platform.window_icon_filename()` picks `emblem.png` on Linux (GTK/WebKitGTK
+won't render a Windows `.ico`) and `emblem.ico` on Windows; `main.py` passes
+it to `webview.start(icon=…)`.  Added `emblem.png` (256×256, the native frame
+extracted from `emblem.ico`) and pointed the AppImage desktop icon at it too.
+Only the from-source Linux desktop window reads it — the headless binary never
+opens a window.
+
 ### Remaining v1.2 work
 
 | Priority | Item                                                                    |
 |----------|-------------------------------------------------------------------------|
 | **P1**   | Linux process-marker verification (manual smoke against real CS2)        |
-| **P3**   | `.png` icon for GTK window                                               |
 
-The steamcmd Linux bootstrap, the docs pass, and the AppImage/`.deb`
-packaging are all done — packaging build-verified in the `v1.2.0-alpha4`
-CI run.  v1.2.0 final now gates only on the manual CS2 smoke against a real
-Ubuntu install ([LINUX_SMOKE.md](LINUX_SMOKE.md)); the `.png` GTK icon is
-cosmetic P3.
+Everything code + packaging is done: steamcmd bootstrap, docs pass, the
+AppImage/`.deb` (build-verified in `v1.2.0-alpha4` CI), and the GTK window
+icon.  v1.2.0 final now gates on exactly one thing — the manual CS2 smoke
+against a real Ubuntu install ([LINUX_SMOKE.md](LINUX_SMOKE.md)).
 
 ---
 

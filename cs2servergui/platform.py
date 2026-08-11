@@ -27,6 +27,7 @@ css_download_url()                → str   # CounterStrikeSharp default
 case_mismatch_hint(path)          → str | None  # Linux-only case diagnostic
 webview_gui()                     → str   # pywebview backend name
 has_display()                     → bool  # desktop session available?
+window_icon_filename()            → str   # emblem.ico | emblem.png
 depotdownloader_filename()        → str   # "DepotDownloader.exe" | "DepotDownloader"
 depotdownloader_asset_os()        → str   # "windows" | "linux"
 make_executable(path)             → None  # chmod +x on Linux; no-op on Windows
@@ -293,6 +294,20 @@ def has_display() -> bool:
     if _IS_WINDOWS:
         return True
     return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+
+
+def window_icon_filename() -> str:
+    """Filename of the desktop-window icon for the current OS.
+
+    Windows: emblem.ico — Edge WebView2 uses the multi-resolution .ico.
+    Linux:   emblem.png — GTK/WebKitGTK's set_icon_from_file (and the Qt
+             backend) want a PNG; a .ico renders poorly or not at all.
+
+    Both files sit next to main.py (and in _MEIPASS when frozen) and carry the
+    same Oblivion crystal artwork.  Only the desktop window uses this — the
+    headless binary never opens a window, so it never reads the icon.
+    """
+    return "emblem.ico" if _IS_WINDOWS else "emblem.png"
 
 
 def case_mismatch_hint(path: str) -> str | None:

@@ -694,6 +694,22 @@ t('platform: has_display() on Linux follows $DISPLAY / $WAYLAND_DISPLAY',
   t_platform_has_display_linux_checks_display_envs)
 
 
+def t_platform_window_icon_filename_per_os():
+    """window_icon_filename(): .ico on Windows (Edge WebView2), .png on Linux
+    (GTK/WebKitGTK won't render a .ico). The resolved file must exist at the
+    repo root so the desktop window actually finds an icon."""
+    import sys as _sys, os as _os
+    from cs2servergui.platform import window_icon_filename
+    name = window_icon_filename()
+    expected = 'emblem.ico' if _sys.platform == 'win32' else 'emblem.png'
+    if name != expected:
+        return False, f'got={name!r} expected={expected!r}'
+    root = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+    return _os.path.isfile(_os.path.join(root, name)), f'{name} missing at repo root'
+t('platform: window_icon_filename() per OS + file present',
+  t_platform_window_icon_filename_per_os)
+
+
 def t_platform_case_mismatch_hint_finds_sibling_on_linux():
     """When the expected component differs only by case from an existing
     sibling, the hint must mention both names so the operator can see
